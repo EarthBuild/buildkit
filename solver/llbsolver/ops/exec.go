@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/containerd/containerd/platforms"
 	"github.com/moby/buildkit/cache"
@@ -54,6 +55,23 @@ type ExecOp struct {
 }
 
 var _ solver.Op = &ExecOp{}
+
+// earthly-specific: a custom exec limit for certain customers.
+
+var errExecTimeoutExceeded = errors.New("max execution time exceeded")
+var execTimeout time.Duration
+
+func init() {
+	env, ok := os.LookupEnv("BUILDKIT_EXEC_TIMEOUT")
+	if !ok {
+		return
+	}
+	var err error
+	execTimeout, err = time.ParseDuration(env)
+	if err != nil {
+		panic(fmt.Sprintf("invalid value for 'BUILDKIT_EXEC_TIMEOUT': %s", env))
+	}
+}
 
 func NewExecOp(v solver.Vertex, op *pb.Op_Exec, platform *pb.Platform, cm cache.Manager, parallelism *semutil.Weighted, sm *session.Manager, exec executor.Executor, w worker.Worker) (*ExecOp, error) {
 	if err := opsutils.Validate(&pb.Op{Op: op}); err != nil {
@@ -400,6 +418,13 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 	}
 	// earthly-specific TODO: should the rec be set to a nopRecord, or can nil be safely used instead?
 
+	// earthly-specific: enforce a time limit for certain customers.
+	if execTimeout > 0 {
+		var cancel func()
+		ctx, cancel = context.WithTimeoutCause(ctx, execTimeout, errExecTimeoutExceeded)
+		defer cancel()
+	}
+
 	var execErr error
 	var rec resourcestypes.Recorder
 	if !isLocal {
@@ -426,7 +451,14 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 		p.OutputRefs[i].Ref = nil
 	}
 	e.rec = rec
-	return results, errors.Wrapf(execErr, "process %q did not complete successfully", strings.Join(e.op.Meta.Args, " "))
+
+	// earthly-specific: customize error message on exec timeout.
+	retErr := errors.Wrapf(execErr, "process %q did not complete successfully", strings.Join(e.op.Meta.Args, " "))
+	if cause := context.Cause(ctx); errors.Is(cause, errExecTimeoutExceeded) {
+		retErr = errors.Errorf("max execution time of %s exceeded", execTimeout)
+	}
+
+	return results, retErr
 }
 
 // earthly-specific
