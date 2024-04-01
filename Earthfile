@@ -1,7 +1,6 @@
+VERSION 0.8
 
-VERSION 0.6
-
-FROM alpine:3.13
+FROM alpine:3.19
 WORKDIR /buildkit
 
 build:
