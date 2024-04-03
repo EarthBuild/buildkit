@@ -9,28 +9,35 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/docker/errdefs"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/tracing"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
+	bolt "go.etcd.io/bbolt"
 )
+
+type CommitRefFunc func(ctx context.Context, result Result) error
 
 type simpleSolver struct {
 	resolveOpFunc   ResolveOpFunc
+	commitRefFunc   CommitRefFunc
 	solver          *Solver
 	job             *Job
 	parallelGuard   *parallelGuard
-	resultCache     *resultCache
+	resultCache     resultCache
 	cacheKeyManager *cacheKeyManager
 	mu              sync.Mutex
 }
 
-func newSimpleSolver(resolveOpFunc ResolveOpFunc, solver *Solver) *simpleSolver {
+func newSimpleSolver(resolveOpFunc ResolveOpFunc, commitRefFunc CommitRefFunc, solver *Solver, cache resultCache) *simpleSolver {
 	return &simpleSolver{
 		cacheKeyManager: newCacheKeyManager(),
-		resultCache:     newResultCache(),
+		resultCache:     cache,
 		parallelGuard:   newParallelGuard(time.Millisecond * 100),
 		resolveOpFunc:   resolveOpFunc,
+		commitRefFunc:   commitRefFunc,
 		solver:          solver,
 	}
 }
@@ -72,6 +79,9 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	// Required to access cache map results on state.
 	st.op = op
 
+	// Add cache opts to context as they will be accessed by cache retrieval.
+	ctx = withAncestorCacheOpts(ctx, st)
+
 	// CacheMap populates required fields in SourceOp.
 	cm, err := op.CacheMap(ctx, int(e.Index))
 	if err != nil {
@@ -88,7 +98,12 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 		return nil, err
 	}
 
-	if v, ok := s.resultCache.get(cacheKey); ok && v != nil {
+	v, ok, err := s.resultCache.get(ctx, cacheKey)
+	if err != nil {
+		return nil, err
+	}
+
+	if ok && v != nil {
 		ctx = progress.WithProgress(ctx, st.mpw)
 		notifyCompleted := notifyStarted(ctx, &st.clientVertex, true)
 		notifyCompleted(nil, true)
@@ -100,9 +115,21 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 		return nil, err
 	}
 
+	// Ensure all results are finalized (committed to cache). It may be better
+	// to background these calls at some point.
+	for _, res := range results {
+		err = s.commitRefFunc(ctx, res)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	res := results[int(e.Index)]
 
-	s.resultCache.set(cacheKey, res)
+	err = s.resultCache.set(ctx, cacheKey, res)
+	if err != nil {
+		return nil, err
+	}
 
 	return res, nil
 }
@@ -133,6 +160,14 @@ func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
 	}
 
 	st.mpw.Add(job.pw)
+
+	// Hack: this is used in combination with withAncestorCacheOpts to pass
+	// necessary dependency information to a few caching components. We'll need
+	// to expire these keys somehow. We should also move away from using the
+	// actives map, but it's still being used by withAncestorCacheOpts for now.
+	s.solver.mu.Lock()
+	s.solver.actives[vertex.Digest()] = st
+	s.solver.mu.Unlock()
 
 	return st
 }
@@ -167,7 +202,6 @@ func (s *simpleSolver) exploreVertices(e Edge) ([]digest.Digest, map[digest.Dige
 func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex Vertex, cm *CacheMap) ([]Result, error) {
 	// This struct is used to reconstruct a cache key from an LLB digest & all
 	// parents using consistent digests that depend on the full dependency chain.
-	// TODO: handle cm.Opts (CacheOpts)?
 	scm := simpleCacheMap{
 		digest: cm.Digest.String(),
 		deps:   make([]cacheMapDep, len(cm.Deps)),
@@ -184,7 +218,11 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 		}
 
 		// Lookup the result for that cache key.
-		res, ok := s.resultCache.get(cacheKey)
+		res, ok, err := s.resultCache.get(ctx, cacheKey)
+		if err != nil {
+			return nil, err
+		}
+
 		if !ok {
 			return nil, errors.Errorf("cache key not found: %s", cacheKey)
 		}
@@ -351,24 +389,104 @@ func (f *parallelGuard) acquire(ctx context.Context, d string) (<-chan struct{},
 	return ch, closer
 }
 
-type resultCache struct {
+type resultCache interface {
+	set(ctx context.Context, key string, r Result) error
+	get(ctx context.Context, key string) (Result, bool, error)
+}
+
+type inMemCache struct {
 	cache map[string]Result
 	mu    sync.Mutex
 }
 
-func newResultCache() *resultCache {
-	return &resultCache{cache: map[string]Result{}}
+func newInMemCache() *inMemCache {
+	return &inMemCache{cache: map[string]Result{}}
 }
 
-func (c *resultCache) set(key string, r Result) {
+func (c *inMemCache) set(ctx context.Context, key string, r Result) error {
 	c.mu.Lock()
 	c.cache[key] = r
 	c.mu.Unlock()
+	return nil
 }
 
-func (c *resultCache) get(key string) (Result, bool) {
+func (c *inMemCache) get(ctx context.Context, key string) (Result, bool, error) {
 	c.mu.Lock()
 	r, ok := c.cache[key]
 	c.mu.Unlock()
-	return r, ok
+	return r, ok, nil
 }
+
+var _ resultCache = &inMemCache{}
+
+type diskCache struct {
+	resultGetter workerResultGetter
+	db           *bolt.DB
+	bucketName   string
+}
+
+type workerResultGetter interface {
+	Get(ctx context.Context, id string) (Result, error)
+}
+
+func newDiskCache(resultGetter workerResultGetter) (*diskCache, error) {
+	c := &diskCache{
+		bucketName:   "ids",
+		resultGetter: resultGetter,
+	}
+	err := c.init()
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (c *diskCache) init() error {
+	// TODO: pass in root config directory.
+	db, err := bolt.Open("/tmp/earthly/buildkit/simple.db", 0600, nil)
+	if err != nil {
+		return err
+	}
+	err = db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("ids"))
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	c.db = db
+	return nil
+}
+
+func (c *diskCache) set(ctx context.Context, key string, r Result) error {
+	return c.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(c.bucketName))
+		return b.Put([]byte(key), []byte(r.ID()))
+	})
+}
+
+func (c *diskCache) get(ctx context.Context, key string) (Result, bool, error) {
+	var id string
+	err := c.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(c.bucketName))
+		id = string(b.Get([]byte(key)))
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if id == "" {
+		return nil, false, nil
+	}
+	res, err := c.resultGetter.Get(ctx, id)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			bklog.G(ctx).Warnf("failed to get cached result from worker: %v", err)
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return res, true, nil
+}
+
+var _ resultCache = &diskCache{}

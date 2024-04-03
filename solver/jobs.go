@@ -256,8 +256,10 @@ type Job struct {
 }
 
 type SolverOpt struct {
-	ResolveOpFunc ResolveOpFunc
-	DefaultCache  CacheManager
+	ResolveOpFunc      ResolveOpFunc
+	DefaultCache       CacheManager
+	WorkerResultGetter workerResultGetter
+	CommitRefFunc      CommitRefFunc
 }
 
 func NewSolver(opts SolverOpt) *Solver {
@@ -274,7 +276,11 @@ func NewSolver(opts SolverOpt) *Solver {
 	// TODO: This should be hoisted up a few layers as not to be bound to the
 	// original solver. For now, we just need a convenient place to initialize
 	// it once.
-	simple := newSimpleSolver(opts.ResolveOpFunc, jl)
+	c, err := newDiskCache(opts.WorkerResultGetter)
+	if err != nil {
+		panic(err) // TODO: Handle error appropriately once the new solver code is moved.
+	}
+	simple := newSimpleSolver(opts.ResolveOpFunc, opts.CommitRefFunc, jl, c)
 	jl.simple = simple
 
 	jl.s = newScheduler(jl)

@@ -269,6 +269,9 @@ func captureProvenance(ctx context.Context, res solver.CachedResultWithProvenanc
 		switch op := pp.(type) {
 		case *ops.SourceOp:
 			id, pin := op.Pin()
+			if pin == "" { // Hack: latest cache opt changes led to an empty value here. Investigate.
+				return nil
+			}
 			err := id.Capture(c, pin)
 			if err != nil {
 				return err
