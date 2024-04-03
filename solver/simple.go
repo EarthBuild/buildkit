@@ -18,6 +18,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// CommitRefFunc can be used to finalize a Result's ImmutableRef.
 type CommitRefFunc func(ctx context.Context, result Result) error
 
 type simpleSolver struct {
