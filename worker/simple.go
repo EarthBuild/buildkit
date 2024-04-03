@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 
-	"github.com/containerd/nydus-snapshotter/pkg/errdefs"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/solver"
 )
@@ -34,7 +33,7 @@ func (w *WorkerResultGetter) Get(ctx context.Context, id string) (solver.Result,
 	ref, err := worker.LoadRef(ctx, refID, false)
 	if err != nil {
 		if cache.IsNotFound(err) {
-			return nil, errdefs.ErrNotFound
+			return nil, solver.ErrRefNotFound
 		}
 		return nil, err
 	}

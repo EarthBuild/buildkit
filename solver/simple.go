@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/errdefs"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/tracing"
@@ -17,6 +16,8 @@ import (
 	"github.com/pkg/errors"
 	bolt "go.etcd.io/bbolt"
 )
+
+var ErrRefNotFound = errors.New("ref not found")
 
 // CommitRefFunc can be used to finalize a Result's ImmutableRef.
 type CommitRefFunc func(ctx context.Context, result Result) error
@@ -444,7 +445,7 @@ func newDiskCache(resultGetter workerResultGetter) (*diskCache, error) {
 
 func (c *diskCache) init() error {
 	// TODO: pass in root config directory.
-	db, err := bolt.Open("/tmp/earthly/buildkit/simple.db", 0600, nil)
+	db, err := bolt.Open("/tmp/earthly/buildkit/simple.db", 0755, nil)
 	if err != nil {
 		return err
 	}
@@ -481,13 +482,22 @@ func (c *diskCache) get(ctx context.Context, key string) (Result, bool, error) {
 	}
 	res, err := c.resultGetter.Get(ctx, id)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
-			bklog.G(ctx).Warnf("failed to get cached result from worker: %v", err)
+		if errors.Is(err, ErrRefNotFound) {
+			if err := c.delete(ctx, key); err != nil {
+				bklog.G(ctx).Warnf("failed to delete cache key: %v", err)
+			}
 			return nil, false, nil
 		}
 		return nil, false, err
 	}
 	return res, true, nil
+}
+
+func (c *diskCache) delete(_ context.Context, key string) error {
+	return c.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(c.bucketName))
+		return b.Delete([]byte(key))
+	})
 }
 
 var _ resultCache = &diskCache{}
