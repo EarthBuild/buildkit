@@ -13,7 +13,6 @@ import (
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes/docker"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/hashicorp/go-multierror"
 	"github.com/moby/buildkit/cache"
@@ -298,8 +297,6 @@ func (w *Worker) LoadRef(ctx context.Context, id string, hidden bool) (cache.Imm
 	ref, err := w.CacheMgr.Get(ctx, id, pg, opts...)
 	var needsRemoteProviders cache.NeedsRemoteProviderError
 	if errors.As(err, &needsRemoteProviders) {
-		fmt.Println("Trying again with cache opts")
-
 		if optGetter := solver.CacheOptGetterOf(ctx); optGetter != nil {
 			var keys []interface{}
 			for _, dgst := range needsRemoteProviders {
@@ -313,7 +310,6 @@ func (w *Worker) LoadRef(ctx context.Context, id string, hidden bool) (cache.Imm
 					}
 				}
 			}
-			spew.Dump(descHandlers)
 			opts = append(opts, descHandlers)
 			ref, err = w.CacheMgr.Get(ctx, id, pg, opts...)
 		}
