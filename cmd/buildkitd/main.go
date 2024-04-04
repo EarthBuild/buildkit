@@ -843,6 +843,7 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		LeaseManager:              w.LeaseManager(),
 		ContentStore:              w.ContentStore(),
 		HistoryConfig:             cfg.History,
+		RootDir:                   cfg.Root,
 	})
 }
 

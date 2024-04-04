@@ -68,6 +68,7 @@ type Opt struct {
 	LeaseManager              *leaseutil.Manager
 	ContentStore              *containerdsnapshot.Store
 	HistoryConfig             *config.HistoryConfig
+	RootDir                   string
 }
 
 type Controller struct { // TODO: ControlService
@@ -105,6 +106,7 @@ func NewController(opt Opt) (*Controller, error) {
 		SessionManager:   opt.SessionManager,
 		Entitlements:     opt.Entitlements,
 		HistoryQueue:     hq,
+		RootDir:          opt.RootDir,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create solver")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -425,16 +426,18 @@ type diskCache struct {
 	resultGetter workerResultGetter
 	db           *bolt.DB
 	bucketName   string
+	rootDir      string
 }
 
 type workerResultGetter interface {
 	Get(ctx context.Context, id string) (Result, error)
 }
 
-func newDiskCache(resultGetter workerResultGetter) (*diskCache, error) {
+func newDiskCache(resultGetter workerResultGetter, rootDir string) (*diskCache, error) {
 	c := &diskCache{
 		bucketName:   "ids",
 		resultGetter: resultGetter,
+		rootDir:      rootDir,
 	}
 	err := c.init()
 	if err != nil {
@@ -444,8 +447,7 @@ func newDiskCache(resultGetter workerResultGetter) (*diskCache, error) {
 }
 
 func (c *diskCache) init() error {
-	// TODO: pass in root config directory.
-	db, err := bolt.Open("/tmp/earthly/buildkit/simple.db", 0755, nil)
+	db, err := bolt.Open(filepath.Join(c.rootDir, "ids.db"), 0755, nil)
 	if err != nil {
 		return err
 	}
