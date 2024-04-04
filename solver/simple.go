@@ -251,9 +251,10 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 		if dep.ComputeDigestFunc != nil {
 			compDigest, err := dep.ComputeDigestFunc(ctx, res, st)
 			if err != nil {
-				return nil, err
+				bklog.G(ctx).Warnf("failed to compute digest: %v", err)
+			} else {
+				scm.deps[i].computed = compDigest.String()
 			}
-			scm.deps[i].computed = compDigest.String()
 		}
 
 		// Add input references to the struct as to link dependencies.
