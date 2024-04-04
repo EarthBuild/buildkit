@@ -83,7 +83,7 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	st.op = op
 
 	// Add cache opts to context as they will be accessed by cache retrieval.
-	ctx = withAncestorCacheOpts(ctx, st)
+	cacheOptsCtx := withAncestorCacheOpts(ctx, st)
 
 	// CacheMap populates required fields in SourceOp.
 	cm, err := op.CacheMap(ctx, int(e.Index))
@@ -101,7 +101,7 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 		return nil, err
 	}
 
-	v, ok, err := s.resultCache.get(ctx, cacheKey)
+	v, ok, err := s.resultCache.get(cacheOptsCtx, cacheKey)
 	if err != nil {
 		return nil, err
 	}
