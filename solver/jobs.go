@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
@@ -960,7 +959,6 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 		}()
 
 		res, err := op.Exec(ctx, s.st, inputs)
-		spew.Dump(err)
 		complete := true
 		if err != nil {
 			select {
