@@ -93,6 +93,7 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 
 	inputs, err := s.preprocessInputs(ctx, st, vertex, cm.CacheMap)
 	if err != nil {
+		notifyError(ctx, st, false, err)
 		return nil, err
 	}
 
@@ -107,9 +108,7 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	}
 
 	if ok && v != nil {
-		ctx = progress.WithProgress(ctx, st.mpw)
-		notifyCompleted := notifyStarted(ctx, &st.clientVertex, true)
-		notifyCompleted(nil, true)
+		notifyError(ctx, st, true, nil)
 		return v, nil
 	}
 
@@ -135,6 +134,12 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	}
 
 	return res, nil
+}
+
+func notifyError(ctx context.Context, st *state, cached bool, err error) {
+	ctx = progress.WithProgress(ctx, st.mpw)
+	notifyCompleted := notifyStarted(ctx, &st.clientVertex, cached)
+	notifyCompleted(err, cached)
 }
 
 // createState creates a new state struct with required and placeholder values.
@@ -252,6 +257,7 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 			compDigest, err := dep.ComputeDigestFunc(ctx, res, st)
 			if err != nil {
 				bklog.G(ctx).Warnf("failed to compute digest: %v", err)
+				return nil, err
 			} else {
 				scm.deps[i].computed = compDigest.String()
 			}
