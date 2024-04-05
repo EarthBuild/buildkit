@@ -91,13 +91,22 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 		return nil, err
 	}
 
-	inputs, err := s.preprocessInputs(ctx, st, vertex, cm.CacheMap)
+	// By default we generate a cache key that's not salted as the keys need to
+	// persist across builds. However, when cache is disabled, we scope the keys
+	// to the current session. This is because some jobs will be duplicated in a
+	// given build & will need to be cached in a limited way.
+	salt := ""
+	if op.IgnoreCache() {
+		salt = job.SessionID
+	}
+
+	inputs, err := s.preprocessInputs(ctx, st, vertex, cm.CacheMap, salt)
 	if err != nil {
 		notifyError(ctx, st, false, err)
 		return nil, err
 	}
 
-	cacheKey, err := s.cacheKeyManager.cacheKey(ctx, d.String())
+	cacheKey, err := s.cacheKeyManager.cacheKey(ctx, salt, d.String())
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +216,7 @@ func (s *simpleSolver) exploreVertices(e Edge) ([]digest.Digest, map[digest.Dige
 	return ret, vertices
 }
 
-func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex Vertex, cm *CacheMap) ([]Result, error) {
+func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex Vertex, cm *CacheMap, salt string) ([]Result, error) {
 	// This struct is used to reconstruct a cache key from an LLB digest & all
 	// parents using consistent digests that depend on the full dependency chain.
 	scm := simpleCacheMap{
@@ -220,7 +229,7 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 
 	for i, in := range vertex.Inputs() {
 		// Compute a cache key given the LLB digest value.
-		cacheKey, err := s.cacheKeyManager.cacheKey(ctx, in.Vertex.Digest().String())
+		cacheKey, err := s.cacheKeyManager.cacheKey(ctx, salt, in.Vertex.Digest().String())
 		if err != nil {
 			return nil, err
 		}
@@ -306,10 +315,12 @@ func (m *cacheKeyManager) add(key string, s *simpleCacheMap) {
 
 // cacheKey recursively generates a cache key based on a sequence of ancestor
 // operations & their cacheable values.
-func (m *cacheKeyManager) cacheKey(ctx context.Context, d string) (string, error) {
+func (m *cacheKeyManager) cacheKey(ctx context.Context, salt, digest string) (string, error) {
 	h := sha256.New()
 
-	err := m.cacheKeyRecurse(ctx, d, h)
+	io.WriteString(h, salt)
+
+	err := m.cacheKeyRecurse(ctx, digest, h)
 	if err != nil {
 		return "", err
 	}
