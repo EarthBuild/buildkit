@@ -74,18 +74,13 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	defer done()
 	<-wait
 
-	st := s.createState(vertex, job)
-
-	op := newSharedOp(st.opts.ResolveOpFunc, st.opts.DefaultCache, st)
-
-	// Required to access cache map results on state.
-	st.op = op
+	st := s.state(vertex, job)
 
 	// Add cache opts to context as they will be accessed by cache retrieval.
 	ctx = withAncestorCacheOpts(ctx, st)
 
 	// CacheMap populates required fields in SourceOp.
-	cm, err := op.CacheMap(ctx, int(e.Index))
+	cm, err := st.op.CacheMap(ctx, int(e.Index))
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +106,7 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 		return v, nil
 	}
 
-	results, _, err := op.Exec(ctx, inputs)
+	results, _, err := st.op.Exec(ctx, inputs)
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +136,18 @@ func notifyError(ctx context.Context, st *state, cached bool, err error) {
 	notifyCompleted(err, cached)
 }
 
+func (s *simpleSolver) state(vertex Vertex, job *Job) *state {
+	s.solver.mu.RLock()
+	if st, ok := s.solver.actives[vertex.Digest()]; ok {
+		st.jobs[job] = struct{}{}
+		s.solver.mu.RUnlock()
+		return st
+	}
+	s.solver.mu.RUnlock()
+
+	return s.createState(vertex, job)
+}
+
 // createState creates a new state struct with required and placeholder values.
 func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
 	defaultCache := NewInMemoryCacheManager()
@@ -166,6 +173,9 @@ func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
 		job: {},
 	}
 
+	// Note: If this is called for each new job (in getState) it will lead to
+	// duplicated output for cached results. Adding the first job seems to be
+	// sufficient.
 	st.mpw.Add(job.pw)
 
 	// Hack: this is used in combination with withAncestorCacheOpts to pass
@@ -175,6 +185,11 @@ func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
 	s.solver.mu.Lock()
 	s.solver.actives[vertex.Digest()] = st
 	s.solver.mu.Unlock()
+
+	op := newSharedOp(st.opts.ResolveOpFunc, st.opts.DefaultCache, st)
+
+	// Required to access cache map results on state.
+	st.op = op
 
 	return st
 }
