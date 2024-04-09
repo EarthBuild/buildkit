@@ -27,7 +27,6 @@ type simpleSolver struct {
 	resolveOpFunc   ResolveOpFunc
 	commitRefFunc   CommitRefFunc
 	solver          *Solver
-	job             *Job
 	parallelGuard   *parallelGuard
 	resultCache     resultCache
 	cacheKeyManager *cacheKeyManager
@@ -91,22 +90,13 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 		return nil, err
 	}
 
-	// By default we generate a cache key that's not salted as the keys need to
-	// persist across builds. However, when cache is disabled, we scope the keys
-	// to the current session. This is because some jobs will be duplicated in a
-	// given build & will need to be cached in a limited way.
-	salt := ""
-	if op.IgnoreCache() {
-		salt = job.SessionID
-	}
-
-	inputs, err := s.preprocessInputs(ctx, st, vertex, cm.CacheMap, salt)
+	inputs, err := s.preprocessInputs(ctx, st, vertex, cm.CacheMap, job)
 	if err != nil {
 		notifyError(ctx, st, false, err)
 		return nil, err
 	}
 
-	cacheKey, err := s.cacheKeyManager.cacheKey(ctx, salt, d.String())
+	cacheKey, err := s.cacheKeyManager.cacheKey(ctx, d.String())
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +206,7 @@ func (s *simpleSolver) exploreVertices(e Edge) ([]digest.Digest, map[digest.Dige
 	return ret, vertices
 }
 
-func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex Vertex, cm *CacheMap, salt string) ([]Result, error) {
+func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex Vertex, cm *CacheMap, job *Job) ([]Result, error) {
 	// This struct is used to reconstruct a cache key from an LLB digest & all
 	// parents using consistent digests that depend on the full dependency chain.
 	scm := simpleCacheMap{
@@ -225,11 +215,22 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 		inputs: make([]string, len(cm.Deps)),
 	}
 
+	// By default we generate a cache key that's not salted as the keys need to
+	// persist across builds. However, when cache is disabled, we scope the keys
+	// to the current session. This is because some jobs will be duplicated in a
+	// given build & will need to be cached in a limited way.
+	if vertex.Options().IgnoreCache {
+		scm.salt = job.SessionID
+	}
+
 	var inputs []Result
 
 	for i, in := range vertex.Inputs() {
+
+		digest := in.Vertex.Digest().String()
+
 		// Compute a cache key given the LLB digest value.
-		cacheKey, err := s.cacheKeyManager.cacheKey(ctx, salt, in.Vertex.Digest().String())
+		cacheKey, err := s.cacheKeyManager.cacheKey(ctx, digest)
 		if err != nil {
 			return nil, err
 		}
@@ -241,7 +242,7 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 		}
 
 		if !ok {
-			return nil, errors.Errorf("cache key not found: %s", cacheKey)
+			return nil, errors.Errorf("result not found for digest: %s", digest)
 		}
 
 		dep := cm.Deps[i]
@@ -299,6 +300,7 @@ type simpleCacheMap struct {
 	digest string
 	inputs []string
 	deps   []cacheMapDep
+	salt   string
 }
 
 func newCacheKeyManager() *cacheKeyManager {
@@ -315,10 +317,8 @@ func (m *cacheKeyManager) add(key string, s *simpleCacheMap) {
 
 // cacheKey recursively generates a cache key based on a sequence of ancestor
 // operations & their cacheable values.
-func (m *cacheKeyManager) cacheKey(ctx context.Context, salt, digest string) (string, error) {
+func (m *cacheKeyManager) cacheKey(ctx context.Context, digest string) (string, error) {
 	h := sha256.New()
-
-	io.WriteString(h, salt)
 
 	err := m.cacheKeyRecurse(ctx, digest, h)
 	if err != nil {
@@ -334,6 +334,10 @@ func (m *cacheKeyManager) cacheKeyRecurse(ctx context.Context, d string, h hash.
 	m.mu.Unlock()
 	if !ok {
 		return errors.New("missing cache map key")
+	}
+
+	if c.salt != "" {
+		io.WriteString(h, c.salt)
 	}
 
 	for _, in := range c.inputs {

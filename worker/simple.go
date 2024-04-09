@@ -5,6 +5,7 @@ import (
 
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/solver"
+	"github.com/moby/buildkit/util/bklog"
 )
 
 // WorkerResultGetter abstracts the work involved in loading a Result from a
@@ -33,6 +34,7 @@ func (w *WorkerResultGetter) Get(ctx context.Context, id string) (solver.Result,
 	ref, err := worker.LoadRef(ctx, refID, false)
 	if err != nil {
 		if cache.IsNotFound(err) {
+			bklog.G(ctx).Warnf("could not load ref from worker: %v", err)
 			return nil, solver.ErrRefNotFound
 		}
 		return nil, err
