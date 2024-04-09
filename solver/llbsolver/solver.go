@@ -79,6 +79,7 @@ type Opt struct {
 	WorkerController *worker.Controller
 	HistoryQueue     *HistoryQueue
 	ResourceMonitor  *resources.Monitor
+	RootDir          string
 }
 
 type Solver struct {
@@ -119,8 +120,11 @@ func New(opt Opt) (*Solver, error) {
 	s.sysSampler = sampler
 
 	s.solver = solver.NewSolver(solver.SolverOpt{
-		ResolveOpFunc: s.resolver(),
-		DefaultCache:  opt.CacheManager,
+		ResolveOpFunc:      s.resolver(),
+		DefaultCache:       opt.CacheManager,
+		WorkerResultGetter: worker.NewWorkerResultGetter(opt.WorkerController),
+		CommitRefFunc:      worker.FinalizeRef,
+		RootDir:            opt.RootDir,
 	})
 	return s, nil
 }

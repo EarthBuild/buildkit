@@ -256,8 +256,11 @@ type Job struct {
 }
 
 type SolverOpt struct {
-	ResolveOpFunc ResolveOpFunc
-	DefaultCache  CacheManager
+	ResolveOpFunc      ResolveOpFunc
+	DefaultCache       CacheManager
+	WorkerResultGetter workerResultGetter
+	CommitRefFunc      CommitRefFunc
+	RootDir            string
 }
 
 func NewSolver(opts SolverOpt) *Solver {
@@ -274,7 +277,11 @@ func NewSolver(opts SolverOpt) *Solver {
 	// TODO: This should be hoisted up a few layers as not to be bound to the
 	// original solver. For now, we just need a convenient place to initialize
 	// it once.
-	simple := newSimpleSolver(opts.ResolveOpFunc, jl)
+	c, err := newDiskCache(opts.WorkerResultGetter, opts.RootDir)
+	if err != nil {
+		panic(err) // TODO: Handle error appropriately once the new solver code is moved.
+	}
+	simple := newSimpleSolver(opts.ResolveOpFunc, opts.CommitRefFunc, jl, c)
 	jl.simple = simple
 
 	jl.s = newScheduler(jl)
@@ -613,6 +620,11 @@ func (j *Job) CloseProgress() {
 }
 
 func (j *Job) Discard() error {
+	// TMP: Hack to prevent actives map deletes.
+	if true {
+		return nil
+	}
+
 	j.list.mu.Lock()
 	defer j.list.mu.Unlock()
 
