@@ -74,18 +74,13 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	defer done()
 	<-wait
 
-	st := s.createState(vertex, job)
-
-	op := newSharedOp(st.opts.ResolveOpFunc, st.opts.DefaultCache, st)
-
-	// Required to access cache map results on state.
-	st.op = op
+	st := s.state(vertex, job)
 
 	// Add cache opts to context as they will be accessed by cache retrieval.
 	ctx = withAncestorCacheOpts(ctx, st)
 
 	// CacheMap populates required fields in SourceOp.
-	cm, err := op.CacheMap(ctx, int(e.Index))
+	cm, err := st.op.CacheMap(ctx, int(e.Index))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -115,7 +110,7 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 		return v, expCacheKeys, nil
 	}
 
-	results, _, err := op.Exec(ctx, inputs)
+	results, _, err := st.op.Exec(ctx, inputs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -143,6 +138,17 @@ func notifyError(ctx context.Context, st *state, cached bool, err error) {
 	ctx = progress.WithProgress(ctx, st.mpw)
 	notifyCompleted := notifyStarted(ctx, &st.clientVertex, cached)
 	notifyCompleted(err, cached)
+}
+
+func (s *simpleSolver) state(vertex Vertex, job *Job) *state {
+	s.solver.mu.RLock()
+	if st, ok := s.solver.actives[vertex.Digest()]; ok {
+		st.jobs[job] = struct{}{}
+		s.solver.mu.RUnlock()
+		return st
+	}
+	s.solver.mu.RUnlock()
+	return s.createState(vertex, job)
 }
 
 // createState creates a new state struct with required and placeholder values.
@@ -179,6 +185,11 @@ func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
 	s.solver.mu.Lock()
 	s.solver.actives[vertex.Digest()] = st
 	s.solver.mu.Unlock()
+
+	op := newSharedOp(st.opts.ResolveOpFunc, st.opts.DefaultCache, st)
+
+	// Required to access cache map results on state.
+	st.op = op
 
 	return st
 }
