@@ -620,10 +620,6 @@ func (j *Job) CloseProgress() {
 }
 
 func (j *Job) Discard() error {
-	// TMP: Hack to prevent actives map deletes.
-	if true {
-		return nil
-	}
 
 	j.list.mu.Lock()
 	defer j.list.mu.Unlock()

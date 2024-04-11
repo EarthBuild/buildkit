@@ -49,7 +49,7 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 	// Ordered list of vertices to build.
 	digests, vertices := s.exploreVertices(e)
 
-	var ret Result
+	var ret CachedResult
 
 	for _, d := range digests {
 		vertex, ok := vertices[d]
@@ -57,18 +57,18 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 			return nil, errors.Errorf("digest %s not found", d)
 		}
 
-		res, err := s.buildOne(ctx, d, vertex, job, e)
+		res, expCacheKeys, err := s.buildOne(ctx, d, vertex, job, e)
 		if err != nil {
 			return nil, err
 		}
 
-		ret = res
+		ret = NewCachedResult(res, expCacheKeys)
 	}
 
-	return NewCachedResult(ret, []ExportableCacheKey{}), nil
+	return ret, nil
 }
 
-func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Vertex, job *Job, e Edge) (Result, error) {
+func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Vertex, job *Job, e Edge) (Result, []ExportableCacheKey, error) {
 	// Ensure we don't have multiple threads working on the same digest.
 	wait, done := s.parallelGuard.acquire(ctx, d.String())
 	defer done()
@@ -87,33 +87,37 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	// CacheMap populates required fields in SourceOp.
 	cm, err := op.CacheMap(ctx, int(e.Index))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	inputs, err := s.preprocessInputs(ctx, st, vertex, cm.CacheMap, job)
 	if err != nil {
 		notifyError(ctx, st, false, err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	cacheKey, err := s.cacheKeyManager.cacheKey(ctx, d.String())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	v, ok, err := s.resultCache.get(ctx, cacheKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	expCacheKeys := []ExportableCacheKey{
+		{Exporter: &simpleExporter{cacheKey: cacheKey}},
 	}
 
 	if ok && v != nil {
 		notifyError(ctx, st, true, nil)
-		return v, nil
+		return v, expCacheKeys, nil
 	}
 
 	results, _, err := op.Exec(ctx, inputs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Ensure all results are finalized (committed to cache). It may be better
@@ -121,7 +125,7 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	for _, res := range results {
 		err = s.commitRefFunc(ctx, res)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -129,10 +133,10 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 
 	err = s.resultCache.set(ctx, cacheKey, res)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return res, nil
+	return res, expCacheKeys, nil
 }
 
 func notifyError(ctx context.Context, st *state, cached bool, err error) {
@@ -525,3 +529,11 @@ func (c *diskCache) delete(_ context.Context, key string) error {
 }
 
 var _ resultCache = &diskCache{}
+
+type simpleExporter struct {
+	cacheKey string
+}
+
+func (s *simpleExporter) ExportTo(ctx context.Context, t CacheExporterTarget, opt CacheExportOpt) ([]CacheExporterRecord, error) {
+	return nil, nil
+}
