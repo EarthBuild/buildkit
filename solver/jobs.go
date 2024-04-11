@@ -620,6 +620,9 @@ func (j *Job) CloseProgress() {
 }
 
 func (j *Job) Discard() error {
+	if true {
+		return nil
+	}
 
 	j.list.mu.Lock()
 	defer j.list.mu.Unlock()
