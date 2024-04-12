@@ -608,7 +608,7 @@ func (e *ExecOp) sendLocally(ctx context.Context, root executor.Mount, mounts []
 			}
 			err = localhost.LocalhostPut(ctx, caller, finalSrc, finalDst)
 			if err != nil {
-				return errors.Wrap(err, "error calling LocalhostExec")
+				return errors.Wrap(err, "error calling LocalhostExec 1")
 			}
 		}
 		return nil
@@ -625,7 +625,7 @@ func (e *ExecOp) execLocally(ctx context.Context, root executor.Mount, g session
 	return e.sm.Any(ctx, g, func(ctx context.Context, _ string, caller session.Caller) error {
 		err := localhost.LocalhostExec(ctx, caller, args, cwd, stdout, stderr)
 		if err != nil {
-			return errors.Wrap(err, "error calling LocalhostExec")
+			return errors.Wrap(err, "error calling LocalhostExec 2")
 		}
 		return nil
 	})

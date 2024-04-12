@@ -10,6 +10,7 @@ import (
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver/errdefs"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/flightcontrol"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/progress/controller"
@@ -920,6 +921,7 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 	defer func() {
 		err = errdefs.WithOp(err, s.st.vtx.Sys())
 		err = errdefs.WrapVertex(err, s.st.origDigest)
+		bklog.G(ctx).Warnf("sharedOp#Exec error: %T %v", err, err)
 	}()
 	op, err := s.getOp()
 	if err != nil {
