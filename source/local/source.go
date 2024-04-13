@@ -125,8 +125,9 @@ func (ls *localSourceHandler) CacheKey(ctx context.Context, g session.Group, ind
 	}
 
 	// Hack: The encoded session ID here is breaking the simplified caching
-	// approach in "simple.go". However, a consistent value here is likely
-	// unreliable with multiple users. Figure out another option.
+	// approach in "simple.go" as it differs for each request. Use the
+	// SharedKeyHint property which is provided by Earthly and is based off of
+	// the path & inode names.
 	sessionID = ls.src.SharedKeyHint
 
 	dt, err := json.Marshal(struct {
