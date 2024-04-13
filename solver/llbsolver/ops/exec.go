@@ -28,6 +28,7 @@ import (
 	"github.com/moby/buildkit/solver/llbsolver/mounts"
 	"github.com/moby/buildkit/solver/llbsolver/ops/opsutils"
 	"github.com/moby/buildkit/solver/pb"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/progress/logs"
 	"github.com/moby/buildkit/util/semutil"
 	utilsystem "github.com/moby/buildkit/util/system"
@@ -435,6 +436,7 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 			Stderr:      stderr,
 			StatsStream: statsStream, // earthly-specific
 		}, nil)
+		bklog.G(ctx).Warnf("error from e.exec.Run %T %v", execErr, execErr)
 	}
 
 	for i, out := range p.OutputRefs {
