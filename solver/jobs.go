@@ -955,7 +955,7 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 			notifyCompleted(retErr, false)
 		}()
 
-		res, err := op.Exec(ctx, s.st, inputs)
+		res, err := op.Exec(context.WithoutCancel(ctx), s.st, inputs)
 		bklog.G(ctx).Warnf("op#Exec error: %T %v", err, err)
 		complete := true
 		if err != nil {
