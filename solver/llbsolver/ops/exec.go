@@ -287,6 +287,10 @@ func addDefaultEnvvar(env []string, k, v string) []string {
 func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Result) (results []solver.Result, err error) {
 	trace.SpanFromContext(ctx).AddEvent("ExecOp started")
 
+	defer func() {
+		bklog.G(ctx).Warnf("Error from ExecOp#Exec %T %v", err, err)
+	}()
+
 	refs := make([]*worker.WorkerRef, len(inputs))
 	for i, inp := range inputs {
 		var ok bool
