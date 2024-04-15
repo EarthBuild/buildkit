@@ -55,15 +55,17 @@ func (w *runcExecutor) monitorContainerStats(ctx context.Context, id string, sam
 		case <-ctx.Done():
 			bklog.G(ctx).Infof("stats collection context done: %v", ctx.Err())
 			return
-		case <-timer.C:
+		case <-timer.C: // Initial sleep will give container the chance to start.
 			stats, err := w.runc.Stats(ctx, id)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
 				if numFailuresAllowed > 0 {
-					// allow the initial calls to runc.Stats to fail, for cases where the program didn't start within the initial
-					// sampleFrequency; this should only occur under heavy workloads
+					// Allow the initial calls to runc.Stats to fail, for cases
+					// where the program didn't start within the initial
+					// sampleFrequency; this should only occur under heavy
+					// workloads.
 					bklog.G(ctx).Warnf("ignoring runc stats collection error: %s", err)
 					numFailuresAllowed--
 					continue
@@ -72,7 +74,7 @@ func (w *runcExecutor) monitorContainerStats(ctx context.Context, id string, sam
 				return
 			}
 
-			// once runc.Stats has succeeded, don't ignore future errors
+			// Once runc.Stats has succeeded, don't ignore future errors.
 			numFailuresAllowed = 0
 
 			err = writeStatsToStream(statsWriter, stats)
