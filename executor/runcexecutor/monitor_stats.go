@@ -46,33 +46,39 @@ func writeStatsToStream(w io.Writer, stats *runc.Stats) error {
 
 func (w *runcExecutor) monitorContainerStats(ctx context.Context, id string, sampleFrequency time.Duration, statsWriter io.WriteCloser) {
 	numFailuresAllowed := 10
-	for {
-		// sleep at the top of the loop to give it time to start
-		time.Sleep(sampleFrequency)
 
-		stats, err := w.runc.Stats(ctx, id)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
+	timer := time.NewTimer(sampleFrequency)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			bklog.G(ctx).Infof("stats collection context done: %v", ctx.Err())
+		case <-timer.C:
+			stats, err := w.runc.Stats(ctx, id)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				if numFailuresAllowed > 0 {
+					// allow the initial calls to runc.Stats to fail, for cases where the program didn't start within the initial
+					// sampleFrequency; this should only occur under heavy workloads
+					bklog.G(ctx).Warnf("ignoring runc stats collection error: %s", err)
+					numFailuresAllowed--
+					continue
+				}
+				bklog.G(ctx).Errorf("runc stats collection error: %s", err)
 				return
 			}
-			if numFailuresAllowed > 0 {
-				// allow the initial calls to runc.Stats to fail, for cases where the program didn't start within the initial
-				// sampleFrequency; this should only occur under heavy workloads
-				bklog.G(ctx).Warnf("ignoring runc stats collection error: %s", err)
-				numFailuresAllowed--
-				continue
+
+			// once runc.Stats has succeeded, don't ignore future errors
+			numFailuresAllowed = 0
+
+			err = writeStatsToStream(statsWriter, stats)
+			if err != nil {
+				bklog.G(ctx).Errorf("failed to send runc stats to client-stream: %s", err)
+				return
 			}
-			bklog.G(ctx).Errorf("runc stats collection error: %s", err)
-			return
-		}
-
-		// once runc.Stats has succeeded, don't ignore future errors
-		numFailuresAllowed = 0
-
-		err = writeStatsToStream(statsWriter, stats)
-		if err != nil {
-			bklog.G(ctx).Errorf("failed to send runc stats to client-stream: %s", err)
-			return
 		}
 	}
 }

@@ -323,6 +323,8 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 		}
 	}
 
+	statsCtx, statsCancel := context.WithCancel(ctx)
+
 	trace.SpanFromContext(ctx).AddEvent("Container created")
 	err = w.run(ctx, id, bundle, process, func() {
 		startedOnce.Do(func() {
@@ -330,10 +332,9 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 			if started != nil {
 				close(started)
 			}
-			// This may be cause of cancel
-			// if process.StatsStream != nil {
-			// 	go w.monitorContainerStats(ctx, id, w.sampleFrequency, process.StatsStream) // earthly-specific
-			// }
+			if process.StatsStream != nil {
+				go w.monitorContainerStats(statsCtx, id, w.sampleFrequency, process.StatsStream) // earthly-specific
+			}
 			if rec != nil {
 				rec.Start()
 			}
@@ -341,6 +342,7 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 	}, true)
 
 	releaseContainer := func(ctx context.Context) error {
+		statsCancel()
 		err := w.runc.Delete(ctx, id, &runc.DeleteOpts{})
 		err1 := namespace.Close()
 		if err == nil {
