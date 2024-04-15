@@ -54,6 +54,7 @@ func (w *runcExecutor) monitorContainerStats(ctx context.Context, id string, sam
 		select {
 		case <-ctx.Done():
 			bklog.G(ctx).Infof("stats collection context done: %v", ctx.Err())
+			return
 		case <-timer.C:
 			stats, err := w.runc.Stats(ctx, id)
 			if err != nil {
