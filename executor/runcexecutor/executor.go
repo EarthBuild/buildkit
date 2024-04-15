@@ -330,6 +330,7 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 			if started != nil {
 				close(started)
 			}
+			// This may be cause of cancel
 			// if process.StatsStream != nil {
 			// 	go w.monitorContainerStats(ctx, id, w.sampleFrequency, process.StatsStream) // earthly-specific
 			// }
