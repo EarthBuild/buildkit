@@ -141,13 +141,12 @@ func notifyError(ctx context.Context, st *state, cached bool, err error) {
 }
 
 func (s *simpleSolver) state(vertex Vertex, job *Job) *state {
-	s.solver.mu.RLock()
+	s.solver.mu.Lock()
+	defer s.solver.mu.Unlock()
 	if st, ok := s.solver.actives[vertex.Digest()]; ok {
 		st.jobs[job] = struct{}{}
-		s.solver.mu.RUnlock()
 		return st
 	}
-	s.solver.mu.RUnlock()
 	return s.createState(vertex, job)
 }
 
@@ -182,9 +181,7 @@ func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
 	// necessary dependency information to a few caching components. We'll need
 	// to expire these keys somehow. We should also move away from using the
 	// actives map, but it's still being used by withAncestorCacheOpts for now.
-	s.solver.mu.Lock()
 	s.solver.actives[vertex.Digest()] = st
-	s.solver.mu.Unlock()
 
 	op := newSharedOp(st.opts.ResolveOpFunc, st.opts.DefaultCache, st)
 
