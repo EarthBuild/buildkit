@@ -842,7 +842,7 @@ func (lbf *llbBridgeForwarder) ReadFile(ctx context.Context, req *pb.ReadFileReq
 	return &pb.ReadFileResponse{Data: dt}, nil
 }
 
-func (lbf *llbBridgeForwarder) ReadDir(ctx context.Context, req *pb.ReadDirRequest) (res *pb.ReadDirResponse, retErr error) {
+func (lbf *llbBridgeForwarder) ReadDir(ctx context.Context, req *pb.ReadDirRequest) (*pb.ReadDirResponse, error) {
 	ctx = tracing.ContextWithSpanFromContext(ctx, lbf.callCtx)
 
 	ref, err := lbf.getImmutableRef(ctx, req.Ref, req.DirPath)
