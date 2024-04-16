@@ -843,15 +843,10 @@ func (lbf *llbBridgeForwarder) ReadFile(ctx context.Context, req *pb.ReadFileReq
 }
 
 func (lbf *llbBridgeForwarder) ReadDir(ctx context.Context, req *pb.ReadDirRequest) (res *pb.ReadDirResponse, retErr error) {
-	defer func() {
-		bklog.G(ctx).Warnf("Error from ReadDir: %v", retErr)
-	}()
-
 	ctx = tracing.ContextWithSpanFromContext(ctx, lbf.callCtx)
 
 	ref, err := lbf.getImmutableRef(ctx, req.Ref, req.DirPath)
 	if err != nil {
-		bklog.G(ctx).Warnf("Error from getImmutableRef: %v", err)
 		return nil, err
 	}
 
@@ -868,7 +863,6 @@ func (lbf *llbBridgeForwarder) ReadDir(ctx context.Context, req *pb.ReadDirReque
 	}
 	entries, err := cacheutil.ReadDir(ctx, m, newReq)
 	if err != nil {
-		bklog.G(ctx).Warnf("Error from cacheutil.ReadDir: %v", err)
 		return nil, lbf.wrapSolveError(err)
 	}
 
