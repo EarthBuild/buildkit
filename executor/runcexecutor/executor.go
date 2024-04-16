@@ -331,7 +331,7 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 				close(started)
 			}
 			if process.StatsStream != nil {
-				go w.monitorContainerStats(ctx, id, w.sampleFrequency, process.StatsStream) // earthly-specific
+				go w.monitorContainerStats(context.WithoutCancel(ctx), id, w.sampleFrequency, process.StatsStream) // earthly-specific
 			}
 			if rec != nil {
 				rec.Start()
