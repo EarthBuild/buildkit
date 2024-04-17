@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/tracing"
@@ -24,23 +25,34 @@ var ErrRefNotFound = errors.New("ref not found")
 type CommitRefFunc func(ctx context.Context, result Result) error
 
 type simpleSolver struct {
-	resolveOpFunc   ResolveOpFunc
-	commitRefFunc   CommitRefFunc
-	solver          *Solver
-	parallelGuard   *parallelGuard
-	resultCache     resultCache
-	cacheKeyManager *cacheKeyManager
-	mu              sync.Mutex
+	resolveOpFunc      ResolveOpFunc
+	commitRefFunc      CommitRefFunc
+	solver             *Solver
+	parallelGuard      *parallelGuard
+	resultCache        resultCache
+	cacheKeyManager    *cacheKeyManager
+	cacheResultStorage CacheResultStorage
+	defaultCache       CacheManager
+	mu                 sync.Mutex
 }
 
-func newSimpleSolver(resolveOpFunc ResolveOpFunc, commitRefFunc CommitRefFunc, solver *Solver, cache resultCache) *simpleSolver {
+func newSimpleSolver(
+	resolveOpFunc ResolveOpFunc,
+	commitRefFunc CommitRefFunc,
+	solver *Solver,
+	defaultCache CacheManager,
+	cacheResultStorage CacheResultStorage,
+	cache resultCache,
+) *simpleSolver {
 	return &simpleSolver{
-		cacheKeyManager: newCacheKeyManager(),
-		resultCache:     cache,
-		parallelGuard:   newParallelGuard(time.Millisecond * 100),
-		resolveOpFunc:   resolveOpFunc,
-		commitRefFunc:   commitRefFunc,
-		solver:          solver,
+		cacheKeyManager:    newCacheKeyManager(),
+		cacheResultStorage: cacheResultStorage,
+		defaultCache:       defaultCache,
+		resultCache:        cache,
+		parallelGuard:      newParallelGuard(time.Millisecond * 100),
+		resolveOpFunc:      resolveOpFunc,
+		commitRefFunc:      commitRefFunc,
+		solver:             solver,
 	}
 }
 
@@ -102,7 +114,14 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	}
 
 	expCacheKeys := []ExportableCacheKey{
-		{Exporter: &simpleExporter{cacheKey: cacheKey}},
+		{
+			Exporter: &simpleExporter{
+				cacheKey:           digest.NewDigestFromEncoded(digest.SHA256, cacheKey),
+				resultCache:        s.resultCache,
+				cacheResultStorage: s.cacheResultStorage,
+				vertex:             vertex,
+			},
+		},
 	}
 
 	if ok && v != nil {
@@ -152,10 +171,8 @@ func (s *simpleSolver) state(vertex Vertex, job *Job) *state {
 
 // createState creates a new state struct with required and placeholder values.
 func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
-	defaultCache := NewInMemoryCacheManager()
-
 	st := &state{
-		opts:         SolverOpt{DefaultCache: defaultCache, ResolveOpFunc: s.resolveOpFunc},
+		opts:         SolverOpt{DefaultCache: s.defaultCache, ResolveOpFunc: s.resolveOpFunc},
 		parents:      map[digest.Digest]struct{}{},
 		childVtx:     map[digest.Digest]struct{}{},
 		allPw:        map[progress.Writer]struct{}{},
@@ -165,7 +182,7 @@ func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
 		clientVertex: initClientVertex(vertex),
 		edges:        map[Index]*edge{},
 		index:        s.solver.index,
-		mainCache:    defaultCache,
+		mainCache:    s.defaultCache,
 		cache:        map[string]CacheManager{},
 		solver:       s.solver,
 		origDigest:   vertex.Digest(),
@@ -292,6 +309,8 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 		// reconstruct dependencies (mounts, etc.) for a new container run.
 		inputs = append(inputs, res)
 	}
+
+	spew.Dump(scm)
 
 	s.cacheKeyManager.add(vertex.Digest().String(), &scm)
 
@@ -503,6 +522,7 @@ func (c *diskCache) set(ctx context.Context, key string, r Result) error {
 	})
 }
 
+// TODO: decouple key translation from result loading.
 func (c *diskCache) get(ctx context.Context, key string) (Result, bool, error) {
 	var id string
 	err := c.db.View(func(tx *bolt.Tx) error {
@@ -539,9 +559,68 @@ func (c *diskCache) delete(_ context.Context, key string) error {
 var _ resultCache = &diskCache{}
 
 type simpleExporter struct {
-	cacheKey string
+	cacheKey           digest.Digest
+	resultCache        resultCache
+	cacheResultStorage CacheResultStorage
+	vertex             Vertex
 }
 
 func (s *simpleExporter) ExportTo(ctx context.Context, t CacheExporterTarget, opt CacheExportOpt) ([]CacheExporterRecord, error) {
-	return nil, nil
+	rec := t.Add(s.cacheKey)
+	ret := []CacheExporterRecord{rec}
+
+	// TODO: come back to this.
+	if opt.Mode == CacheExportModeRemoteOnly {
+		return nil, errors.New("remote only not supported")
+	}
+
+	fmt.Println("Primary cache ID", s.cacheKey)
+
+	// TODO: load the ID without the full result.
+	res, ok, err := s.resultCache.get(ctx, s.cacheKey.Hex())
+	if err != nil {
+		return nil, err
+	}
+
+	if !ok {
+		return nil, errors.Wrapf(err, "failed to load result for key: %s", s.cacheKey)
+	}
+
+	cacheResult := CacheResult{ID: res.ID(), CreatedAt: time.Now()} // Does this time matter?
+
+	remotes, err := s.cacheResultStorage.LoadRemotes(ctx, cacheResult, opt.CompressionOpt, opt.Session)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		remote   *Remote
+		variants []CacheExporterRecord
+	)
+
+	if len(remotes) > 0 {
+		remote, remotes = remotes[0], remotes[1:]
+	}
+
+	if opt.CompressionOpt != nil {
+		for _, r := range remotes {
+			rec := t.Add(s.cacheKey)
+			rec.AddResult(s.vertex.Digest(), 0, time.Now(), r)
+			variants = append(variants, rec)
+		}
+	}
+
+	if remote != nil {
+		for _, rec := range ret {
+			rec.AddResult(s.vertex.Digest(), 0, time.Now(), remote)
+		}
+	}
+
+	ret = append(ret, variants...)
+
+	for _, input := range s.vertex.Inputs() {
+
+	}
+
+	return ret, nil
 }

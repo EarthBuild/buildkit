@@ -822,6 +822,7 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		"s3":       s3remotecache.ResolveCacheExporterFunc(),
 		"azblob":   azblob.ResolveCacheExporterFunc(),
 	}
+
 	remoteCacheImporterFuncs := map[string]remotecache.ResolveCacheImporterFunc{
 		"registry": registryremotecache.ResolveCacheImporterFunc(sessionManager, w.ContentStore(), resolverFn),
 		"local":    localremotecache.ResolveCacheImporterFunc(sessionManager),
@@ -829,13 +830,17 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		"s3":       s3remotecache.ResolveCacheImporterFunc(),
 		"azblob":   azblob.ResolveCacheImporterFunc(),
 	}
+
+	cacheResultStorage := worker.NewCacheResultStorage(wc)
+
 	return control.NewController(control.Opt{
 		SessionManager:            sessionManager,
 		WorkerController:          wc,
 		Frontends:                 frontends,
 		ResolveCacheExporterFuncs: remoteCacheExporterFuncs,
 		ResolveCacheImporterFuncs: remoteCacheImporterFuncs,
-		CacheManager:              solver.NewCacheManager(context.TODO(), "local", cacheStorage, worker.NewCacheResultStorage(wc)),
+		CacheResultStorage:        cacheResultStorage,
+		CacheManager:              solver.NewCacheManager(context.TODO(), "local", cacheStorage, cacheResultStorage),
 		Entitlements:              cfg.Entitlements,
 		TraceCollector:            tc,
 		HistoryDB:                 historyDB,

@@ -59,6 +59,7 @@ type Opt struct {
 	WorkerController          *worker.Controller
 	Frontends                 map[string]frontend.Frontend
 	CacheManager              solver.CacheManager
+	CacheResultStorage        solver.CacheResultStorage
 	ResolveCacheExporterFuncs map[string]remotecache.ResolveCacheExporterFunc
 	ResolveCacheImporterFuncs map[string]remotecache.ResolveCacheImporterFunc
 	Entitlements              []string
@@ -98,15 +99,16 @@ func NewController(opt Opt) (*Controller, error) {
 	}
 
 	s, err := llbsolver.New(llbsolver.Opt{
-		WorkerController: opt.WorkerController,
-		Frontends:        opt.Frontends,
-		CacheManager:     opt.CacheManager,
-		CacheResolvers:   opt.ResolveCacheImporterFuncs,
-		GatewayForwarder: gatewayForwarder,
-		SessionManager:   opt.SessionManager,
-		Entitlements:     opt.Entitlements,
-		HistoryQueue:     hq,
-		RootDir:          opt.RootDir,
+		WorkerController:   opt.WorkerController,
+		Frontends:          opt.Frontends,
+		CacheManager:       opt.CacheManager,
+		CacheResultStorage: opt.CacheResultStorage,
+		CacheResolvers:     opt.ResolveCacheImporterFuncs,
+		GatewayForwarder:   gatewayForwarder,
+		SessionManager:     opt.SessionManager,
+		Entitlements:       opt.Entitlements,
+		HistoryQueue:       hq,
+		RootDir:            opt.RootDir,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create solver")

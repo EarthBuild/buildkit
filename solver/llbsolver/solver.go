@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	slsa02 "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/v0.2"
 	controlapi "github.com/moby/buildkit/api/services/control"
@@ -70,16 +71,17 @@ type ResolveWorkerFunc func() (worker.Worker, error)
 
 // Opt defines options for new Solver.
 type Opt struct {
-	CacheManager     solver.CacheManager
-	CacheResolvers   map[string]remotecache.ResolveCacheImporterFunc
-	Entitlements     []string
-	Frontends        map[string]frontend.Frontend
-	GatewayForwarder *controlgateway.GatewayForwarder
-	SessionManager   *session.Manager
-	WorkerController *worker.Controller
-	HistoryQueue     *HistoryQueue
-	ResourceMonitor  *resources.Monitor
-	RootDir          string
+	CacheManager       solver.CacheManager
+	CacheResultStorage solver.CacheResultStorage
+	CacheResolvers     map[string]remotecache.ResolveCacheImporterFunc
+	Entitlements       []string
+	Frontends          map[string]frontend.Frontend
+	GatewayForwarder   *controlgateway.GatewayForwarder
+	SessionManager     *session.Manager
+	WorkerController   *worker.Controller
+	HistoryQueue       *HistoryQueue
+	ResourceMonitor    *resources.Monitor
+	RootDir            string
 }
 
 type Solver struct {
@@ -122,6 +124,7 @@ func New(opt Opt) (*Solver, error) {
 	s.solver = solver.NewSolver(solver.SolverOpt{
 		ResolveOpFunc:      s.resolver(),
 		DefaultCache:       opt.CacheManager,
+		CacheResultStorage: opt.CacheResultStorage,
 		WorkerResultGetter: worker.NewWorkerResultGetter(opt.WorkerController),
 		CommitRefFunc:      worker.FinalizeRef,
 		RootDir:            opt.RootDir,
@@ -618,7 +621,7 @@ func runCacheExporters(ctx context.Context, exporters []RemoteCacheExporter, j *
 
 						// Configure compression
 						compressionConfig := exp.Config().Compression
-
+						fmt.Println("runCacheExporters")
 						// all keys have same export chain so exporting others is not needed
 						_, err = res.CacheKeys()[0].Exporter.ExportTo(ctx, exp, solver.CacheExportOpt{
 							ResolveRemotes: workerRefResolver(cacheconfig.RefConfig{Compression: compressionConfig}, false, g),
@@ -856,6 +859,8 @@ func inlineCache(ctx context.Context, e remotecache.Exporter, res solver.CachedR
 		digests = append(digests, desc.Digest)
 	}
 
+	spew.Dump(digests)
+
 	ctx = withDescHandlerCacheOpts(ctx, workerRef.ImmutableRef)
 	refCfg := cacheconfig.RefConfig{Compression: compressionopt}
 	if _, err := res.CacheKeys()[0].Exporter.ExportTo(ctx, e, solver.CacheExportOpt{
@@ -866,6 +871,7 @@ func inlineCache(ctx context.Context, e remotecache.Exporter, res solver.CachedR
 	}); err != nil {
 		return nil, err
 	}
+	fmt.Println("func inlineCache")
 	return ie.ExportForLayers(ctx, digests)
 }
 

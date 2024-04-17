@@ -258,7 +258,8 @@ type Job struct {
 type SolverOpt struct {
 	ResolveOpFunc      ResolveOpFunc
 	DefaultCache       CacheManager
-	WorkerResultGetter workerResultGetter
+	CacheResultStorage CacheResultStorage
+	WorkerResultGetter workerResultGetter // TODO: remove this in favor of CacheResultStorage.
 	CommitRefFunc      CommitRefFunc
 	RootDir            string
 }
@@ -281,7 +282,15 @@ func NewSolver(opts SolverOpt) *Solver {
 	if err != nil {
 		panic(err) // TODO: Handle error appropriately once the new solver code is moved.
 	}
-	simple := newSimpleSolver(opts.ResolveOpFunc, opts.CommitRefFunc, jl, c)
+
+	simple := newSimpleSolver(
+		opts.ResolveOpFunc,
+		opts.CommitRefFunc,
+		jl,
+		opts.DefaultCache,
+		opts.CacheResultStorage,
+		c,
+	)
 	jl.simple = simple
 
 	jl.s = newScheduler(jl)

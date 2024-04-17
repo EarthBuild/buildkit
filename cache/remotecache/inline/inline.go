@@ -3,8 +3,10 @@ package inline
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/containerd/containerd/labels"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/moby/buildkit/cache/remotecache"
 	v1 "github.com/moby/buildkit/cache/remotecache/v1"
 	"github.com/moby/buildkit/session"
@@ -56,6 +58,8 @@ func (ce *exporter) ExportForLayers(ctx context.Context, layers []digest.Digest)
 	if err != nil {
 		return nil, err
 	}
+
+	spew.Dump(config)
 
 	layerBlobDigests := make([]digest.Digest, len(layers))
 
@@ -148,6 +152,8 @@ func (ce *exporter) ExportForLayers(ctx context.Context, layers []digest.Digest)
 		return nil, err
 	}
 	ce.reset()
+
+	fmt.Println(string(dt))
 
 	return dt, nil
 }
