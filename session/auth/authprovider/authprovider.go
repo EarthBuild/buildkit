@@ -78,7 +78,7 @@ func (ap *authProvider) FetchToken(ctx context.Context, req *auth.FetchTokenRequ
 
 	// check for statically configured bearer token
 	if ac.RegistryToken != "" {
-		return toTokenResponse(ac.RegistryToken, time.Time{}, 0), nil
+		return toTokenResponse(ac.RegistryToken, time.Time{}, 0, false), nil
 	}
 
 	creds, err := ap.credentials(req.Host)
@@ -127,19 +127,20 @@ func (ap *authProvider) FetchToken(ctx context.Context, req *auth.FetchTokenRequ
 					if err != nil {
 						return nil, err
 					}
-					return toTokenResponse(resp.Token, resp.IssuedAt, resp.ExpiresIn), nil
+					return toTokenResponse(resp.Token, resp.IssuedAt, resp.ExpiresIn, false), nil
 				}
 			}
 			return nil, err
 		}
-		return toTokenResponse(resp.AccessToken, resp.IssuedAt, resp.ExpiresIn), nil
+		return toTokenResponse(resp.AccessToken, resp.IssuedAt, resp.ExpiresIn, false), nil
 	}
 	// do request anonymously
 	resp, err := authutil.FetchToken(ctx, httpClient, nil, to)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to fetch anonymous token")
 	}
-	return toTokenResponse(resp.Token, resp.IssuedAt, resp.ExpiresIn), nil
+
+	return toTokenResponse(resp.Token, resp.IssuedAt, resp.ExpiresIn, true), nil
 }
 
 func (ap *authProvider) tlsConfig(host string) (*tls.Config, error) {
@@ -276,13 +277,14 @@ func (ap *authProvider) getAuthorityKey(host string, salt []byte) (ed25519.Priva
 	return ed25519.NewKeyFromSeed(sum[:ed25519.SeedSize]), nil
 }
 
-func toTokenResponse(token string, issuedAt time.Time, expires int) *auth.FetchTokenResponse {
+func toTokenResponse(token string, issuedAt time.Time, expires int, anonymous bool) *auth.FetchTokenResponse {
 	if expires == 0 {
 		expires = defaultExpiration
 	}
 	resp := &auth.FetchTokenResponse{
 		Token:     token,
 		ExpiresIn: int64(expires),
+		Anonymous: anonymous, // earthly-specific
 	}
 	if !issuedAt.IsZero() {
 		resp.IssuedAt = issuedAt.Unix()
