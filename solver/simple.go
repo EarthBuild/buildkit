@@ -69,18 +69,162 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 			return nil, errors.Errorf("digest %s not found", d)
 		}
 
-		res, expCacheKeys, err := s.buildOne(ctx, d, vertex, job, e)
+		cachedResult, err := s.buildOne(ctx, d, vertex, job, e)
 		if err != nil {
 			return nil, err
 		}
 
-		ret = NewCachedResult(res, expCacheKeys)
+		ret = cachedResult
 	}
 
 	return ret, nil
 }
 
-func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Vertex, job *Job, e Edge) (Result, []ExportableCacheKey, error) {
+// Temporary global maps used for new cache key code.
+var (
+	cacheKeyMu      = sync.Mutex{}
+	cacheMapDigests = map[string][]digest.Digest{}
+	slowCacheKeys   = map[string]*ExportableCacheKey{}
+	inputResults    = map[string]CachedResult{}
+)
+
+func (s *simpleSolver) prepareInputs(vtx Vertex) []CachedResult {
+	cacheKeyMu.Lock()
+	defer cacheKeyMu.Unlock()
+
+	vertexInputs := vtx.Inputs()
+
+	if len(vertexInputs) == 0 {
+		return nil
+	}
+
+	var results []CachedResult
+
+	for _, input := range vertexInputs {
+		k := fmt.Sprintf("%s:%d", input.Vertex.Digest(), 0)
+		cachedResult := inputResults[k]
+		results = append(results, cachedResult)
+	}
+
+	return results
+}
+
+func (s *simpleSolver) prepareCacheKeys(ctx context.Context, st *state, vtx Vertex, cm *CacheMap) ([]*CacheKey, error) {
+
+	cacheKeyMu.Lock()
+	defer cacheKeyMu.Unlock()
+
+	vertexDigest := vtx.Digest()
+	vertexInputs := vtx.Inputs()
+
+	// TODO: figure out what this is.
+	index := Index(0)
+
+	if len(vertexInputs) == 0 {
+		k := fmt.Sprintf("%s:%d", vertexDigest, index)
+		cacheMapDigests := cacheMapDigests[k]
+		var keys []*CacheKey
+		for _, dgst := range cacheMapDigests {
+			keys = append(keys, NewCacheKey(dgst, vertexDigest, index))
+		}
+		return keys, nil
+	}
+
+	k := NewCacheKey(cm.Digest, vertexDigest, index)
+
+	inputs := make([][]CacheKeyWithSelector, len(vertexInputs))
+
+	for i, input := range vertexInputs {
+		k := fmt.Sprintf("%s:%d", input.Vertex.Digest(), 0)
+
+		cachedResult := inputResults[k]
+		for _, cacheKey := range cachedResult.CacheKeys() {
+			inputs[i] = append(inputs[i], CacheKeyWithSelector{CacheKey: cacheKey, Selector: cm.Deps[i].Selector})
+		}
+
+		slowCacheKey, ok := slowCacheKeys[k]
+		if !ok {
+			slowCacheDigest, err := st.op.CalcSlowCache(ctx, index, cm.Deps[i].PreprocessFunc, cm.Deps[i].ComputeDigestFunc, cachedResult)
+			if err != nil {
+				return nil, err
+			}
+			ck := NewCacheKey(slowCacheDigest, "", -1)
+			slowCacheKey = &ExportableCacheKey{CacheKey: ck, Exporter: &exporter{k: ck}}
+			slowCacheKeys[k] = slowCacheKey
+		}
+
+		inputs[i] = append(inputs[i], CacheKeyWithSelector{CacheKey: *slowCacheKey})
+	}
+
+	k.deps = inputs
+
+	spew.Dump("CREATE", k.TraceFields())
+
+	return []*CacheKey{k}, nil
+}
+
+func (s *simpleSolver) execOp(ctx context.Context, st *state, cm *CacheMap, vtx Vertex) (CachedResult, error) {
+	cacheKeys, err := s.prepareCacheKeys(ctx, st, vtx, cm)
+	if err != nil {
+		return nil, err
+	}
+
+	inputs := s.prepareInputs(vtx)
+
+	results, subExporters, err := st.op.Exec(ctx, toResultSlice(inputs))
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	index := 0
+
+	if len(results) <= int(index) {
+		return nil, errors.Errorf("invalid response from exec need %d index but %d results received", index, len(results))
+	}
+
+	res := results[int(index)]
+
+	for i := range results {
+		if i != int(index) {
+			go results[i].Release(context.TODO())
+		}
+	}
+
+	var exporters []CacheExporter
+
+	for _, cacheKey := range cacheKeys {
+		ck, err := st.op.Cache().Save(cacheKey, res, time.Now())
+		if err != nil {
+			return nil, err
+		}
+
+		if _, ok := ck.Exporter.(*exporter); ok {
+			bklog.G(ctx).Warnf("secondary exporters likely needed")
+			// TODO: handle secondary exporters if needed
+			// exp.edge = e
+		}
+
+		exps := make([]CacheExporter, 0, len(subExporters))
+		for _, exp := range subExporters {
+			exps = append(exps, exp.Exporter)
+		}
+
+		exporters = append(exporters, ck.Exporter)
+		exporters = append(exporters, exps...)
+	}
+
+	ek := make([]ExportableCacheKey, 0, len(cacheKeys))
+	for _, ck := range cacheKeys {
+		ek = append(ek, ExportableCacheKey{
+			CacheKey: ck,
+			Exporter: &mergedExporter{exporters: exporters},
+		})
+	}
+
+	return NewCachedResult(res, ek), nil
+}
+
+func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Vertex, job *Job, e Edge) (CachedResult, error) {
 	// Ensure we don't have multiple threads working on the same digest.
 	wait, done := s.parallelGuard.acquire(ctx, d.String())
 	defer done()
@@ -89,68 +233,75 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	st := s.state(vertex, job)
 
 	// Add cache opts to context as they will be accessed by cache retrieval.
-	ctx = withAncestorCacheOpts(ctx, st)
+	// ctx = withAncestorCacheOpts(ctx, st)
 
 	// CacheMap populates required fields in SourceOp.
-	cm, err := st.op.CacheMap(ctx, int(e.Index))
+	cm, err := st.op.CacheMap(ctx, 0)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	inputs, err := s.preprocessInputs(ctx, st, vertex, cm.CacheMap, job)
+	tmpCacheKey := fmt.Sprintf("%s:%d", vertex.Digest(), 0)
+
+	cacheKeyMu.Lock()
+	cacheMapDigests[tmpCacheKey] = append(cacheMapDigests[tmpCacheKey], cm.CacheMap.Digest)
+	cacheKeyMu.Unlock()
+
+	// TODO: Add back cache check here.
+
+	cacheRecords := map[string]*CacheRecord{}
+
+	keys, err := st.op.Cache().Query(nil, 0, cm.Digest, 0)
 	if err != nil {
-		notifyError(ctx, st, false, err)
-		return nil, nil, err
-	}
+		bklog.G(ctx).Warnf("failed to query cache keys: %v", err)
+	} else {
+		for _, key := range keys {
+			spew.Dump("FOUND", key.TraceFields())
 
-	cacheKey, err := s.cacheKeyManager.cacheKey(ctx, d.String())
-	if err != nil {
-		return nil, nil, err
-	}
-
-	v, ok, err := s.resultCache.get(ctx, cacheKey)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	expCacheKeys := []ExportableCacheKey{
-		{
-			Exporter: &simpleExporter{
-				cacheKey:           digest.NewDigestFromEncoded(digest.SHA256, cacheKey),
-				resultCache:        s.resultCache,
-				cacheResultStorage: s.cacheResultStorage,
-				vertex:             vertex,
-			},
-		},
-	}
-
-	if ok && v != nil {
-		notifyError(ctx, st, true, nil)
-		return v, expCacheKeys, nil
-	}
-
-	results, _, err := st.op.Exec(ctx, inputs)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Ensure all results are finalized (committed to cache). It may be better
-	// to background these calls at some point.
-	for _, res := range results {
-		err = s.commitRefFunc(ctx, res)
-		if err != nil {
-			return nil, nil, err
+			key.vtx = vertex.Digest()
+			records, err := st.op.Cache().Records(ctx, key)
+			if err != nil {
+				bklog.G(ctx).Warnf("failed to query cache records: %v", err)
+				continue
+			}
+			for _, r := range records {
+				cacheRecords[r.ID] = r
+			}
 		}
 	}
 
-	res := results[int(e.Index)]
+	var cachedResult CachedResult
 
-	err = s.resultCache.set(ctx, cacheKey, res)
-	if err != nil {
-		return nil, nil, err
+	if len(cacheRecords) > 0 {
+		recs := make([]*CacheRecord, 0, len(cacheRecords))
+		for _, r := range cacheRecords {
+			recs = append(recs, r)
+		}
+
+		rec := getBestResult(recs)
+
+		res, err := st.op.LoadCache(ctx, rec)
+		if err != nil {
+			return nil, err
+		}
+
+		fmt.Println("Successfully loaded cached result")
+
+		// TODO: this also wanted an edge value for secondary exporters.
+		cachedResult = NewCachedResult(res, []ExportableCacheKey{{CacheKey: rec.key, Exporter: &exporter{k: rec.key, record: rec}}})
+	} else {
+		fmt.Println("No cached result found. Exec-ing.")
+		cachedResult, err = s.execOp(ctx, st, cm.CacheMap, vertex)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return res, expCacheKeys, nil
+	cacheKeyMu.Lock()
+	inputResults[tmpCacheKey] = cachedResult
+	cacheKeyMu.Unlock()
+
+	return cachedResult, nil
 }
 
 func notifyError(ctx context.Context, st *state, cached bool, err error) {
@@ -557,70 +708,3 @@ func (c *diskCache) delete(_ context.Context, key string) error {
 }
 
 var _ resultCache = &diskCache{}
-
-type simpleExporter struct {
-	cacheKey           digest.Digest
-	resultCache        resultCache
-	cacheResultStorage CacheResultStorage
-	vertex             Vertex
-}
-
-func (s *simpleExporter) ExportTo(ctx context.Context, t CacheExporterTarget, opt CacheExportOpt) ([]CacheExporterRecord, error) {
-	rec := t.Add(s.cacheKey)
-	ret := []CacheExporterRecord{rec}
-
-	// TODO: come back to this.
-	if opt.Mode == CacheExportModeRemoteOnly {
-		return nil, errors.New("remote only not supported")
-	}
-
-	fmt.Println("Primary cache ID", s.cacheKey)
-
-	// TODO: load the ID without the full result.
-	res, ok, err := s.resultCache.get(ctx, s.cacheKey.Hex())
-	if err != nil {
-		return nil, err
-	}
-
-	if !ok {
-		return nil, errors.Wrapf(err, "failed to load result for key: %s", s.cacheKey)
-	}
-
-	cacheResult := CacheResult{ID: res.ID(), CreatedAt: time.Now()} // Does this time matter?
-
-	remotes, err := s.cacheResultStorage.LoadRemotes(ctx, cacheResult, opt.CompressionOpt, opt.Session)
-	if err != nil {
-		return nil, err
-	}
-
-	var (
-		remote   *Remote
-		variants []CacheExporterRecord
-	)
-
-	if len(remotes) > 0 {
-		remote, remotes = remotes[0], remotes[1:]
-	}
-
-	if opt.CompressionOpt != nil {
-		for _, r := range remotes {
-			rec := t.Add(s.cacheKey)
-			rec.AddResult(s.vertex.Digest(), 0, time.Now(), r)
-			variants = append(variants, rec)
-		}
-	}
-
-	if remote != nil {
-		for _, rec := range ret {
-			rec.AddResult(s.vertex.Digest(), 0, time.Now(), remote)
-		}
-	}
-
-	ret = append(ret, variants...)
-
-	for _, input := range s.vertex.Inputs() {
-
-	}
-
-	return ret, nil
-}

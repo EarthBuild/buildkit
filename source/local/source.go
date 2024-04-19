@@ -128,7 +128,7 @@ func (ls *localSourceHandler) CacheKey(ctx context.Context, g session.Group, ind
 	// approach in "simple.go" as it differs for each request. Use the
 	// SharedKeyHint property which is provided by Earthly and is based off of
 	// the path & inode names.
-	sessionID = ls.src.SharedKeyHint
+	// sessionID = ls.src.SharedKeyHint
 
 	dt, err := json.Marshal(struct {
 		SessionID       string
