@@ -819,7 +819,7 @@ func (h *HistoryQueue) Listen(ctx context.Context, req *controlapi.BuildHistoryR
 		}
 		h.mu.Unlock()
 		for _, e := range events {
-			if e.Record == nil {
+			if e == nil || e.Record == nil {
 				continue
 			}
 			if err := f(e); err != nil {
@@ -835,7 +835,7 @@ func (h *HistoryQueue) Listen(ctx context.Context, req *controlapi.BuildHistoryR
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case e := <-sub.ch:
 			if req.Ref != "" && req.Ref != e.Record.Ref {
 				continue

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	goRuntime "runtime"
 	"strconv"
 	"strings"
 
@@ -30,15 +31,47 @@ import (
 type RuntimeInfo = containerdexecutor.RuntimeInfo
 
 // NewWorkerOpt creates a WorkerOpt.
-// earthly-specific use semutil.Weighted instead of semaphore
-func NewWorkerOpt(root string, address, snapshotterName, ns string, rootless bool, labels map[string]string, dns *oci.DNSConfig, nopt netproviders.Opt, apparmorProfile string, selinux bool, parallelismSem *semutil.Weighted, traceSocket string, runtime *RuntimeInfo, opts ...containerd.ClientOpt) (base.WorkerOpt, error) {
+func NewWorkerOpt(
+	root string,
+	address, snapshotterName, ns string,
+	rootless bool,
+	labels map[string]string,
+	dns *oci.DNSConfig,
+	nopt netproviders.Opt,
+	apparmorProfile string,
+	selinux bool,
+	parallelismSem *semutil.Weighted, // earthly-specific use semutil.Weighted instead of semaphore
+	traceSocket string,
+	runtime *RuntimeInfo,
+	opts ...containerd.ClientOpt,
+) (base.WorkerOpt, error) {
 	opts = append(opts, containerd.WithDefaultNamespace(ns))
 
+	if goRuntime.GOOS == "windows" {
+		// TODO(profnandaa): once the upstream PR[1] is merged and
+		// vendored in buildkit, we will remove this block.
+		// [1] https://github.com/containerd/containerd/pull/9412
+		address = strings.TrimPrefix(address, "npipe://")
+	}
 	client, err := containerd.New(address, opts...)
 	if err != nil {
 		return base.WorkerOpt{}, errors.Wrapf(err, "failed to connect client to %q . make sure containerd is running", address)
 	}
-	return newContainerd(root, client, snapshotterName, ns, rootless, labels, dns, nopt, apparmorProfile, selinux, parallelismSem, traceSocket, runtime)
+	return newContainerd(
+		root,
+		client,
+		snapshotterName,
+		ns,
+		rootless,
+		labels,
+		dns,
+		nopt,
+		apparmorProfile,
+		selinux,
+		parallelismSem,
+		traceSocket,
+		runtime,
+	)
 }
 
 // earthly-specific use semutil.Weighted instead of semaphore

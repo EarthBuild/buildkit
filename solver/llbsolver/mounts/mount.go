@@ -137,7 +137,7 @@ func (g *cacheRefGetter) getRefCacheDirNoCache(ctx context.Context, key string, 
 			select {
 			case <-ctx.Done():
 				cacheRefsLocker.Lock(key)
-				return nil, ctx.Err()
+				return nil, context.Cause(ctx)
 			case <-time.After(100 * time.Millisecond):
 				cacheRefsLocker.Lock(key)
 			}
@@ -200,7 +200,7 @@ type sshMountInstance struct {
 }
 
 func (sm *sshMountInstance) Mount() ([]mount.Mount, func() error, error) {
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancelCause(context.TODO())
 
 	uid := int(sm.sm.mount.SSHOpt.Uid)
 	gid := int(sm.sm.mount.SSHOpt.Gid)
@@ -211,7 +211,7 @@ func (sm *sshMountInstance) Mount() ([]mount.Mount, func() error, error) {
 			GID: gid,
 		})
 		if err != nil {
-			cancel()
+			cancel(err)
 			return nil, nil, err
 		}
 		uid = identity.UID
@@ -225,7 +225,7 @@ func (sm *sshMountInstance) Mount() ([]mount.Mount, func() error, error) {
 		Mode: int(sm.sm.mount.SSHOpt.Mode & 0777),
 	})
 	if err != nil {
-		cancel()
+		cancel(err)
 		return nil, nil, err
 	}
 	release := func() error {
@@ -233,7 +233,7 @@ func (sm *sshMountInstance) Mount() ([]mount.Mount, func() error, error) {
 		if cleanup != nil {
 			err = cleanup()
 		}
-		cancel()
+		cancel(err)
 		return err
 	}
 

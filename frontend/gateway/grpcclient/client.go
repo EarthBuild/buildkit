@@ -44,8 +44,9 @@ type GrpcClient interface {
 }
 
 func New(ctx context.Context, opts map[string]string, session, product string, c pb.LLBBridgeClient, w []client.WorkerInfo) (GrpcClient, error) {
-	pingCtx, pingCancel := context.WithTimeout(ctx, 15*time.Second)
-	defer pingCancel()
+	pingCtx, pingCancel := context.WithCancelCause(ctx)
+	pingCtx, _ = context.WithTimeoutCause(pingCtx, 15*time.Second, errors.WithStack(context.DeadlineExceeded))
+	defer pingCancel(errors.WithStack(context.Canceled))
 	resp, err := c.Ping(pingCtx, &pb.PingRequest{})
 	if err != nil {
 		return nil, err
@@ -637,7 +638,7 @@ func (b *procMessageForwarder) Close() {
 type messageForwarder struct {
 	client pb.LLBBridgeClient
 	ctx    context.Context
-	cancel func()
+	cancel func(error)
 	eg     *errgroup.Group
 	mu     sync.Mutex
 	pids   map[string]*procMessageForwarder
@@ -651,7 +652,7 @@ type messageForwarder struct {
 }
 
 func newMessageForwarder(ctx context.Context, client pb.LLBBridgeClient) *messageForwarder {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 	eg, ctx := errgroup.WithContext(ctx)
 	return &messageForwarder{
 		client: client,
@@ -740,7 +741,7 @@ func (m *messageForwarder) Send(msg *pb.ExecMessage) error {
 }
 
 func (m *messageForwarder) Release() error {
-	m.cancel()
+	m.cancel(errors.WithStack(context.Canceled))
 	return m.eg.Wait()
 }
 
@@ -970,7 +971,7 @@ func (ctr *container) Start(ctx context.Context, req client.StartRequest) (clien
 				closeDoneOnce.Do(func() {
 					close(done)
 				})
-				return ctx.Err()
+				return context.Cause(ctx)
 			}
 
 			if file := msg.GetFile(); file != nil {
@@ -1173,7 +1174,7 @@ func grpcClientConn(ctx context.Context) (context.Context, *grpc.ClientConn, err
 		return nil, nil, errors.Wrap(err, "failed to create grpc client")
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 	_ = cancel
 	// go monitorHealth(ctx, cc, cancel)
 

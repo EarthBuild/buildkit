@@ -48,7 +48,7 @@ type Mount struct {
 }
 
 func NewContainer(ctx context.Context, w worker.Worker, sm *session.Manager, g session.Group, req NewContainerRequest) (client.Container, error) {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 	eg, ctx := errgroup.WithContext(ctx)
 	platform := opspb.Platform{
 		OS:           runtime.GOOS,
@@ -312,7 +312,7 @@ type gatewayContainer struct {
 	mu         sync.Mutex
 	cleanup    []func() error
 	ctx        context.Context
-	cancel     func()
+	cancel     func(error)
 }
 
 func (gwCtr *gatewayContainer) Start(ctx context.Context, req client.StartRequest) (client.ContainerProcess, error) {
@@ -420,7 +420,7 @@ func (gwCtr *gatewayContainer) loadSecretEnv(ctx context.Context, secretEnv []*p
 func (gwCtr *gatewayContainer) Release(ctx context.Context) error {
 	gwCtr.mu.Lock()
 	defer gwCtr.mu.Unlock()
-	gwCtr.cancel()
+	gwCtr.cancel(errors.WithStack(context.Canceled))
 	err1 := gwCtr.errGroup.Wait()
 
 	var err2 error

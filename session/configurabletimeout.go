@@ -5,13 +5,14 @@ import (
 	"time"
 
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
-func configurableMonitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelConn func(), healthCfg ManagerHealthCfg) {
-	defer cancelConn()
+func configurableMonitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelConn context.CancelCauseFunc, healthCfg ManagerHealthCfg) {
+	defer cancelConn(errors.New("configurableMonitorHealth failure"))
 	defer cc.Close()
 
 	ticker := time.NewTicker(healthCfg.frequency)
