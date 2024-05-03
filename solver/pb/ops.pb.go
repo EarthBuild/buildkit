@@ -157,6 +157,7 @@ func (CacheSharingOpt) EnumDescriptor() ([]byte, []int) {
 
 // Op represents a vertex of the LLB DAG.
 type Op struct {
+	// changes to this structure must be represented in json.go.
 	// inputs is a set of input edges.
 	Inputs []*Input `protobuf:"bytes,1,rep,name=inputs,proto3" json:"inputs,omitempty"`
 	// Types that are valid to be assigned to Op:
@@ -2044,6 +2045,7 @@ func (m *FileOp) GetActions() []*FileAction {
 }
 
 type FileAction struct {
+	// changes to this structure must be represented in json.go.
 	Input          InputIndex  `protobuf:"varint,1,opt,name=input,proto3,customtype=InputIndex" json:"input"`
 	SecondaryInput InputIndex  `protobuf:"varint,2,opt,name=secondaryInput,proto3,customtype=InputIndex" json:"secondaryInput"`
 	Output         OutputIndex `protobuf:"varint,3,opt,name=output,proto3,customtype=OutputIndex" json:"output"`
@@ -2565,6 +2567,8 @@ func (m *ChownOpt) GetGroup() *UserOpt {
 }
 
 type UserOpt struct {
+	// changes to this structure must be represented in json.go.
+	//
 	// Types that are valid to be assigned to User:
 	//
 	//	*UserOpt_ByName

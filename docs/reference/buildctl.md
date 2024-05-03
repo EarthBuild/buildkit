@@ -78,7 +78,7 @@ OPTIONS:
    --metadata-file value             Output build metadata (e.g., image digest) to a file as JSON
    --source-policy-file value        Read source policy file from a JSON file
    --ref-file value                  Write build ref to a file
-   --registry-auth-tlscontext value  Overwrite TLS configuration when authenticating with registries, e.g. --registry-auth-tlscontext host=https://myserver:2376,ca=/path/to/my/ca.crt,cert=/path/to/my/cert.crt,key=/path/to/my/key.crt
+   --registry-auth-tlscontext value  Overwrite TLS configuration when authenticating with registries, e.g. --registry-auth-tlscontext host=https://myserver:2376,insecure=false,ca=/path/to/my/ca.crt,cert=/path/to/my/cert.crt,key=/path/to/my/key.crt
    
 ```
 <!---GENERATE_END-->
@@ -88,8 +88,8 @@ OPTIONS:
 The build consists of the following key elements:
 
 * [frontend definition](#frontend): parses the build descriptor, e.g. dockerfile
-* [local sources](#local_sources): sets relevant directories and files passed to the build
-* [frontend options](#frontend_options): options that are relevant to the particular frontend
+* [local sources](#local-sources): sets relevant directories and files passed to the build
+* [frontend options](#frontend-options): options that are relevant to the particular frontend
 * [output](#output): defines what format of output to use and where to place it
 * [cache](#cache): defines where to export the cache generated during the build to, or where to import from
 
@@ -183,7 +183,7 @@ $ buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=.
 #### gateway-specific options
 
 The `gateway.v0` frontend passes all of its `--opt` options on to the OCI image that is called to convert the
-input to LLB. The one requires option is `--opt source=<image>`, which defines the OCI image to use to convert
+input to LLB. The one required option is `--opt source=<image>`, which defines the OCI image to use to convert
 the input to LLB.
 
 For example:
