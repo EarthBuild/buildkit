@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/pkg/errors"
@@ -69,6 +71,7 @@ func (sm *Manager) Any(ctx context.Context, g Group, f func(context.Context, str
 			if lastErr != nil {
 				return lastErr
 			}
+			fmt.Printf("no active sessions at %v -- called by %s\n", time.Now(), debug.Stack())
 			return errors.Errorf("no active sessions")
 		}
 
