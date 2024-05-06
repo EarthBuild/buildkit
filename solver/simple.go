@@ -29,13 +29,21 @@ type simpleSolver struct {
 	solver          *Solver
 	parallelGuard   *parallelGuard
 	resultCache     resultCache
+	cacheManager    CacheManager
 	cacheKeyManager *cacheKeyManager
 	mu              sync.Mutex
 }
 
-func newSimpleSolver(resolveOpFunc ResolveOpFunc, commitRefFunc CommitRefFunc, solver *Solver, cache resultCache) *simpleSolver {
+var (
+	depMu      = sync.Mutex{}
+	printMu    = sync.Mutex{}
+	depResults = map[string]CachedResult{}
+)
+
+func newSimpleSolver(resolveOpFunc ResolveOpFunc, commitRefFunc CommitRefFunc, solver *Solver, cache resultCache, cacheManager CacheManager) *simpleSolver {
 	return &simpleSolver{
 		cacheKeyManager: newCacheKeyManager(),
+		cacheManager:    cacheManager,
 		resultCache:     cache,
 		parallelGuard:   newParallelGuard(time.Millisecond * 100),
 		resolveOpFunc:   resolveOpFunc,
@@ -57,15 +65,159 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 			return nil, errors.Errorf("digest %s not found", d)
 		}
 
-		res, expCacheKeys, err := s.buildOne(ctx, d, vertex, job, e)
+		res, err := s.buildLegacy(ctx, d, vertex, job, e)
 		if err != nil {
 			return nil, err
 		}
 
-		ret = NewCachedResult(res, expCacheKeys)
+		ret = res
 	}
 
 	return ret, nil
+}
+
+func (s *simpleSolver) buildLegacy(ctx context.Context, d digest.Digest, vtx Vertex, job *Job, e Edge) (CachedResult, error) {
+
+	// Ensure we don't have multiple threads working on the same digest.
+	wait, done := s.parallelGuard.acquire(ctx, d.String())
+	defer done()
+	<-wait
+
+	st := s.state(vtx, job)
+
+	// CacheMap populates required fields in SourceOp.
+	cm, err := st.op.CacheMap(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	cacheKey, inputs, err := s.preprocessInputsLegacy(ctx, st, cm.CacheMap, vtx)
+	if err != nil {
+		return nil, err
+	}
+
+	// printMu.Lock()
+	// spew.Dump(cacheKey.TraceFields())
+	// printMu.Unlock()
+
+	keys, err := st.op.Cache().Query(nil, 0, cm.Digest, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	cacheRecords := map[string]*CacheRecord{}
+	for _, k := range keys {
+		k.vtx = vtx.Digest()
+		records, err := st.op.Cache().Records(ctx, k)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range records {
+			cacheRecords[r.ID] = r
+		}
+	}
+
+	fmt.Println("cache records", len(cacheRecords))
+
+	if len(cacheRecords) > 0 {
+		recs := make([]*CacheRecord, 0, len(cacheRecords))
+		for _, r := range cacheRecords {
+			recs = append(recs, r)
+		}
+
+		rec := getBestResult(recs)
+
+		res, err := st.op.LoadCache(ctx, rec)
+		if err != nil {
+			return nil, err
+		}
+
+		fmt.Println("Using cache result")
+		return NewCachedResult(res, []ExportableCacheKey{{CacheKey: rec.key, Exporter: &exporter{k: rec.key, record: rec}}}), nil
+	}
+
+	results, subExporters, err := st.op.Exec(ctx, toResultSlice(inputs))
+	if err != nil {
+		return nil, err
+	}
+
+	res := results[0]
+
+	var exporters []CacheExporter
+
+	ck, err := st.op.Cache().Save(cacheKey, res, time.Now())
+	if err != nil {
+		return nil, err
+	}
+
+	if _, ok := ck.Exporter.(*exporter); ok {
+		// TODO: This is used in the cache exporter (secondary exporters)
+		// exp.edge = e
+	}
+
+	exps := make([]CacheExporter, 0, len(subExporters))
+	for _, exp := range subExporters {
+		exps = append(exps, exp.Exporter)
+	}
+
+	exporters = append(exporters, ck.Exporter)
+	exporters = append(exporters, exps...)
+
+	ek := ExportableCacheKey{
+		CacheKey: cacheKey,
+		Exporter: &mergedExporter{exporters: exporters},
+	}
+
+	cachedResult := NewCachedResult(res, []ExportableCacheKey{ek})
+
+	depMu.Lock()
+	depResults[vtx.Digest().String()] = cachedResult
+	depMu.Unlock()
+
+	return cachedResult, nil
+}
+
+func (s *simpleSolver) preprocessInputsLegacy(ctx context.Context, st *state, cm *CacheMap, vtx Vertex) (*CacheKey, []CachedResult, error) {
+
+	numInputs := len(vtx.Inputs())
+
+	if numInputs == 0 {
+		return NewCacheKey(cm.Digest, vtx.Digest(), 0), nil, nil
+	}
+
+	deps := make([][]CacheKeyWithSelector, numInputs)
+
+	var results []CachedResult // This wasn't working with "make" & up-front length.
+	for i, input := range vtx.Inputs() {
+		depMu.Lock()
+		result, ok := depResults[input.Vertex.Digest().String()]
+		depMu.Unlock()
+		if !ok {
+			return nil, nil, errors.New("result not found")
+		}
+
+		results = append(results, result)
+
+		for _, k := range result.CacheKeys() {
+			deps[i] = append(deps[i], CacheKeyWithSelector{CacheKey: k, Selector: cm.Deps[i].Selector})
+		}
+
+		if cm.Deps[i].ComputeDigestFunc != nil || cm.Deps[i].PreprocessFunc != nil {
+			v, err := st.op.CalcSlowCache(ctx, 0, cm.Deps[i].PreprocessFunc, cm.Deps[i].ComputeDigestFunc, result)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			slowKey := NewCacheKey(v, "", -1)
+			expCacheKey := &ExportableCacheKey{CacheKey: slowKey, Exporter: &exporter{k: slowKey}}
+			deps[i] = append(deps[i], CacheKeyWithSelector{CacheKey: *expCacheKey})
+		}
+	}
+
+	k := NewCacheKey(cm.Digest, vtx.Digest(), 0)
+	k.deps = deps
+
+	return k, results, nil
 }
 
 func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Vertex, job *Job, e Edge) (Result, []ExportableCacheKey, error) {

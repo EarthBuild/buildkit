@@ -281,7 +281,7 @@ func NewSolver(opts SolverOpt) *Solver {
 	if err != nil {
 		panic(err) // TODO: Handle error appropriately once the new solver code is moved.
 	}
-	simple := newSimpleSolver(opts.ResolveOpFunc, opts.CommitRefFunc, jl, c)
+	simple := newSimpleSolver(opts.ResolveOpFunc, opts.CommitRefFunc, jl, c, opts.DefaultCache)
 	jl.simple = simple
 
 	jl.s = newScheduler(jl)
