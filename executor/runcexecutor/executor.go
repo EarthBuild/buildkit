@@ -3,10 +3,12 @@ package runcexecutor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"syscall"
@@ -539,6 +541,7 @@ func (k procKiller) Cleanup() {
 // otherwise for `runc exec` we will read the pid from a pidfile and then
 // send the signal directly that process.
 func (k procKiller) Kill(ctx context.Context) (err error) {
+	fmt.Printf("%v Kill called by %s\n", time.Now(), debug.Stack())
 	bklog.G(ctx).Debugf("sending sigkill to process in container %s", k.id)
 	defer func() {
 		if err != nil {
