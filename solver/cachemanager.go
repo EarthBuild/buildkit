@@ -121,6 +121,9 @@ func (c *cacheManager) Query(deps []CacheKeyWithSelector, input Index, dgst dige
 	}
 
 	if len(deps) == 0 {
+		if dgst == digest.Digest(debugDigest) {
+			fmt.Println("Checking if root key exists", rootKey(dgst, output))
+		}
 		if !c.backend.Exists(rootKey(dgst, output).String()) {
 			return nil, nil
 		}
@@ -309,6 +312,10 @@ func (c *cacheManager) Save(k *CacheKey, r Result, createdAt time.Time) (rck *Ex
 		lg.WithError(rerr).WithField("return_cachekey", rck.TraceFields()).Trace("cache manager")
 	}()
 
+	if k.debug {
+		lg.Info("Saving result")
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -316,6 +323,11 @@ func (c *cacheManager) Save(k *CacheKey, r Result, createdAt time.Time) (rck *Ex
 	if err != nil {
 		return nil, err
 	}
+
+	if k.debug {
+		fmt.Println("Save getID", c.getID(k))
+	}
+
 	if err := c.backend.AddResult(c.getID(k), res); err != nil {
 		return nil, err
 	}
@@ -382,10 +394,16 @@ func (c *cacheManager) ensurePersistentKey(k *CacheKey) error {
 				Digest:   k.Digest(),
 				Selector: ck.Selector,
 			}
+			if k.debug {
+				ck.CacheKey.CacheKey.debug = true
+			}
 			ckID := c.getID(ck.CacheKey.CacheKey)
 			if !c.backend.HasLink(ckID, l, id) {
 				if err := c.ensurePersistentKey(ck.CacheKey.CacheKey); err != nil {
 					return err
+				}
+				if k.debug {
+					fmt.Println("ensurePersisentKey AddLink", ckID, id)
 				}
 				if err := c.backend.AddLink(ckID, l, id); err != nil {
 					return err

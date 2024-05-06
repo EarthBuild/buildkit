@@ -136,6 +136,7 @@ func (s *Store) Load(id string, resultID string) (solver.CacheResult, error) {
 }
 
 func (s *Store) AddResult(id string, res solver.CacheResult) error {
+	fmt.Println("AddResult", id, res.ID)
 	return s.db.Update(func(tx *bolt.Tx) error {
 		_, err := tx.Bucket([]byte(linksBucket)).CreateBucketIfNotExists([]byte(id))
 		if err != nil {

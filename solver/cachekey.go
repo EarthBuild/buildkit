@@ -43,6 +43,8 @@ type CacheKey struct {
 	ids    map[*cacheManager]string
 
 	indexIDs []string
+
+	debug bool
 }
 
 func (ck *CacheKey) TraceFields() map[string]any {

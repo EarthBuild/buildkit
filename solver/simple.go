@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/tracing"
@@ -35,9 +36,10 @@ type simpleSolver struct {
 }
 
 var (
-	depMu      = sync.Mutex{}
-	printMu    = sync.Mutex{}
-	depResults = map[string]CachedResult{}
+	depMu       = sync.Mutex{}
+	printMu     = sync.Mutex{}
+	depResults  = map[string]CachedResult{}
+	debugDigest = "sha256:4eeaa0a0e2eb217e9e35404a781964714a63abadc4c275ef830117c01f3ab1f8"
 )
 
 func newSimpleSolver(resolveOpFunc ResolveOpFunc, commitRefFunc CommitRefFunc, solver *Solver, cache resultCache, cacheManager CacheManager) *simpleSolver {
@@ -96,44 +98,38 @@ func (s *simpleSolver) buildLegacy(ctx context.Context, d digest.Digest, vtx Ver
 		return nil, err
 	}
 
-	// printMu.Lock()
-	// spew.Dump(cacheKey.TraceFields())
-	// printMu.Unlock()
+	if cm.Digest.String() == debugDigest {
+		printMu.Lock()
+		fmt.Println("Checking cache")
+		spew.Dump(cacheKey.TraceFields())
+		printMu.Unlock()
+		cacheKey.debug = true
+	}
 
-	keys, err := st.op.Cache().Query(nil, 0, cm.Digest, 0)
+	records, err := st.op.Cache().Records(ctx, cacheKey)
 	if err != nil {
 		return nil, err
 	}
 
-	cacheRecords := map[string]*CacheRecord{}
-	for _, k := range keys {
-		k.vtx = vtx.Digest()
-		records, err := st.op.Cache().Records(ctx, k)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range records {
-			cacheRecords[r.ID] = r
-		}
-	}
+	printMu.Lock()
+	fmt.Println(vtx.Name())
+	fmt.Println("Cache records", len(records))
+	printMu.Unlock()
 
-	fmt.Println("cache records", len(cacheRecords))
-
-	if len(cacheRecords) > 0 {
-		recs := make([]*CacheRecord, 0, len(cacheRecords))
-		for _, r := range cacheRecords {
-			recs = append(recs, r)
-		}
-
-		rec := getBestResult(recs)
+	if len(records) > 0 {
+		rec := getBestResult(records)
 
 		res, err := st.op.LoadCache(ctx, rec)
 		if err != nil {
 			return nil, err
 		}
 
-		fmt.Println("Using cache result")
-		return NewCachedResult(res, []ExportableCacheKey{{CacheKey: rec.key, Exporter: &exporter{k: rec.key, record: rec}}}), nil
+		r := NewCachedResult(res, []ExportableCacheKey{{CacheKey: rec.key, Exporter: &exporter{k: rec.key, record: rec}}})
+		depMu.Lock()
+		depResults[vtx.Digest().String()] = r
+		depMu.Unlock()
+
+		return r, nil
 	}
 
 	results, subExporters, err := st.op.Exec(ctx, toResultSlice(inputs))
@@ -203,6 +199,7 @@ func (s *simpleSolver) preprocessInputsLegacy(ctx context.Context, st *state, cm
 		}
 
 		if cm.Deps[i].ComputeDigestFunc != nil || cm.Deps[i].PreprocessFunc != nil {
+			fmt.Println("Calc slow cache key")
 			v, err := st.op.CalcSlowCache(ctx, 0, cm.Deps[i].PreprocessFunc, cm.Deps[i].ComputeDigestFunc, result)
 			if err != nil {
 				return nil, nil, err
@@ -210,6 +207,10 @@ func (s *simpleSolver) preprocessInputsLegacy(ctx context.Context, st *state, cm
 
 			slowKey := NewCacheKey(v, "", -1)
 			expCacheKey := &ExportableCacheKey{CacheKey: slowKey, Exporter: &exporter{k: slowKey}}
+
+			st.op.Cache().Query([]CacheKeyWithSelector{{CacheKey: *expCacheKey}}, 0, cm.Digest, 0)
+			st.op.Cache().Query(append(deps[i], CacheKeyWithSelector{CacheKey: *expCacheKey}), 0, cm.Digest, 0)
+
 			deps[i] = append(deps[i], CacheKeyWithSelector{CacheKey: *expCacheKey})
 		}
 	}
@@ -304,10 +305,8 @@ func (s *simpleSolver) state(vertex Vertex, job *Job) *state {
 
 // createState creates a new state struct with required and placeholder values.
 func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
-	defaultCache := NewInMemoryCacheManager()
-
 	st := &state{
-		opts:         SolverOpt{DefaultCache: defaultCache, ResolveOpFunc: s.resolveOpFunc},
+		opts:         SolverOpt{DefaultCache: s.cacheManager, ResolveOpFunc: s.resolveOpFunc},
 		parents:      map[digest.Digest]struct{}{},
 		childVtx:     map[digest.Digest]struct{}{},
 		allPw:        map[progress.Writer]struct{}{},
@@ -317,7 +316,7 @@ func (s *simpleSolver) createState(vertex Vertex, job *Job) *state {
 		clientVertex: initClientVertex(vertex),
 		edges:        map[Index]*edge{},
 		index:        s.solver.index,
-		mainCache:    defaultCache,
+		mainCache:    s.cacheManager,
 		cache:        map[string]CacheManager{},
 		solver:       s.solver,
 		origDigest:   vertex.Digest(),
