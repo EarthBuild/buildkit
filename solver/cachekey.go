@@ -56,12 +56,13 @@ func (ck *CacheKey) TraceFields() map[string]any {
 	}
 
 	// don't recurse more than one level in showing deps
-	depsMap := make([]map[string]string, len(ck.deps))
+	depsMap := make([][]map[string]string, len(ck.deps))
 	for i, deps := range ck.deps {
-		depsMap[i] = map[string]string{}
-		for _, ck := range deps {
-			depsMap[i]["id"] = ck.CacheKey.ID
-			depsMap[i]["selector"] = ck.Selector.String()
+		depsMap[i] = make([]map[string]string, len(deps))
+		for j, ck := range deps {
+			depsMap[i][j] = map[string]string{}
+			depsMap[i][j]["id"] = ck.CacheKey.ID
+			depsMap[i][j]["selector"] = ck.Selector.String()
 		}
 	}
 
