@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -441,6 +442,9 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 			Stderr:      stderr,
 			StatsStream: statsStream, // earthly-specific
 		}, nil)
+		if execErr != nil {
+			fmt.Printf("%v args=%v got run err=%v (cause=%v) stack=%s\n", time.Now(), meta.Args, execErr, context.Cause(ctx), debug.Stack())
+		}
 	}
 
 	for i, out := range p.OutputRefs {

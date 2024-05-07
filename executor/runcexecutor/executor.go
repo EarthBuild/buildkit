@@ -156,10 +156,10 @@ func New(opt Opt, networkProviders map[pb.NetMode]network.Provider) (executor.Ex
 func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, mounts []executor.Mount, process executor.ProcessInfo, started chan<- struct{}) (rec resourcestypes.Recorder, err error) {
 	meta := process.Meta
 
-	go func() {
-		_ = <-ctx.Done()
-		fmt.Printf("%v Run %s %v context is done (err=%v)\n", time.Now(), id, meta.Args, ctx.Err())
-	}()
+	//go func() {
+	//	_ = <-ctx.Done()
+	//	fmt.Printf("%v Run %s %v context is done (run err=%v, context err=%v, cause=%v)\n", time.Now(), id, meta.Args, err, ctx.Err(), context.Cause(ctx))
+	//}()
 
 	startedOnce := sync.Once{}
 	done := make(chan error, 1)
@@ -618,7 +618,7 @@ type procHandle struct {
 // The goal is to allow for runc to gracefully shutdown when the request context
 // is cancelled.
 func runcProcessHandle(ctx context.Context, killer procKiller) (*procHandle, context.Context) {
-	fmt.Printf("runcProcessHandle called by %s\n", debug.Stack()) // called by L329
+	//fmt.Printf("runcProcessHandle called by %s\n", debug.Stack()) // called by L329
 	runcCtx, cancel := context.WithCancel(context.Background())
 	p := &procHandle{
 		ready:    make(chan struct{}),
