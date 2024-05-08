@@ -619,7 +619,10 @@ type procHandle struct {
 // is cancelled.
 func runcProcessHandle(ctx context.Context, killer procKiller) (*procHandle, context.Context) {
 	fmt.Printf("runcProcessHandle called by %s\n", debug.Stack())
-	runcCtx, cancel := context.WithCancel(context.Background())
+	runcCtx, cancelCause := context.WithCancelCause(context.Background())
+	cancel := func() {
+		cancelCause(fmt.Errorf("runcProcessHandle cancel"))
+	}
 	p := &procHandle{
 		ready:    make(chan struct{}),
 		ended:    make(chan struct{}),

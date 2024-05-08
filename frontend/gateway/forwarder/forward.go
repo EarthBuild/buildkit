@@ -350,6 +350,7 @@ func (r *ref) Evaluate(ctx context.Context) error {
 }
 
 func (r *ref) ReadFile(ctx context.Context, req client.ReadRequest) ([]byte, error) {
+	fmt.Printf("ref.ReadFile called\n")
 	m, err := r.getMountable(ctx)
 	if err != nil {
 		return nil, err
@@ -367,6 +368,7 @@ func (r *ref) ReadFile(ctx context.Context, req client.ReadRequest) ([]byte, err
 }
 
 func (r *ref) ReadDir(ctx context.Context, req client.ReadDirRequest) ([]*fstypes.Stat, error) {
+	fmt.Printf("ref.ReadDir called\n")
 	m, err := r.getMountable(ctx)
 	if err != nil {
 		return nil, err
@@ -389,11 +391,17 @@ func (r *ref) StatFile(ctx context.Context, req client.StatRequest) (*fstypes.St
 func (r *ref) getMountable(ctx context.Context) (snapshot.Mountable, error) {
 	rr, err := r.resultProxy.Result(ctx)
 	if err != nil {
+		fmt.Printf("getMountable here1 returning err=%v; ctxCause=%v\n", err, context.Cause(ctx))
 		return nil, r.c.wrapSolveError(err)
 	}
 	ref, ok := rr.Sys().(*worker.WorkerRef)
 	if !ok {
+		fmt.Printf("getMountable here2\n")
 		return nil, errors.Errorf("invalid ref: %T", rr.Sys())
 	}
-	return ref.ImmutableRef.Mount(ctx, true, r.session)
+	m, err := ref.ImmutableRef.Mount(ctx, true, r.session)
+	if err != nil {
+		fmt.Printf("getMountable here3 returning err=%v; ctxCause=%v\n", err, context.Cause(ctx))
+	}
+	return m, err
 }

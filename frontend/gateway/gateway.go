@@ -813,6 +813,7 @@ func (lbf *llbBridgeForwarder) ReadFile(ctx context.Context, req *pb.ReadFileReq
 
 	ref, err := lbf.getImmutableRef(ctx, req.Ref, req.FilePath)
 	if err != nil {
+		fmt.Printf("ReadFile here1 returned err=%v; ctxCause=%v\n", err, context.Cause(ctx))
 		return nil, err
 	}
 
@@ -830,12 +831,14 @@ func (lbf *llbBridgeForwarder) ReadFile(ctx context.Context, req *pb.ReadFileReq
 	if ref != nil {
 		m, err = ref.Mount(ctx, true, session.NewGroup(lbf.sid))
 		if err != nil {
+			fmt.Printf("ReadFile here2 returned err=%v; ctxCause=%v\n", err, context.Cause(ctx))
 			return nil, err
 		}
 	}
 
 	dt, err := cacheutil.ReadFile(ctx, m, newReq)
 	if err != nil {
+		fmt.Printf("ReadFile here3 returned err=%v; ctxCause=%v\n", err, context.Cause(ctx))
 		return nil, lbf.wrapSolveError(err)
 	}
 
@@ -847,6 +850,7 @@ func (lbf *llbBridgeForwarder) ReadDir(ctx context.Context, req *pb.ReadDirReque
 
 	ref, err := lbf.getImmutableRef(ctx, req.Ref, req.DirPath)
 	if err != nil {
+		fmt.Printf("ReadDir here1 returned err=%v; ctxCause=%v\n", err, context.Cause(ctx))
 		return nil, err
 	}
 
@@ -858,11 +862,13 @@ func (lbf *llbBridgeForwarder) ReadDir(ctx context.Context, req *pb.ReadDirReque
 	if ref != nil {
 		m, err = ref.Mount(ctx, true, session.NewGroup(lbf.sid))
 		if err != nil {
+			fmt.Printf("ReadDir here2 returned err=%v; ctxCause=%v\n", err, context.Cause(ctx))
 			return nil, err
 		}
 	}
 	entries, err := cacheutil.ReadDir(ctx, m, newReq)
 	if err != nil {
+		fmt.Printf("ReadDir here3 returned err=%v; ctxCause=%v\n", err, context.Cause(ctx))
 		return nil, lbf.wrapSolveError(err)
 	}
 

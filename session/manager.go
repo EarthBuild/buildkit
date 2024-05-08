@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -224,8 +225,8 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 		return errors.New("shutting down")
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancelCause := context.WithCancelCause(ctx)
+	defer cancelCause(fmt.Errorf("manager.go cancel1"))
 
 	opts = canonicalHeaders(opts)
 
@@ -246,7 +247,7 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 			name:      name,
 			sharedKey: sharedKey,
 			ctx:       ctx,
-			cancelCtx: cancel,
+			cancelCtx: func() { cancelCause(fmt.Errorf("manager.go cancel via session")) },
 			done:      make(chan struct{}),
 		},
 		cc:        cc,
@@ -286,8 +287,8 @@ func (sm *Manager) Get(ctx context.Context, id string, noWait bool) (Caller, err
 		id = p[1]
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancelCause := context.WithCancelCause(ctx)
+	defer cancelCause(fmt.Errorf("abasefbuasefou"))
 
 	go func() {
 		<-ctx.Done()

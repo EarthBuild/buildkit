@@ -2,6 +2,7 @@ package progress
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sort"
 	"sync"
@@ -186,7 +187,7 @@ func (pr *progressReader) append(pw *progressWriter) {
 }
 
 func pipe() (*progressReader, *progressWriter, func()) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	pr := &progressReader{
 		ctx:     ctx,
 		writers: make(map[*progressWriter]struct{}),
@@ -202,7 +203,7 @@ func pipe() (*progressReader, *progressWriter, func()) {
 	pw := &progressWriter{
 		reader: pr,
 	}
-	return pr, pw, cancel
+	return pr, pw, func() { cancel(fmt.Errorf("from pipe()")) }
 }
 
 func newWriter(pw *progressWriter) *progressWriter {

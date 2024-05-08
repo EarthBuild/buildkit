@@ -506,10 +506,10 @@ func (c *Controller) Session(stream controlapi.Control_SessionServer) error {
 	conn, closeCh, opts := grpchijack.Hijack(stream)
 	defer conn.Close()
 
-	ctx, cancel := context.WithCancel(stream.Context())
+	ctx, cancel := context.WithCancelCause(stream.Context())
 	go func() {
 		<-closeCh
-		cancel()
+		cancel(fmt.Errorf("control.go"))
 	}()
 
 	err := c.opt.SessionManager.HandleConn(ctx, conn, opts)

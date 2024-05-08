@@ -117,12 +117,12 @@ func newCall[T any](fn func(ctx context.Context) (T, error)) *call[T] {
 
 func (c *call[T]) run() {
 	defer c.closeProgressWriter()
-	ctx, cancel := context.WithCancel(c.ctx)
+	ctx, cancel := context.WithCancelCause(c.ctx)
 	defer func() {
-		fmt.Printf("%v flightcontrol calling cancel in 1 second\n", time.Now())
-		time.Sleep(time.Second)
-		fmt.Printf("%v flightcontrol calling cancel now\n", time.Now())
-		cancel()
+		//fmt.Printf("%v flightcontrol calling cancel in 1 second\n", time.Now())
+		//time.Sleep(time.Second)
+		//fmt.Printf("%v flightcontrol calling cancel now\n", time.Now())
+		cancel(fmt.Errorf("flightcontrol returning from c=%P", c))
 	}()
 	v, err := c.fn(ctx)
 	c.mu.Lock()

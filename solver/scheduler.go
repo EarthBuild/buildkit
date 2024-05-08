@@ -249,8 +249,8 @@ func (s *scheduler) build(ctx context.Context, edge Edge) (CachedResult, error) 
 	}
 	s.mu.Unlock()
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(fmt.Errorf("scheduler.go cancel"))
 
 	go func() {
 		<-ctx.Done()
