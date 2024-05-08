@@ -2,6 +2,7 @@ package flightcontrol
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"runtime"
 	"sort"
@@ -117,7 +118,12 @@ func newCall[T any](fn func(ctx context.Context) (T, error)) *call[T] {
 func (c *call[T]) run() {
 	defer c.closeProgressWriter()
 	ctx, cancel := context.WithCancel(c.ctx)
-	defer cancel()
+	defer func() {
+		fmt.Printf("%v flightcontrol calling cancel in 1 second\n", time.Now())
+		time.Sleep(time.Second)
+		fmt.Printf("%v flightcontrol calling cancel now\n", time.Now())
+		cancel()
+	}()
 	v, err := c.fn(ctx)
 	c.mu.Lock()
 	c.result = v

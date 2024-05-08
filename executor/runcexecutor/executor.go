@@ -618,7 +618,7 @@ type procHandle struct {
 // The goal is to allow for runc to gracefully shutdown when the request context
 // is cancelled.
 func runcProcessHandle(ctx context.Context, killer procKiller) (*procHandle, context.Context) {
-	//fmt.Printf("runcProcessHandle called by %s\n", debug.Stack()) // called by L329
+	fmt.Printf("runcProcessHandle called by %s\n", debug.Stack())
 	runcCtx, cancel := context.WithCancel(context.Background())
 	p := &procHandle{
 		ready:    make(chan struct{}),
