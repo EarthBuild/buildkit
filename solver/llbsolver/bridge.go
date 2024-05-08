@@ -257,6 +257,9 @@ func (rp *resultProxy) Provenance() interface{} {
 func (rp *resultProxy) Release(ctx context.Context) (err error) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
+	if rp.released {
+		panic("rp has already been released\n")
+	}
 	for _, res := range rp.errResults {
 		rerr := res.Release(ctx)
 		if rerr != nil {
