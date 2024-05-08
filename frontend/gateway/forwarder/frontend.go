@@ -2,6 +2,7 @@ package forwarder
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/moby/buildkit/frontend"
 	"github.com/moby/buildkit/frontend/gateway/client"
@@ -37,5 +38,6 @@ func (gf *GatewayForwarder) Solve(ctx context.Context, llbBridge frontend.Fronte
 		return nil, err
 	}
 
+	fmt.Printf("gf.Solve calling toFrontendResult\n")
 	return c.toFrontendResult(res)
 }

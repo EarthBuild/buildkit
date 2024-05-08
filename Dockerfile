@@ -40,6 +40,7 @@ FROM alpine-$TARGETARCH AS alpinebase
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:${XX_VERSION} AS xx
 
 # go base image
+#FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bookworm AS golatest
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS golatest
 
 # git stage is used for checking out remote repository sources
@@ -48,7 +49,8 @@ RUN apk add --no-cache git
 
 # gobuild is base stage for compiling go/cgo
 FROM golatest AS gobuild-base
-RUN apk add --no-cache file bash clang lld musl-dev pkgconfig git make
+RUN apk add --no-cache file bash clang lld musl-dev pkgconfig git make libseccomp-dev libseccomp-static
+#RUN apt update && apt install -y file bash clang lld build-essential git make libseccomp-dev
 COPY --link --from=xx / /
 
 # delve for debug variant
@@ -71,8 +73,8 @@ WORKDIR $GOPATH/src/github.com/opencontainers/runc
 ARG TARGETPLATFORM
 # gcc is only installed for libgcc
 # lld has issues building static binaries for ppc so prefer ld for it
-RUN set -e; xx-apk add musl-dev gcc libseccomp-dev libseccomp-static; \
-  [ "$(xx-info arch)" != "ppc64le" ] || XX_CC_PREFER_LINKER=ld xx-clang --setup-target-triple
+#RUN set -e; xx-apk add musl-dev gcc libseccomp-dev libseccomp-static; \
+#  [ "$(xx-info arch)" != "ppc64le" ] || XX_CC_PREFER_LINKER=ld xx-clang --setup-target-triple
 RUN --mount=from=runc-src,src=/usr/src/runc,target=. --mount=target=/root/.cache,type=cache \
   CGO_ENABLED=1 xx-go build -mod=vendor -ldflags '-extldflags -static' -tags 'apparmor seccomp netgo cgo static_build osusergo' -o /usr/bin/runc ./ && \
   xx-verify --static /usr/bin/runc
@@ -107,14 +109,13 @@ ARG BUILDKITD_TAGS
 ARG TARGETPLATFORM
 ARG GOBUILDFLAGS
 ARG VERIFYFLAGS="--static"
-ARG CGO_ENABLED=0
+ARG CGO_ENABLED=1
 ARG BUILDKIT_DEBUG
 ARG GOGCFLAGS=${BUILDKIT_DEBUG:+"all=-N -l"}
 RUN --mount=target=. --mount=target=/root/.cache,type=cache \
   --mount=target=/go/pkg/mod,type=cache \
   --mount=source=/tmp/.ldflags,target=/tmp/.ldflags,from=buildkit-version \
-  xx-go build ${GOBUILDFLAGS} -gcflags="${GOGCFLAGS}" -ldflags "$(cat /tmp/.ldflags) -extldflags '-static'" -tags "osusergo netgo static_build seccomp ${BUILDKITD_TAGS}" -o /usr/bin/buildkitd ./cmd/buildkitd && \
-  xx-verify ${VERIFYFLAGS} /usr/bin/buildkitd
+  xx-go build -race ${GOBUILDFLAGS} -gcflags="${GOGCFLAGS}" -tags "osusergo netgo static_build seccomp ${BUILDKITD_TAGS}" -o /usr/bin/buildkitd ./cmd/buildkitd
 
 FROM scratch AS binaries-linux
 COPY --link --from=runc /usr/bin/runc /buildkit-runc

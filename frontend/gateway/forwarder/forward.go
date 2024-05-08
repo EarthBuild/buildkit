@@ -205,6 +205,7 @@ func (c *BridgeClient) toFrontendResult(r *client.Result) (*frontend.Result, err
 		if !ok {
 			return nil, errors.Errorf("invalid reference type for forward %T", r)
 		}
+		fmt.Printf("calling acquireResultProxy\n")
 		return rr.acquireResultProxy(), nil
 	})
 	if err != nil {
