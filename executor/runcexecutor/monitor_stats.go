@@ -45,6 +45,9 @@ func writeStatsToStream(w io.Writer, stats *runc.Stats) error {
 }
 
 func (w *runcExecutor) monitorContainerStats(ctx context.Context, id string, sampleFrequency time.Duration, statsWriter io.WriteCloser) {
+}
+
+func (w *runcExecutor) monitorContainerStats2(ctx context.Context, id string, sampleFrequency time.Duration, statsWriter io.WriteCloser) {
 	numFailuresAllowed := 10
 	for {
 		// sleep at the top of the loop to give it time to start
