@@ -122,7 +122,7 @@ func (c *call[T]) run() {
 		//fmt.Printf("%v flightcontrol calling cancel in 1 second\n", time.Now())
 		//time.Sleep(time.Second)
 		//fmt.Printf("%v flightcontrol calling cancel now\n", time.Now())
-		cancel(fmt.Errorf("flightcontrol returning from c=%P", c))
+		cancel(fmt.Errorf("flightcontrol returning from c=%p", c))
 	}()
 	v, err := c.fn(ctx)
 	c.mu.Lock()
