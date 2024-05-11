@@ -844,6 +844,7 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		ContentStore:              w.ContentStore(),
 		HistoryConfig:             cfg.History,
 		RootDir:                   cfg.Root,
+		RegistryHosts:             resolverFn,
 	})
 }
 

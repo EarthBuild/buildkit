@@ -18,29 +18,41 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var ErrRefNotFound = errors.New("ref not found")
-
 // CommitRefFunc can be used to finalize a Result's ImmutableRef.
 type CommitRefFunc func(ctx context.Context, result Result) error
+
+// ResultSource can be any source (local or remote) that allows one to load a
+// Result using a cache key digest.
+type ResultSource interface {
+	Load(ctx context.Context, cacheKey digest.Digest) (Result, bool, error)
+}
 
 type simpleSolver struct {
 	resolveOpFunc   ResolveOpFunc
 	commitRefFunc   CommitRefFunc
 	solver          *Solver
 	parallelGuard   *parallelGuard
-	resultCache     resultCache
+	refIDStore      *RefIDStore
+	resultSource    ResultSource
 	cacheKeyManager *cacheKeyManager
 	mu              sync.Mutex
 }
 
-func newSimpleSolver(resolveOpFunc ResolveOpFunc, commitRefFunc CommitRefFunc, solver *Solver, cache resultCache) *simpleSolver {
+func newSimpleSolver(
+	resolveOpFunc ResolveOpFunc,
+	commitRefFunc CommitRefFunc,
+	solver *Solver,
+	refIDStore *RefIDStore,
+	resultSource ResultSource,
+) *simpleSolver {
 	return &simpleSolver{
 		cacheKeyManager: newCacheKeyManager(),
-		resultCache:     cache,
 		parallelGuard:   newParallelGuard(time.Millisecond * 100),
 		resolveOpFunc:   resolveOpFunc,
 		commitRefFunc:   commitRefFunc,
 		solver:          solver,
+		refIDStore:      refIDStore,
+		resultSource:    resultSource,
 	}
 }
 
@@ -49,7 +61,8 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 	// Ordered list of vertices to build.
 	digests, vertices := s.exploreVertices(e)
 
-	var ret CachedResult
+	var ret Result
+	var expKeys []ExportableCacheKey
 
 	for _, d := range digests {
 		vertex, ok := vertices[d]
@@ -57,20 +70,29 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 			return nil, errors.Errorf("digest %s not found", d)
 		}
 
-		res, expCacheKeys, err := s.buildOne(ctx, d, vertex, job, e)
+		res, cacheKey, err := s.buildOne(ctx, d, vertex, job, e)
 		if err != nil {
 			return nil, err
 		}
 
-		ret = NewCachedResult(res, expCacheKeys)
+		ret = res
+
+		// Hijack the CacheKey type in order to export a reference from the new cache key to the ref ID.
+		expKeys = append(expKeys, ExportableCacheKey{
+			CacheKey: &CacheKey{
+				ID:     res.ID(),
+				digest: cacheKey,
+			},
+			Exporter: nil, // We're not using an exporter here.
+		})
 	}
 
-	return ret, nil
+	return NewCachedResult(ret, expKeys), nil
 }
 
-func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Vertex, job *Job, e Edge) (Result, []ExportableCacheKey, error) {
+func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Vertex, job *Job, e Edge) (Result, digest.Digest, error) {
 	// Ensure we don't have multiple threads working on the same digest.
-	wait, done := s.parallelGuard.acquire(ctx, d.String())
+	wait, done := s.parallelGuard.acquire(ctx, d)
 	defer done()
 	<-wait
 
@@ -82,37 +104,33 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	// CacheMap populates required fields in SourceOp.
 	cm, err := st.op.CacheMap(ctx, int(e.Index))
 	if err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
 
 	inputs, err := s.preprocessInputs(ctx, st, vertex, cm.CacheMap, job)
 	if err != nil {
 		notifyError(ctx, st, false, err)
-		return nil, nil, err
+		return nil, "", err
 	}
 
-	cacheKey, err := s.cacheKeyManager.cacheKey(ctx, d.String())
+	cacheKey, err := s.cacheKeyManager.cacheKey(ctx, d)
 	if err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
 
-	v, ok, err := s.resultCache.get(ctx, cacheKey)
+	v, ok, err := s.resultSource.Load(ctx, cacheKey)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	expCacheKeys := []ExportableCacheKey{
-		{Exporter: &simpleExporter{cacheKey: cacheKey}},
+		return nil, "", err
 	}
 
 	if ok && v != nil {
 		notifyError(ctx, st, true, nil)
-		return v, expCacheKeys, nil
+		return v, cacheKey, nil
 	}
 
 	results, _, err := st.op.Exec(ctx, inputs)
 	if err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
 
 	// Ensure all results are finalized (committed to cache). It may be better
@@ -120,18 +138,18 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	for _, res := range results {
 		err = s.commitRefFunc(ctx, res)
 		if err != nil {
-			return nil, nil, err
+			return nil, "", err
 		}
 	}
 
 	res := results[int(e.Index)]
 
-	err = s.resultCache.set(ctx, cacheKey, res)
+	err = s.refIDStore.Set(ctx, cacheKey, res.ID())
 	if err != nil {
-		return nil, nil, err
+		return nil, "", err
 	}
 
-	return res, expCacheKeys, nil
+	return res, cacheKey, nil
 }
 
 func notifyError(ctx context.Context, st *state, cached bool, err error) {
@@ -222,9 +240,9 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 	// This struct is used to reconstruct a cache key from an LLB digest & all
 	// parents using consistent digests that depend on the full dependency chain.
 	scm := simpleCacheMap{
-		digest: cm.Digest.String(),
+		digest: cm.Digest,
 		deps:   make([]cacheMapDep, len(cm.Deps)),
-		inputs: make([]string, len(cm.Deps)),
+		inputs: make([]digest.Digest, len(cm.Deps)),
 	}
 
 	// By default we generate a cache key that's not salted as the keys need to
@@ -239,22 +257,22 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 
 	for i, in := range vertex.Inputs() {
 
-		digest := in.Vertex.Digest().String()
+		d := in.Vertex.Digest()
 
 		// Compute a cache key given the LLB digest value.
-		cacheKey, err := s.cacheKeyManager.cacheKey(ctx, digest)
+		cacheKey, err := s.cacheKeyManager.cacheKey(ctx, d)
 		if err != nil {
 			return nil, err
 		}
 
 		// Lookup the result for that cache key.
-		res, ok, err := s.resultCache.get(ctx, cacheKey)
+		res, ok, err := s.resultSource.Load(ctx, cacheKey)
 		if err != nil {
 			return nil, err
 		}
 
 		if !ok {
-			return nil, errors.Errorf("result not found for digest: %s", digest)
+			return nil, errors.Errorf("result not found for digest: %s", d)
 		}
 
 		dep := cm.Deps[i]
@@ -269,7 +287,7 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 
 		// Add selectors (usually file references) to the struct.
 		scm.deps[i] = cacheMapDep{
-			selector: dep.Selector.String(),
+			selector: dep.Selector,
 		}
 
 		// ComputeDigestFunc will usually checksum files. This is then used as
@@ -281,66 +299,66 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 				bklog.G(ctx).Warnf("failed to compute digest: %v", err)
 				return nil, err
 			} else {
-				scm.deps[i].computed = compDigest.String()
+				scm.deps[i].computed = compDigest
 			}
 		}
 
 		// Add input references to the struct as to link dependencies.
-		scm.inputs[i] = in.Vertex.Digest().String()
+		scm.inputs[i] = in.Vertex.Digest()
 
 		// Add the cached result to the input set. These inputs are used to
 		// reconstruct dependencies (mounts, etc.) for a new container run.
 		inputs = append(inputs, res)
 	}
 
-	s.cacheKeyManager.add(vertex.Digest().String(), &scm)
+	s.cacheKeyManager.add(vertex.Digest(), &scm)
 
 	return inputs, nil
 }
 
 type cacheKeyManager struct {
-	cacheMaps map[string]*simpleCacheMap
+	cacheMaps map[digest.Digest]*simpleCacheMap
 	mu        sync.Mutex
 }
 
 type cacheMapDep struct {
-	selector string
-	computed string
+	selector digest.Digest
+	computed digest.Digest
 }
 
 type simpleCacheMap struct {
-	digest string
-	inputs []string
+	digest digest.Digest
+	inputs []digest.Digest
 	deps   []cacheMapDep
 	salt   string
 }
 
 func newCacheKeyManager() *cacheKeyManager {
 	return &cacheKeyManager{
-		cacheMaps: map[string]*simpleCacheMap{},
+		cacheMaps: map[digest.Digest]*simpleCacheMap{},
 	}
 }
 
-func (m *cacheKeyManager) add(key string, s *simpleCacheMap) {
+func (m *cacheKeyManager) add(d digest.Digest, s *simpleCacheMap) {
 	m.mu.Lock()
-	m.cacheMaps[key] = s
+	m.cacheMaps[d] = s
 	m.mu.Unlock()
 }
 
 // cacheKey recursively generates a cache key based on a sequence of ancestor
 // operations & their cacheable values.
-func (m *cacheKeyManager) cacheKey(ctx context.Context, digest string) (string, error) {
+func (m *cacheKeyManager) cacheKey(ctx context.Context, d digest.Digest) (digest.Digest, error) {
 	h := sha256.New()
 
-	err := m.cacheKeyRecurse(ctx, digest, h)
+	err := m.cacheKeyRecurse(ctx, d, h)
 	if err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("%x", h.Sum(nil)), nil
+	return newDigest(fmt.Sprintf("%x", h.Sum(nil))), nil
 }
 
-func (m *cacheKeyManager) cacheKeyRecurse(ctx context.Context, d string, h hash.Hash) error {
+func (m *cacheKeyManager) cacheKeyRecurse(ctx context.Context, d digest.Digest, h hash.Hash) error {
 	m.mu.Lock()
 	c, ok := m.cacheMaps[d]
 	m.mu.Unlock()
@@ -359,13 +377,13 @@ func (m *cacheKeyManager) cacheKeyRecurse(ctx context.Context, d string, h hash.
 		}
 	}
 
-	io.WriteString(h, c.digest)
+	io.WriteString(h, c.digest.String())
 	for _, dep := range c.deps {
 		if dep.selector != "" {
-			io.WriteString(h, dep.selector)
+			io.WriteString(h, dep.selector.String())
 		}
 		if dep.computed != "" {
-			io.WriteString(h, dep.computed)
+			io.WriteString(h, dep.computed.String())
 		}
 	}
 
@@ -374,15 +392,15 @@ func (m *cacheKeyManager) cacheKeyRecurse(ctx context.Context, d string, h hash.
 
 type parallelGuard struct {
 	wait   time.Duration
-	active map[string]struct{}
+	active map[digest.Digest]struct{}
 	mu     sync.Mutex
 }
 
 func newParallelGuard(wait time.Duration) *parallelGuard {
-	return &parallelGuard{wait: wait, active: map[string]struct{}{}}
+	return &parallelGuard{wait: wait, active: map[digest.Digest]struct{}{}}
 }
 
-func (f *parallelGuard) acquire(ctx context.Context, d string) (<-chan struct{}, func()) {
+func (f *parallelGuard) acquire(ctx context.Context, d digest.Digest) (<-chan struct{}, func()) {
 
 	ch := make(chan struct{})
 
@@ -426,62 +444,30 @@ func (f *parallelGuard) acquire(ctx context.Context, d string) (<-chan struct{},
 	return ch, closer
 }
 
-type resultCache interface {
-	set(ctx context.Context, key string, r Result) error
-	get(ctx context.Context, key string) (Result, bool, error)
+// RefIDStore uses a BoltDB database to store links from computed cache keys to
+// worker ref IDs.
+type RefIDStore struct {
+	db         *bolt.DB
+	bucketName string
+	rootDir    string
 }
 
-type inMemCache struct {
-	cache map[string]Result
-	mu    sync.Mutex
-}
-
-func newInMemCache() *inMemCache {
-	return &inMemCache{cache: map[string]Result{}}
-}
-
-func (c *inMemCache) set(ctx context.Context, key string, r Result) error {
-	c.mu.Lock()
-	c.cache[key] = r
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *inMemCache) get(ctx context.Context, key string) (Result, bool, error) {
-	c.mu.Lock()
-	r, ok := c.cache[key]
-	c.mu.Unlock()
-	return r, ok, nil
-}
-
-var _ resultCache = &inMemCache{}
-
-type diskCache struct {
-	resultGetter workerResultGetter
-	db           *bolt.DB
-	bucketName   string
-	rootDir      string
-}
-
-type workerResultGetter interface {
-	Get(ctx context.Context, id string) (Result, error)
-}
-
-func newDiskCache(resultGetter workerResultGetter, rootDir string) (*diskCache, error) {
-	c := &diskCache{
-		bucketName:   "ids",
-		resultGetter: resultGetter,
-		rootDir:      rootDir,
+// NewRefIDStore creates and returns a new store and initializes a BoltDB
+// instance in the specified root directory.
+func NewRefIDStore(rootDir string) (*RefIDStore, error) {
+	r := &RefIDStore{
+		bucketName: "ids",
+		rootDir:    rootDir,
 	}
-	err := c.init()
+	err := r.init()
 	if err != nil {
 		return nil, err
 	}
-	return c, nil
+	return r, nil
 }
 
-func (c *diskCache) init() error {
-	db, err := bolt.Open(filepath.Join(c.rootDir, "ids.db"), 0755, nil)
+func (r *RefIDStore) init() error {
+	db, err := bolt.Open(filepath.Join(r.rootDir, "ids.db"), 0755, nil)
 	if err != nil {
 		return err
 	}
@@ -492,56 +478,42 @@ func (c *diskCache) init() error {
 	if err != nil {
 		return err
 	}
-	c.db = db
+	r.db = db
 	return nil
 }
 
-func (c *diskCache) set(ctx context.Context, key string, r Result) error {
-	return c.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(c.bucketName))
-		return b.Put([]byte(key), []byte(r.ID()))
+// Set a cache key digest to the value of the worker ref ID.
+func (r *RefIDStore) Set(ctx context.Context, key digest.Digest, id string) error {
+	return r.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(r.bucketName))
+		return b.Put([]byte(key), []byte(id))
 	})
 }
 
-func (c *diskCache) get(ctx context.Context, key string) (Result, bool, error) {
+// Get a worker ref ID given a cache key digest.
+func (r *RefIDStore) Get(ctx context.Context, cacheKey digest.Digest) (string, bool, error) {
 	var id string
-	err := c.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(c.bucketName))
-		id = string(b.Get([]byte(key)))
+	err := r.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(r.bucketName))
+		id = string(b.Get([]byte(cacheKey)))
 		return nil
 	})
 	if err != nil {
-		return nil, false, err
+		return "", false, err
 	}
 	if id == "" {
-		return nil, false, nil
+		return "", false, nil
 	}
-	res, err := c.resultGetter.Get(ctx, id)
-	if err != nil {
-		if errors.Is(err, ErrRefNotFound) {
-			if err := c.delete(ctx, key); err != nil {
-				bklog.G(ctx).Warnf("failed to delete cache key: %v", err)
-			}
-			return nil, false, nil
-		}
-		return nil, false, err
-	}
-	return res, true, nil
+	return id, true, nil
 }
 
-func (c *diskCache) delete(_ context.Context, key string) error {
-	return c.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(c.bucketName))
+func (r *RefIDStore) delete(_ context.Context, key string) error {
+	return r.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(r.bucketName))
 		return b.Delete([]byte(key))
 	})
 }
 
-var _ resultCache = &diskCache{}
-
-type simpleExporter struct {
-	cacheKey string
-}
-
-func (s *simpleExporter) ExportTo(ctx context.Context, t CacheExporterTarget, opt CacheExportOpt) ([]CacheExporterRecord, error) {
-	return nil, nil
+func newDigest(s string) digest.Digest {
+	return digest.NewDigestFromEncoded(digest.SHA256, s)
 }

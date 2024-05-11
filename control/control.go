@@ -11,6 +11,7 @@ import (
 
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
 	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/services/content/contentserver"
 	"github.com/distribution/reference"
 	"github.com/hashicorp/go-multierror"
@@ -69,6 +70,7 @@ type Opt struct {
 	ContentStore              *containerdsnapshot.Store
 	HistoryConfig             *config.HistoryConfig
 	RootDir                   string
+	RegistryHosts             docker.RegistryHosts
 }
 
 type Controller struct { // TODO: ControlService
@@ -107,6 +109,7 @@ func NewController(opt Opt) (*Controller, error) {
 		Entitlements:     opt.Entitlements,
 		HistoryQueue:     hq,
 		RootDir:          opt.RootDir,
+		RegistryHosts:    opt.RegistryHosts,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create solver")

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/containerd/remotes/docker"
 	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	slsa02 "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/v0.2"
 	controlapi "github.com/moby/buildkit/api/services/control"
@@ -80,6 +81,7 @@ type Opt struct {
 	HistoryQueue     *HistoryQueue
 	ResourceMonitor  *resources.Monitor
 	RootDir          string
+	RegistryHosts    docker.RegistryHosts
 }
 
 type Solver struct {
@@ -94,6 +96,8 @@ type Solver struct {
 	entitlements              []string
 	history                   *HistoryQueue
 	sysSampler                *resources.Sampler[*resourcetypes.SysSample]
+	registryHosts             docker.RegistryHosts
+	workerRemoteSource        *worker.WorkerRemoteSource
 }
 
 // Processor defines a processing function to be applied after solving, but
@@ -101,6 +105,13 @@ type Solver struct {
 type Processor func(ctx context.Context, result *Result, s *Solver, j *solver.Job, usage *resources.SysSampler) (*Result, error)
 
 func New(opt Opt) (*Solver, error) {
+	defaultWorker, err := opt.WorkerController.GetDefault()
+	if err != nil {
+		return nil, err
+	}
+
+	remoteSource := worker.NewWorkerRemoteSource(defaultWorker)
+
 	s := &Solver{
 		workerController:          opt.WorkerController,
 		resolveWorker:             defaultResolver(opt.WorkerController),
@@ -111,6 +122,8 @@ func New(opt Opt) (*Solver, error) {
 		sm:                        opt.SessionManager,
 		entitlements:              opt.Entitlements,
 		history:                   opt.HistoryQueue,
+		registryHosts:             opt.RegistryHosts,
+		workerRemoteSource:        remoteSource,
 	}
 
 	sampler, err := resources.NewSysSampler()
@@ -119,12 +132,22 @@ func New(opt Opt) (*Solver, error) {
 	}
 	s.sysSampler = sampler
 
+	refIDStore, err := solver.NewRefIDStore(opt.RootDir)
+	if err != nil {
+		return nil, err
+	}
+
+	sources := worker.NewCombinedResultSource(
+		worker.NewWorkerResultSource(opt.WorkerController, refIDStore),
+		remoteSource,
+	)
+
 	s.solver = solver.NewSolver(solver.SolverOpt{
-		ResolveOpFunc:      s.resolver(),
-		DefaultCache:       opt.CacheManager,
-		WorkerResultGetter: worker.NewWorkerResultGetter(opt.WorkerController),
-		CommitRefFunc:      worker.FinalizeRef,
-		RootDir:            opt.RootDir,
+		ResolveOpFunc: s.resolver(),
+		DefaultCache:  opt.CacheManager,
+		ResultSource:  sources,
+		CommitRefFunc: worker.FinalizeRef,
+		RefIDStore:    refIDStore,
 	})
 	return s, nil
 }
@@ -148,6 +171,10 @@ func (s *Solver) bridge(b solver.Builder) *provenanceBridge {
 		resolveCacheImporterFuncs: s.resolveCacheImporterFuncs,
 		cms:                       map[string]solver.CacheManager{},
 		sm:                        s.sm,
+		registryHosts:             s.registryHosts,
+		workerRemoteSource:        s.workerRemoteSource,
+		importDone:                map[string]chan struct{}{},
+		importMu:                  sync.Mutex{},
 	}}
 }
 
@@ -557,16 +584,17 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		return nil, err
 	}
 
-	cacheExporters, inlineCacheExporter := splitCacheExporters(exp.CacheExporters)
-
+	cacheExporters, _ := splitCacheExporters(exp.CacheExporters)
 	var exporterResponse map[string]string
 	if e := exp.Exporter; e != nil {
-		meta, err := runInlineCacheExporter(ctx, e, inlineCacheExporter, j, cached)
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range meta {
-			inp.AddMeta(k, v)
+		if hasInlineCacheExporter(exp.CacheExporters) {
+			meta, err := earthlyInlineCache(ctx, j, e, cached)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed prepare inline cache")
+			}
+			for k, v := range meta {
+				inp.AddMeta(k, v)
+			}
 		}
 
 		if err := inBuilderContext(ctx, j, e.Name(), j.SessionID+"-export", func(ctx context.Context, _ session.Group) error {
@@ -577,6 +605,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		}
 	}
 
+	// Deprecated. Can be removed later.
 	cacheExporterResponse, err := runCacheExporters(ctx, cacheExporters, j, cached, inp)
 	if err != nil {
 		return nil, err
@@ -602,6 +631,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	}, nil
 }
 
+// Deprecated. Can be removed later.
 func runCacheExporters(ctx context.Context, exporters []RemoteCacheExporter, j *solver.Job, cached *result.Result[solver.CachedResult], inp *result.Result[cache.ImmutableRef]) (map[string]string, error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	g := session.NewGroup(j.SessionID)
@@ -654,6 +684,7 @@ func runCacheExporters(ctx context.Context, exporters []RemoteCacheExporter, j *
 	return cacheExporterResponse, nil
 }
 
+// Deprecated. Can be removed later.
 func runInlineCacheExporter(ctx context.Context, e exporter.ExporterInstance, inlineExporter *RemoteCacheExporter, j *solver.Job, cached *result.Result[solver.CachedResult]) (map[string][]byte, error) {
 	meta := map[string][]byte{}
 	if inlineExporter == nil {
@@ -835,6 +866,7 @@ func asInlineCache(e remotecache.Exporter) (inlineCacheExporter, bool) {
 	return ie, ok
 }
 
+// Deprecated. Can be removed later.
 func inlineCache(ctx context.Context, e remotecache.Exporter, res solver.CachedResult, compressionopt compression.Config, g session.Group) ([]byte, error) {
 	ie, ok := asInlineCache(e)
 	if !ok {
