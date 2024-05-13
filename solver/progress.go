@@ -15,6 +15,7 @@ import (
 )
 
 func (j *Job) Status(ctx context.Context, statsStream bool, ch chan *client.SolveStatus) error {
+	//fmt.Printf("job.Status called by %s\n", debug.Stack())
 	vs := &vertexStream{cache: map[digest.Digest]*client.Vertex{}, wasCached: make(map[digest.Digest]struct{})}
 	pr := j.pr.Reader(ctx)
 	defer func() {
@@ -23,6 +24,8 @@ func (j *Job) Status(ctx context.Context, statsStream bool, ch chan *client.Solv
 		}
 		close(ch)
 	}()
+
+	// If this part is enabled (i.e. we filter out statsStream data), context cancel error does not happen.
 
 	if !statsStream { // earthly-specific: don't stream stats back to old clients (which will cause them to print binary data to stderr)
 		pr = progress.NewFilteredReader(pr, func(ctx context.Context, p *progress.Progress) (bool, error) {
@@ -41,12 +44,14 @@ func (j *Job) Status(ctx context.Context, statsStream bool, ch chan *client.Solv
 			if err == io.EOF {
 				return nil
 			}
+			//fmt.Printf("pr.Read got an err=%v\n", err)
 			return err
 		}
 		ss := &client.SolveStatus{}
 		for _, p := range p {
 			switch v := p.Sys.(type) {
 			case client.Vertex:
+				//fmt.Printf("got a client.Vertex: %+v\n", v)
 				ss.Vertexes = append(ss.Vertexes, vs.append(v)...)
 
 			case progress.Status:
@@ -116,9 +121,18 @@ type vertexStream struct {
 
 func (vs *vertexStream) append(v client.Vertex) []*client.Vertex {
 	var out []*client.Vertex
+	//fmt.Printf("adding %s to cache: %+v\n", v.Digest, v)
 	vs.cache[v.Digest] = &v
+	//if v.Started != nil {
+	//	if v.Completed == nil {
+	//		fmt.Printf("%s is in progress; lets hope we get a completed update\n", v.Digest)
+	//	} else {
+	//		fmt.Printf("%s has completed\n", v.Digest)
+	//	}
+	//}
 	if v.Started != nil {
 		for _, inp := range v.Inputs {
+			//fmt.Printf("inp %+v\n", inp)
 			if inpv, ok := vs.cache[inp]; ok {
 				if !inpv.Cached && inpv.Completed == nil {
 					inpv.Cached = true
@@ -131,6 +145,7 @@ func (vs *vertexStream) append(v client.Vertex) []*client.Vertex {
 		}
 	}
 	if v.Cached {
+		//fmt.Printf("marking %s as cached\n", v.Digest)
 		vs.markCached(v.Digest)
 	}
 
@@ -156,7 +171,8 @@ func (vs *vertexStream) encore() []*client.Vertex {
 			now := time.Now()
 			v.Completed = &now
 			if _, ok := vs.wasCached[v.Digest]; !ok && v.Error == "" {
-				v.Error = context.Canceled.Error()
+				//fmt.Printf("setting context.Canceled.Error() here; something is bad with %+v\n", v)
+				v.Error = context.Canceled.Error() // THIS IS THE ERROR
 			}
 			out = append(out, v)
 		}

@@ -468,6 +468,7 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 }
 
 func (c *Controller) Status(req *controlapi.StatusRequest, stream controlapi.Control_StatusServer) error {
+	//fmt.Printf("controller.Status called by %s\n", debug.Stack())
 	if err := sendTimestampHeader(stream); err != nil {
 		return err
 	}
@@ -487,10 +488,12 @@ func (c *Controller) Status(req *controlapi.StatusRequest, stream controlapi.Con
 		for {
 			ss, ok := <-ch
 			if !ok {
+				//fmt.Printf("ch is empty, return nil\n")
 				return nil
 			}
 			for _, sr := range ss.Marshal() {
 				if err := stream.SendMsg(sr); err != nil {
+					//fmt.Printf("failed to send message err=%v\n", err)
 					return err
 				}
 			}

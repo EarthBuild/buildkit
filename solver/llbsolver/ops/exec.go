@@ -413,6 +413,7 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 
 	// earthly-specific
 	statsStream, statsFlush := logs.NewStatsStreams(ctx, os.Getenv("BUILDKIT_DEBUG_EXEC_OUTPUT") == "1")
+	defer statsStream.Close()
 	defer func() {
 		if err != nil {
 			statsFlush()

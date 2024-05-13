@@ -32,10 +32,12 @@ func FromContext(ctx context.Context, opts ...WriterOption) WriterFactory {
 		pw, ok := v.(*progressWriter)
 		if !ok {
 			if pw, ok := v.(*MultiWriter); ok {
+				//fmt.Printf("returning an existing MultiWriter\n")
 				return pw, true, ctx
 			}
 			return &noOpWriter{}, false, ctx
 		}
+		//fmt.Printf("returning an newWriter\n")
 		pw = newWriter(pw)
 		for _, o := range opts {
 			o(pw)
@@ -116,6 +118,7 @@ type progressReader struct {
 }
 
 func (pr *progressReader) Read(ctx context.Context) ([]*Progress, error) {
+	//fmt.Printf("Read called by %s\n", debug.Stack())
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -229,6 +232,11 @@ func (pw *progressWriter) Write(id string, v interface{}) error {
 	if pw.done {
 		return errors.Errorf("writing %s to closed progress writer", id)
 	}
+	// import cycle
+	//if vl, ok := v.(client.VertexLog); ok && vl.Stream == 99 {
+	//	fmt.Printf("got a statstream to write\n")
+	//}
+	//fmt.Printf("calling writeRawProgress\n")
 	return pw.writeRawProgress(&Progress{
 		ID:        id,
 		Timestamp: time.Now(),
@@ -256,6 +264,7 @@ func (pw *progressWriter) WriteRawProgress(p *Progress) error {
 
 func (pw *progressWriter) writeRawProgress(p *Progress) error {
 	pw.reader.mu.Lock()
+	//fmt.Printf("saving to map under %s\n", p.ID)
 	pw.reader.dirty[p.ID] = p
 	pw.reader.cond.Broadcast()
 	pw.reader.mu.Unlock()
