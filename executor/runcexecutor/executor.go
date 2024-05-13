@@ -330,6 +330,8 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 		}
 	}
 
+	statsCtx, statsCancel := context.WithCancel(context.Background())
+
 	trace.SpanFromContext(ctx).AddEvent("Container created")
 	err = w.run(ctx, id, bundle, process, func() {
 		startedOnce.Do(func() {
@@ -338,7 +340,7 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 				close(started)
 			}
 			if process.StatsStream != nil {
-				go w.monitorContainerStats(ctx, id, w.sampleFrequency, process.StatsStream) // earthly-specific
+				go w.monitorContainerStats(statsCtx, id, w.sampleFrequency, process.StatsStream) // earthly-specific
 			}
 			if rec != nil {
 				rec.Start()
@@ -347,6 +349,7 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 	}, true)
 
 	releaseContainer := func(ctx context.Context) error {
+		statsCancel()
 		err := w.runc.Delete(ctx, id, &runc.DeleteOpts{})
 		err1 := namespace.Close()
 		if err == nil {
@@ -546,7 +549,7 @@ func (k procKiller) Cleanup() {
 // otherwise for `runc exec` we will read the pid from a pidfile and then
 // send the signal directly that process.
 func (k procKiller) Kill(ctx context.Context) (err error) {
-	fmt.Printf("%v Kill called by %s\n", time.Now(), debug.Stack())
+	//fmt.Printf("%v Kill called by %s\n", time.Now(), debug.Stack())
 	bklog.G(ctx).Debugf("sending sigkill to process in container %s", k.id)
 	defer func() {
 		if err != nil {

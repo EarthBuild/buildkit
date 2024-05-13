@@ -146,10 +146,13 @@ func (sw *streamWriter) write(dt []byte) (int, error) {
 	if len(dt) == 0 {
 		return 0, nil
 	}
+	//if sw.stream != StatsStream || sw.stream > 0 {
+	// This is causing the context canceled
 	sw.pw.Write(identity.NewID(), client.VertexLog{
 		Stream: sw.stream,
 		Data:   dt,
 	})
+	//}
 	if sw.printOutput {
 		switch sw.stream {
 		case 1:
