@@ -32,3 +32,14 @@ func headersStreamInterceptor(kv ...string) grpc.StreamClientInterceptor {
 		return streamer(ctx, desc, cc, method, opts...)
 	}
 }
+
+// WithDefaultGRPCDialer triggers the internal gRPC dialer to be used instead of the buildkit default.
+// This can be important when buildkit server is behind an HTTP connect proxy,
+// since the default dialer in gRPC already knows how to use those.
+func WithDefaultGRPCDialer() ClientOpt {
+	return &withDefaultGRPCDialer{}
+}
+
+type withDefaultGRPCDialer struct{}
+
+func (*withDefaultGRPCDialer) isClientOpt() {}
