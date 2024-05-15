@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/remotecache"
+	"github.com/moby/buildkit/cache/remotecache/registry"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter"
@@ -43,6 +45,7 @@ type llbBridge struct {
 	cms                       map[string]solver.CacheManager
 	cmsMu                     sync.Mutex
 	sm                        *session.Manager
+	registryHosts             docker.RegistryHosts
 }
 
 func (b *llbBridge) Warn(ctx context.Context, dgst digest.Digest, msg string, opts frontend.WarnOpts) error {
@@ -98,55 +101,87 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 			return nil, err
 		}
 	}
-	var cms []solver.CacheManager
-	for _, im := range cacheImports {
-		cmID, err := cmKey(im)
+
+	inlineCacheRemotes := map[digest.Digest]*solver.Remote{}
+
+	// Earthly custom inline cache handling.
+	for _, cacheImport := range cacheImports {
+		if cacheImport.Type != "registry" {
+			break
+		}
+
+		err := inBuilderContext(ctx, b.builder, "earthly inline cache", "", func(ctx context.Context, g session.Group) error {
+			inlineCacheRemotes, err = registry.EarthlyInlineCacheRemotes(ctx, b.sm, w, b.registryHosts, g, cacheImport.Attrs)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			bklog.G(ctx).Warnf("failed to import inline cache: %v", err)
+		}
+	}
+
+	if len(inlineCacheRemotes) > 0 {
+		for cacheKey, remote := range inlineCacheRemotes {
+			fmt.Println("adding cache key", cacheKey, len(remote.Descriptors))
+			// b.workerRemoteSource.AddResult(ctx, cacheKey, remote)
+		}
+	}
+
+	// MH: Old-school remote & inline cache imports disabled.
+	/*
+		var cms []solver.CacheManager
+		for _, im := range cacheImports {
+			cmID, err := cmKey(im)
+			if err != nil {
+				return nil, err
+			}
+			b.cmsMu.Lock()
+			var cm solver.CacheManager
+			if prevCm, ok := b.cms[cmID]; !ok {
+				func(cmID string, im gw.CacheOptionsEntry) {
+					cm = newLazyCacheManager(cmID, func() (solver.CacheManager, error) {
+						var cmNew solver.CacheManager
+						if err := inBuilderContext(context.TODO(), b.builder, "importing cache manifest from "+cmID, "", func(ctx context.Context, g session.Group) error {
+							resolveCI, ok := b.resolveCacheImporterFuncs[im.Type]
+							if !ok {
+								return errors.Errorf("unknown cache importer: %s", im.Type)
+							}
+							ci, desc, err := resolveCI(ctx, g, im.Attrs)
+							if err != nil {
+								return errors.Wrapf(err, "failed to configure %v cache importer", im.Type)
+							}
+							cmNew, err = ci.Resolve(ctx, desc, cmID, w)
+							return err
+						}); err != nil {
+							bklog.G(ctx).Debugf("error while importing cache manifest from cmId=%s: %v", cmID, err)
+							return nil, err
+						}
+						return cmNew, nil
+					})
+
+					cmInst := cm
+					eg.Go(func() error {
+						if lcm, ok := cmInst.(*lazyCacheManager); ok {
+							lcm.wait()
+						}
+						return nil
+					})
+				}(cmID, im)
+				b.cms[cmID] = cm
+			} else {
+				cm = prevCm
+			}
+			cms = append(cms, cm)
+			b.cmsMu.Unlock()
+		}
+		err = eg.Wait()
 		if err != nil {
 			return nil, err
 		}
-		b.cmsMu.Lock()
-		var cm solver.CacheManager
-		if prevCm, ok := b.cms[cmID]; !ok {
-			func(cmID string, im gw.CacheOptionsEntry) {
-				cm = newLazyCacheManager(cmID, func() (solver.CacheManager, error) {
-					var cmNew solver.CacheManager
-					if err := inBuilderContext(context.TODO(), b.builder, "importing cache manifest from "+cmID, "", func(ctx context.Context, g session.Group) error {
-						resolveCI, ok := b.resolveCacheImporterFuncs[im.Type]
-						if !ok {
-							return errors.Errorf("unknown cache importer: %s", im.Type)
-						}
-						ci, desc, err := resolveCI(ctx, g, im.Attrs)
-						if err != nil {
-							return errors.Wrapf(err, "failed to configure %v cache importer", im.Type)
-						}
-						cmNew, err = ci.Resolve(ctx, desc, cmID, w)
-						return err
-					}); err != nil {
-						bklog.G(ctx).Debugf("error while importing cache manifest from cmId=%s: %v", cmID, err)
-						return nil, err
-					}
-					return cmNew, nil
-				})
+	*/
 
-				cmInst := cm
-				eg.Go(func() error {
-					if lcm, ok := cmInst.(*lazyCacheManager); ok {
-						lcm.wait()
-					}
-					return nil
-				})
-			}(cmID, im)
-			b.cms[cmID] = cm
-		} else {
-			cm = prevCm
-		}
-		cms = append(cms, cm)
-		b.cmsMu.Unlock()
-	}
-	err = eg.Wait()
-	if err != nil {
-		return nil, err
-	}
 	dpc := &detectPrunedCacheID{}
 
 	edge, err := Load(ctx, def, polEngine, dpc.Load, ValidateEntitlements(ent), WithCacheSources(cms), NormalizeRuntimePlatforms(), WithValidateCaps())

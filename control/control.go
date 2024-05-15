@@ -109,6 +109,7 @@ func NewController(opt Opt) (*Controller, error) {
 		Entitlements:     opt.Entitlements,
 		HistoryQueue:     hq,
 		RootDir:          opt.RootDir,
+		RegistryHosts:    opt.RegistryHosts,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create solver")

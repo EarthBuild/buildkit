@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/containerd/remotes/docker"
 	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	slsa02 "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/v0.2"
 	controlapi "github.com/moby/buildkit/api/services/control"
@@ -80,6 +81,7 @@ type Opt struct {
 	HistoryQueue     *HistoryQueue
 	ResourceMonitor  *resources.Monitor
 	RootDir          string
+	RegistryHosts    docker.RegistryHosts
 }
 
 type Solver struct {
@@ -94,6 +96,7 @@ type Solver struct {
 	entitlements              []string
 	history                   *HistoryQueue
 	sysSampler                *resources.Sampler[*resourcetypes.SysSample]
+	registryHosts             docker.RegistryHosts
 }
 
 // Processor defines a processing function to be applied after solving, but
@@ -111,6 +114,7 @@ func New(opt Opt) (*Solver, error) {
 		sm:                        opt.SessionManager,
 		entitlements:              opt.Entitlements,
 		history:                   opt.HistoryQueue,
+		registryHosts:             opt.RegistryHosts,
 	}
 
 	sampler, err := resources.NewSysSampler()
@@ -148,6 +152,7 @@ func (s *Solver) bridge(b solver.Builder) *provenanceBridge {
 		resolveCacheImporterFuncs: s.resolveCacheImporterFuncs,
 		cms:                       map[string]solver.CacheManager{},
 		sm:                        s.sm,
+		registryHosts:             s.registryHosts,
 	}}
 }
 
@@ -557,16 +562,27 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		return nil, err
 	}
 
-	cacheExporters, inlineCacheExporter := splitCacheExporters(exp.CacheExporters)
+	cacheExporters, _ := splitCacheExporters(exp.CacheExporters)
 
 	var exporterResponse map[string]string
 	if e := exp.Exporter; e != nil {
-		meta, err := runInlineCacheExporter(ctx, e, inlineCacheExporter, j, cached)
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range meta {
-			inp.AddMeta(k, v)
+		// MH: Old-school inline cache. Can be removed later.
+		// meta, err := runInlineCacheExporter(ctx, e, inlineCacheExporter, j, cached)
+		// if err != nil {
+		// 	return nil, err
+		// }
+		// for k, v := range meta {
+		// 	inp.AddMeta(k, v)
+		// }
+
+		if hasInlineCacheExporter(exp.CacheExporters) {
+			meta, err := earthlyInlineCache(ctx, j, e, cached)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed prepare inline cache")
+			}
+			for k, v := range meta {
+				inp.AddMeta(k, v)
+			}
 		}
 
 		if err := inBuilderContext(ctx, j, e.Name(), j.SessionID+"-export", func(ctx context.Context, _ session.Group) error {
