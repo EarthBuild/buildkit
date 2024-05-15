@@ -105,6 +105,10 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 
 	// Earthly custom inline cache handling.
 	for _, cacheImport := range cacheImports {
+		if true {
+			continue
+		}
+
 		if cacheImport.Type != "registry" {
 			break
 		}
