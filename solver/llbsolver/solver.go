@@ -575,7 +575,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		// 	inp.AddMeta(k, v)
 		// }
 
-		if hasInlineCacheExporter(exp.CacheExporters) && false {
+		if hasInlineCacheExporter(exp.CacheExporters) {
 			meta, err := earthlyInlineCache(ctx, j, e, cached)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed prepare inline cache")
