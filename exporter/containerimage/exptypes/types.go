@@ -11,6 +11,7 @@ const (
 	ExporterImageConfigDigestKey = "containerimage.config.digest"
 	ExporterImageDescriptorKey   = "containerimage.descriptor"
 	ExporterInlineCache          = "containerimage.inlinecache"
+	EarthlyInlineCache           = "earthly.inlinecache"
 	ExporterPlatformsKey         = "refs.platforms"
 )
 

@@ -10,6 +10,7 @@ import (
 	"github.com/distribution/reference"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/estargz"
@@ -17,6 +18,7 @@ import (
 	"github.com/moby/buildkit/util/resolver"
 	resolverconfig "github.com/moby/buildkit/util/resolver/config"
 	"github.com/moby/buildkit/util/resolver/limited"
+	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -93,6 +95,47 @@ func ResolveCacheExporterFunc(sm *session.Manager, hosts docker.RegistryHosts) r
 		}
 		return &exporter{remotecache.NewExporter(contentutil.FromPusher(pusher), refString, ociMediatypes, imageManifest, compressionConfig)}, nil
 	}
+}
+
+// EarthlyInlineCacheRemotes fetches a group of remote sources based on values
+// discovered in a remote image's inline-cache metadata field.
+func EarthlyInlineCacheRemotes(ctx context.Context, sm *session.Manager, w worker.Worker, hosts docker.RegistryHosts, g session.Group, attrs map[string]string) (map[digest.Digest]*solver.Remote, error) {
+	ref, err := canonicalizeRef(attrs[attrRef])
+	if err != nil {
+		return nil, err
+	}
+
+	refString := ref.String()
+
+	insecure := false
+	if v, ok := attrs[attrInsecure]; ok {
+		val, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse %s", attrInsecure)
+		}
+		insecure = val
+	}
+
+	scope, hosts := registryConfig(hosts, ref, "pull", insecure)
+	remote := resolver.DefaultPool.GetResolver(hosts, refString, scope, sm, g)
+
+	xref, desc, err := remote.Resolve(ctx, refString)
+	if err != nil {
+		return nil, err
+	}
+
+	fetcher, err := remote.Fetcher(ctx, xref)
+	if err != nil {
+		return nil, err
+	}
+
+	src := &withDistributionSourceLabel{
+		Provider: contentutil.FromFetcher(limited.Default.WrapFetcher(fetcher, refString)),
+		ref:      refString,
+		source:   w.ContentStore(),
+	}
+
+	return remotecache.EarthlyInlineCacheRemotes(ctx, src, desc, w)
 }
 
 func ResolveCacheImporterFunc(sm *session.Manager, cs content.Store, hosts docker.RegistryHosts) remotecache.ResolveCacheImporterFunc {

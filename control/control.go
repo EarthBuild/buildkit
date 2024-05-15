@@ -11,6 +11,7 @@ import (
 
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
 	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/services/content/contentserver"
 	"github.com/distribution/reference"
 	"github.com/hashicorp/go-multierror"
@@ -69,6 +70,7 @@ type Opt struct {
 	ContentStore              *containerdsnapshot.Store
 	HistoryConfig             *config.HistoryConfig
 	RootDir                   string
+	RegistryHosts             docker.RegistryHosts
 }
 
 type Controller struct { // TODO: ControlService
