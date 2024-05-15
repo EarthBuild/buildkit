@@ -52,6 +52,7 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		grpc.WithDefaultCallOptions(grpc_retry.WithBackoff(grpc_retry.BackoffExponentialWithJitter(10*time.Millisecond, 0.1))), //earthly
 	}
 	needDialer := true
+	useDefaultDialer := false // earthly-specific
 
 	var unary []grpc.UnaryClientInterceptor
 	var stream []grpc.StreamClientInterceptor
@@ -94,6 +95,11 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 			headersKV = h.kv
 		}
 
+		// earthly-specific
+		if _, ok := o.(*withDefaultGRPCDialer); ok {
+			useDefaultDialer = true
+		}
+
 		if opt, ok := o.(*withGRPCDialOption); ok {
 			customDialOptions = append(customDialOptions, opt.opt)
 		}
@@ -121,7 +127,7 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		stream = append(stream, otelgrpc.StreamClientInterceptor(otelgrpc.WithTracerProvider(tracerProvider), otelgrpc.WithPropagators(propagators)))
 	}
 
-	if needDialer {
+	if needDialer && !useDefaultDialer {
 		dialFn, err := resolveDialer(address)
 		if err != nil {
 			return nil, err
@@ -163,6 +169,14 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 	gopts = append(gopts, grpc.WithChainUnaryInterceptor(unary...))
 	gopts = append(gopts, grpc.WithChainStreamInterceptor(stream...))
 	gopts = append(gopts, customDialOptions...)
+
+	// earthly-specific
+	if useDefaultDialer {
+		split := strings.Split(address, "://")
+		if len(split) > 0 {
+			address = split[1]
+		}
+	}
 
 	conn, err := grpc.DialContext(ctx, address, gopts...)
 	if err != nil {
