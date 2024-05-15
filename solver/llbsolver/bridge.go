@@ -33,7 +33,6 @@ import (
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
 )
 
 type llbBridge struct {
@@ -84,7 +83,7 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	// TODO FIXME earthly-specific wait group is required to ensure the remotecache/registry's ResolveCacheImporterFunc can run
 	// which requires the session to remain open in order to get dockerhub (or any other registry) credentials.
 	// It seems like the cleaner approach is to bake this in somewhere into the edge or Load
-	eg, _ := errgroup.WithContext(ctx)
+	// eg, _ := errgroup.WithContext(ctx)
 
 	srcPol, err := loadSourcePolicy(b.builder)
 	if err != nil {
@@ -184,7 +183,7 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 
 	dpc := &detectPrunedCacheID{}
 
-	edge, err := Load(ctx, def, polEngine, dpc.Load, ValidateEntitlements(ent), WithCacheSources(cms), NormalizeRuntimePlatforms(), WithValidateCaps())
+	edge, err := Load(ctx, def, polEngine, dpc.Load, ValidateEntitlements(ent), NormalizeRuntimePlatforms(), WithValidateCaps())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load LLB")
 	}
