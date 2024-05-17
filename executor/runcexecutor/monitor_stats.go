@@ -53,7 +53,7 @@ func (w *runcExecutor) monitorContainerStats(ctx context.Context, id string, sam
 	for {
 		select {
 		case <-ctx.Done():
-			bklog.G(ctx).Infof("stats collection context done: %v", ctx.Err())
+			bklog.G(ctx).Debugf("stats collection context done: %v", ctx.Err())
 			return
 		case <-timer.C: // Initial sleep will give container the chance to start.
 			stats, err := w.runc.Stats(ctx, id)

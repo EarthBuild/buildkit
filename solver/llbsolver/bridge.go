@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/containerd/remotes/docker"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/remotecache"
+	"github.com/moby/buildkit/cache/remotecache/registry"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter"
@@ -31,7 +33,6 @@ import (
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
 )
 
 type llbBridge struct {
@@ -43,6 +44,10 @@ type llbBridge struct {
 	cms                       map[string]solver.CacheManager
 	cmsMu                     sync.Mutex
 	sm                        *session.Manager
+	registryHosts             docker.RegistryHosts
+	workerRemoteSource        *worker.WorkerRemoteSource
+	importDone                map[string]chan struct{}
+	importMu                  sync.Mutex
 }
 
 func (b *llbBridge) Warn(ctx context.Context, dgst digest.Digest, msg string, opts frontend.WarnOpts) error {
@@ -78,11 +83,6 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 		return nil, err
 	}
 
-	// TODO FIXME earthly-specific wait group is required to ensure the remotecache/registry's ResolveCacheImporterFunc can run
-	// which requires the session to remain open in order to get dockerhub (or any other registry) credentials.
-	// It seems like the cleaner approach is to bake this in somewhere into the edge or Load
-	eg, _ := errgroup.WithContext(ctx)
-
 	srcPol, err := loadSourcePolicy(b.builder)
 	if err != nil {
 		return nil, err
@@ -94,62 +94,13 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 		}
 
 		polEngine = sourcepolicy.NewEngine(pol)
-		if err != nil {
-			return nil, err
-		}
 	}
-	var cms []solver.CacheManager
-	for _, im := range cacheImports {
-		cmID, err := cmKey(im)
-		if err != nil {
-			return nil, err
-		}
-		b.cmsMu.Lock()
-		var cm solver.CacheManager
-		if prevCm, ok := b.cms[cmID]; !ok {
-			func(cmID string, im gw.CacheOptionsEntry) {
-				cm = newLazyCacheManager(cmID, func() (solver.CacheManager, error) {
-					var cmNew solver.CacheManager
-					if err := inBuilderContext(context.TODO(), b.builder, "importing cache manifest from "+cmID, "", func(ctx context.Context, g session.Group) error {
-						resolveCI, ok := b.resolveCacheImporterFuncs[im.Type]
-						if !ok {
-							return errors.Errorf("unknown cache importer: %s", im.Type)
-						}
-						ci, desc, err := resolveCI(ctx, g, im.Attrs)
-						if err != nil {
-							return errors.Wrapf(err, "failed to configure %v cache importer", im.Type)
-						}
-						cmNew, err = ci.Resolve(ctx, desc, cmID, w)
-						return err
-					}); err != nil {
-						bklog.G(ctx).Debugf("error while importing cache manifest from cmId=%s: %v", cmID, err)
-						return nil, err
-					}
-					return cmNew, nil
-				})
 
-				cmInst := cm
-				eg.Go(func() error {
-					if lcm, ok := cmInst.(*lazyCacheManager); ok {
-						lcm.wait()
-					}
-					return nil
-				})
-			}(cmID, im)
-			b.cms[cmID] = cm
-		} else {
-			cm = prevCm
-		}
-		cms = append(cms, cm)
-		b.cmsMu.Unlock()
-	}
-	err = eg.Wait()
-	if err != nil {
-		return nil, err
-	}
+	b.processImports(ctx, cacheImports, w)
+
 	dpc := &detectPrunedCacheID{}
 
-	edge, err := Load(ctx, def, polEngine, dpc.Load, ValidateEntitlements(ent), WithCacheSources(cms), NormalizeRuntimePlatforms(), WithValidateCaps())
+	edge, err := Load(ctx, def, polEngine, dpc.Load, ValidateEntitlements(ent), NormalizeRuntimePlatforms(), WithValidateCaps())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load LLB")
 	}
@@ -171,6 +122,57 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 		return nil, err
 	}
 	return res, nil
+}
+
+func (b *llbBridge) processImports(ctx context.Context, cacheImports []gw.CacheOptionsEntry, w worker.Worker) {
+	var importRefs []string
+
+	// Earthly custom inline cache handling. Other cache import types are ignored.
+	for _, cacheImport := range cacheImports {
+		if cacheImport.Type != "registry" {
+			continue
+		}
+
+		importRef := cacheImport.Attrs["ref"]
+		importRefs = append(importRefs, importRef)
+
+		b.importMu.Lock()
+		_, ok := b.importDone[importRef]
+		if ok {
+			b.importMu.Unlock()
+			continue
+		}
+		done := make(chan struct{})
+		b.importDone[importRef] = done
+		b.importMu.Unlock()
+
+		remotes := map[digest.Digest]*solver.Remote{}
+		name := fmt.Sprintf("importing cache manifest from %s", importRef)
+
+		err := inBuilderContext(ctx, b.builder, name, "", func(ctx context.Context, g session.Group) error {
+			var err error
+			remotes, err = registry.EarthlyInlineCacheRemotes(ctx, b.sm, w, b.registryHosts, g, cacheImport.Attrs)
+			return err
+		})
+		if err != nil {
+			bklog.G(ctx).Warnf("failed to import cache manifest from %s", importRef)
+		}
+
+		if len(remotes) > 0 {
+			for cacheKey, remote := range remotes {
+				b.workerRemoteSource.AddResult(ctx, cacheKey, remote)
+			}
+		}
+
+		close(done)
+	}
+
+	for _, importRef := range importRefs {
+		b.importMu.Lock()
+		done := b.importDone[importRef]
+		b.importMu.Unlock()
+		<-done
+	}
 }
 
 // getExporter is earthly specific code which extracts the configured exporter
