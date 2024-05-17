@@ -256,36 +256,37 @@ type Job struct {
 }
 
 type SolverOpt struct {
-	ResolveOpFunc ResolveOpFunc
-	DefaultCache  CacheManager
-	ResultSource  ResultSource
-	RefIDStore    *RefIDStore
-	CommitRefFunc CommitRefFunc
+	ResolveOpFunc      ResolveOpFunc
+	DefaultCache       CacheManager
+	WorkerResultGetter workerResultGetter
+	CommitRefFunc      CommitRefFunc
+	RootDir            string
 }
 
 func NewSolver(opts SolverOpt) *Solver {
 	if opts.DefaultCache == nil {
 		opts.DefaultCache = NewInMemoryCacheManager()
 	}
-	solver := &Solver{
+	jl := &Solver{
 		jobs:    make(map[string]*Job),
 		actives: make(map[digest.Digest]*state),
 		opts:    opts,
 		index:   newEdgeIndex(),
 	}
 
-	simple := newSimpleSolver(
-		opts.ResolveOpFunc,
-		opts.CommitRefFunc,
-		solver,
-		opts.RefIDStore,
-		opts.ResultSource,
-	)
-	solver.simple = simple
+	// TODO: This should be hoisted up a few layers as not to be bound to the
+	// original solver. For now, we just need a convenient place to initialize
+	// it once.
+	c, err := newDiskCache(opts.WorkerResultGetter, opts.RootDir)
+	if err != nil {
+		panic(err) // TODO: Handle error appropriately once the new solver code is moved.
+	}
+	simple := newSimpleSolver(opts.ResolveOpFunc, opts.CommitRefFunc, jl, c)
+	jl.simple = simple
 
-	solver.s = newScheduler(solver)
-	solver.updateCond = sync.NewCond(solver.mu.RLocker())
-	return solver
+	jl.s = newScheduler(jl)
+	jl.updateCond = sync.NewCond(jl.mu.RLocker())
+	return jl
 }
 
 func (jl *Solver) setEdge(e Edge, newEdge *edge) {

@@ -138,7 +138,6 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 
 		config := exptypes.ParseKey(inp.Metadata, exptypes.ExporterImageConfigKey, p)
 		inlineCache := exptypes.ParseKey(inp.Metadata, exptypes.ExporterInlineCache, p)
-		earthlyInlineCache := exptypes.ParseKey(inp.Metadata, exptypes.EarthlyInlineCache, p)
 		remote := &remotes[0]
 		if opts.RewriteTimestamp {
 			remote, err = ic.rewriteRemoteWithEpoch(ctx, opts, remote)
@@ -146,7 +145,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 				return nil, err
 			}
 		}
-		mfstDesc, configDesc, err := ic.commitDistributionManifest(ctx, opts, ref, config, remote, annotations, inlineCache, earthlyInlineCache, opts.Epoch, session.NewGroup(sessionID))
+		mfstDesc, configDesc, err := ic.commitDistributionManifest(ctx, opts, ref, config, remote, annotations, inlineCache, opts.Epoch, session.NewGroup(sessionID))
 		if err != nil {
 			return nil, err
 		}
@@ -204,7 +203,6 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 		}
 		config := exptypes.ParseKey(inp.Metadata, exptypes.ExporterImageConfigKey, p)
 		inlineCache := exptypes.ParseKey(inp.Metadata, exptypes.ExporterInlineCache, p)
-		earthlyInlineCache := exptypes.ParseKey(inp.Metadata, exptypes.EarthlyInlineCache, p)
 
 		remote := &remotes[remotesMap[p.ID]]
 		if remote == nil {
@@ -220,7 +218,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 			}
 		}
 
-		desc, _, err := ic.commitDistributionManifest(ctx, opts, r, config, remote, opts.Annotations.Platform(&p.Platform), inlineCache, earthlyInlineCache, opts.Epoch, session.NewGroup(sessionID))
+		desc, _, err := ic.commitDistributionManifest(ctx, opts, r, config, remote, opts.Annotations.Platform(&p.Platform), inlineCache, opts.Epoch, session.NewGroup(sessionID))
 		if err != nil {
 			return nil, err
 		}
@@ -390,7 +388,7 @@ func (ic *ImageWriter) rewriteRemoteWithEpoch(ctx context.Context, opts *ImageCo
 	}, nil
 }
 
-func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *ImageCommitOpts, ref cache.ImmutableRef, config []byte, remote *solver.Remote, annotations *Annotations, inlineCache, earthlyInlineCache []byte, epoch *time.Time, sg session.Group) (*ocispecs.Descriptor, *ocispecs.Descriptor, error) {
+func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *ImageCommitOpts, ref cache.ImmutableRef, config []byte, remote *solver.Remote, annotations *Annotations, inlineCache []byte, epoch *time.Time, sg session.Group) (*ocispecs.Descriptor, *ocispecs.Descriptor, error) {
 	if len(config) == 0 {
 		var err error
 		config, err = defaultImageConfig()
@@ -409,7 +407,7 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 		return nil, nil, err
 	}
 
-	config, err = patchImageConfig(config, remote.Descriptors, history, inlineCache, earthlyInlineCache, epoch)
+	config, err = patchImageConfig(config, remote.Descriptors, history, inlineCache, epoch)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -635,7 +633,7 @@ func parseHistoryFromConfig(dt []byte) ([]ocispecs.History, error) {
 	return config.History, nil
 }
 
-func patchImageConfig(dt []byte, descs []ocispecs.Descriptor, history []ocispecs.History, cache, earthlyInlineCache []byte, epoch *time.Time) ([]byte, error) {
+func patchImageConfig(dt []byte, descs []ocispecs.Descriptor, history []ocispecs.History, cache []byte, epoch *time.Time) ([]byte, error) {
 	m := map[string]json.RawMessage{}
 	if err := json.Unmarshal(dt, &m); err != nil {
 		return nil, errors.Wrap(err, "failed to parse image config for patch")
@@ -701,14 +699,6 @@ func patchImageConfig(dt []byte, descs []ocispecs.Descriptor, history []ocispecs
 			return nil, err
 		}
 		m["moby.buildkit.cache.v0"] = dt
-	}
-
-	if earthlyInlineCache != nil {
-		dt, err := json.Marshal(earthlyInlineCache)
-		if err != nil {
-			return nil, err
-		}
-		m["earthly.inlinecache.v0"] = dt
 	}
 
 	dt, err = json.Marshal(m)

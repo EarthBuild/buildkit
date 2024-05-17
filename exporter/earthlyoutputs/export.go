@@ -268,13 +268,6 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			simpleMd[exptypes.ExporterInlineCache] = inlineCache
 		}
 
-		// TODO: Remove the above (legacy) option.
-		earthlyInlineCacheK := fmt.Sprintf("%s/%s", exptypes.EarthlyInlineCache, k)
-		earthlyInlineCache, ok := src.Metadata[earthlyInlineCacheK]
-		if ok {
-			simpleMd[exptypes.EarthlyInlineCache] = earthlyInlineCache
-		}
-
 		opts := e.opts
 		as, _, err := containerimage.ParseAnnotations(simpleMd)
 		if err != nil {
