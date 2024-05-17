@@ -91,11 +91,6 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 }
 
 func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Vertex, job *Job, e Edge) (Result, digest.Digest, error) {
-	// Ensure we don't have multiple threads working on the same digest.
-	wait, done := s.parallelGuard.acquire(ctx, d)
-	defer done()
-	<-wait
-
 	st := s.state(vertex, job)
 
 	// Add cache opts to context as they will be accessed by cache retrieval.
@@ -117,6 +112,14 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	if err != nil {
 		return nil, "", err
 	}
+
+	// Ensure we don't have multiple threads working on the same operation. The
+	// computed cache key needs to be used here instead of the vertex
+	// digest. This is because the vertex can sometimes differ for the same
+	// operation depending on its ancestors.
+	wait, done := s.parallelGuard.acquire(ctx, cacheKey)
+	defer done()
+	<-wait
 
 	v, ok, err := s.resultSource.Load(ctx, cacheKey)
 	if err != nil {
