@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/golang-lru/simplelru"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/tracing"
@@ -18,8 +19,17 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+const (
+	runOnceLRUSize    = 2000
+	parallelGuardWait = time.Millisecond * 100
+)
+
 // CommitRefFunc can be used to finalize a Result's ImmutableRef.
 type CommitRefFunc func(ctx context.Context, result Result) error
+
+// IsRunOnceFunc determines if the vertex represents an operation that needs to
+// be run at least once.
+type IsRunOnceFunc func(Vertex, Builder) (bool, error)
 
 // ResultSource can be any source (local or remote) that allows one to load a
 // Result using a cache key digest.
@@ -27,15 +37,45 @@ type ResultSource interface {
 	Load(ctx context.Context, cacheKey digest.Digest) (Result, bool, error)
 }
 
+// runOnceCtrl is a simple wrapper around an LRU cache. It's used to ensure that
+// an operation is only run once per job. However, this is not guaranteed, as
+// the struct uses a reasonable small LRU size to preview excessive memory use.
+type runOnceCtrl struct {
+	lru *simplelru.LRU
+	mu  sync.Mutex
+}
+
+func newRunOnceCtrl() *runOnceCtrl {
+	lru, _ := simplelru.NewLRU(runOnceLRUSize, nil) // Error impossible on positive first argument.
+	return &runOnceCtrl{lru: lru}
+}
+
+// hasRun: Here, we use an LRU cache to whether we need to execute the source
+// operation for this job. The jobs may be re-run if the LRU size is exceeded,
+// but this shouldn't have a big impact on the build. The trade-off is
+// worthwhile given the memory-friendliness of LRUs.
+func (s *runOnceCtrl) hasRun(d digest.Digest, sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := fmt.Sprintf("%s:%s", sessionID, d)
+	ret := s.lru.Contains(key)
+
+	s.lru.Add(key, struct{}{})
+
+	return ret
+}
+
 type simpleSolver struct {
 	resolveOpFunc   ResolveOpFunc
+	isRunOnceFunc   IsRunOnceFunc
 	commitRefFunc   CommitRefFunc
 	solver          *Solver
 	parallelGuard   *parallelGuard
 	refIDStore      *RefIDStore
 	resultSource    ResultSource
 	cacheKeyManager *cacheKeyManager
-	mu              sync.Mutex
+	runOnceCtrl     *runOnceCtrl
 }
 
 func newSimpleSolver(
@@ -44,15 +84,18 @@ func newSimpleSolver(
 	solver *Solver,
 	refIDStore *RefIDStore,
 	resultSource ResultSource,
+	isRunOnceFunc IsRunOnceFunc,
 ) *simpleSolver {
 	return &simpleSolver{
 		cacheKeyManager: newCacheKeyManager(),
-		parallelGuard:   newParallelGuard(time.Millisecond * 100),
+		parallelGuard:   newParallelGuard(parallelGuardWait),
 		resolveOpFunc:   resolveOpFunc,
 		commitRefFunc:   commitRefFunc,
 		solver:          solver,
 		refIDStore:      refIDStore,
 		resultSource:    resultSource,
+		isRunOnceFunc:   isRunOnceFunc,
+		runOnceCtrl:     newRunOnceCtrl(),
 	}
 }
 
@@ -75,6 +118,14 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 			return nil, err
 		}
 
+		// Release previous result as this is not the final return value.
+		if ret != nil {
+			err := ret.Release(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		ret = res
 
 		// Hijack the CacheKey type in order to export a reference from the new cache key to the ref ID.
@@ -85,6 +136,11 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 			},
 			Exporter: nil, // We're not using an exporter here.
 		})
+	}
+
+	err := s.commitRefFunc(ctx, ret)
+	if err != nil {
+		return nil, err
 	}
 
 	return NewCachedResult(ret, expKeys), nil
@@ -121,14 +177,25 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 	defer done()
 	<-wait
 
-	v, ok, err := s.resultSource.Load(ctx, cacheKey)
+	isRunOnce, err := s.isRunOnceFunc(vertex, job)
 	if err != nil {
 		return nil, "", err
 	}
 
-	if ok && v != nil {
-		notifyError(ctx, st, true, nil)
-		return v, cacheKey, nil
+	// Special case for source operations. They need to be run once per build or
+	// content changes will not be reliably detected.
+	mayLoadCache := !isRunOnce || isRunOnce && s.runOnceCtrl.hasRun(cacheKey, job.SessionID)
+
+	if mayLoadCache {
+		v, ok, err := s.resultSource.Load(ctx, cacheKey)
+		if err != nil {
+			return nil, "", err
+		}
+
+		if ok && v != nil {
+			notifyError(ctx, st, true, nil)
+			return v, cacheKey, nil
+		}
 	}
 
 	results, _, err := st.op.Exec(ctx, inputs)
@@ -136,16 +203,16 @@ func (s *simpleSolver) buildOne(ctx context.Context, d digest.Digest, vertex Ver
 		return nil, "", err
 	}
 
-	// Ensure all results are finalized (committed to cache). It may be better
-	// to background these calls at some point.
-	for _, res := range results {
-		err = s.commitRefFunc(ctx, res)
-		if err != nil {
-			return nil, "", err
+	res := results[int(e.Index)]
+
+	for i := range results {
+		if i != int(e.Index) {
+			err = results[i].Release(ctx)
+			if err != nil {
+				return nil, "", err
+			}
 		}
 	}
-
-	res := results[int(e.Index)]
 
 	err = s.refIDStore.Set(ctx, cacheKey, res.ID())
 	if err != nil {
@@ -304,6 +371,15 @@ func (s *simpleSolver) preprocessInputs(ctx context.Context, st *state, vertex V
 			} else {
 				scm.deps[i].computed = compDigest
 			}
+		}
+
+		// The result can be released now that the preprocess & slow cache
+		// digest functions have been run. This is crucial as failing to do so
+		// will lead to full file copying from previously executed source
+		// operations.
+		err = res.Release(ctx)
+		if err != nil {
+			return nil, err
 		}
 
 		// Add input references to the struct as to link dependencies.

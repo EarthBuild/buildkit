@@ -144,6 +144,7 @@ func New(opt Opt) (*Solver, error) {
 
 	s.solver = solver.NewSolver(solver.SolverOpt{
 		ResolveOpFunc: s.resolver(),
+		IsRunOnceFunc: s.isRunOnceOp(),
 		DefaultCache:  opt.CacheManager,
 		ResultSource:  sources,
 		CommitRefFunc: worker.FinalizeRef,

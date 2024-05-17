@@ -20,7 +20,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// ResolveOpFunc finds an Op implementation for a Vertex
+// ResolveOpFunc finds an Op implementation for a Vertex.
 type ResolveOpFunc func(Vertex, Builder) (Op, error)
 
 type Builder interface {
@@ -261,6 +261,7 @@ type SolverOpt struct {
 	ResultSource  ResultSource
 	RefIDStore    *RefIDStore
 	CommitRefFunc CommitRefFunc
+	IsRunOnceFunc IsRunOnceFunc
 }
 
 func NewSolver(opts SolverOpt) *Solver {
@@ -280,6 +281,7 @@ func NewSolver(opts SolverOpt) *Solver {
 		solver,
 		opts.RefIDStore,
 		opts.ResultSource,
+		opts.IsRunOnceFunc,
 	)
 	solver.simple = simple
 
