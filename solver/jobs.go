@@ -259,7 +259,6 @@ type SolverOpt struct {
 	ResolveOpFunc ResolveOpFunc
 	DefaultCache  CacheManager
 	ResultSource  ResultSource
-	RefIDStore    *RefIDStore
 	CommitRefFunc CommitRefFunc
 	IsRunOnceFunc IsRunOnceFunc
 }
@@ -279,7 +278,6 @@ func NewSolver(opts SolverOpt) *Solver {
 		opts.ResolveOpFunc,
 		opts.CommitRefFunc,
 		solver,
-		opts.RefIDStore,
 		opts.ResultSource,
 		opts.IsRunOnceFunc,
 	)

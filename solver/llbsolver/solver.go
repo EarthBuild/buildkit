@@ -132,13 +132,13 @@ func New(opt Opt) (*Solver, error) {
 	}
 	s.sysSampler = sampler
 
-	refIDStore, err := solver.NewRefIDStore(opt.RootDir)
+	workerSource, err := worker.NewWorkerResultSource(opt.WorkerController, opt.RootDir)
 	if err != nil {
 		return nil, err
 	}
 
 	sources := worker.NewCombinedResultSource(
-		worker.NewWorkerResultSource(opt.WorkerController, refIDStore),
+		workerSource,
 		remoteSource,
 	)
 
@@ -148,7 +148,6 @@ func New(opt Opt) (*Solver, error) {
 		DefaultCache:  opt.CacheManager,
 		ResultSource:  sources,
 		CommitRefFunc: worker.FinalizeRef,
-		RefIDStore:    refIDStore,
 	})
 	return s, nil
 }
