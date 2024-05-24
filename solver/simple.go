@@ -134,11 +134,6 @@ func (s *simpleSolver) build(ctx context.Context, job *Job, e Edge) (CachedResul
 		})
 	}
 
-	err := s.commitRefFunc(ctx, ret)
-	if err != nil {
-		return nil, err
-	}
-
 	return NewCachedResult(ret, expKeys), nil
 }
 
@@ -207,6 +202,15 @@ func (s *simpleSolver) buildOne(ctx context.Context, runCacheMan *cacheKeyManage
 			if err != nil {
 				return nil, "", err
 			}
+		}
+	}
+
+	// Some operations need to be left in a mutable state. All others need to be
+	// committed in order to be cached and loaded correctly.
+	if !isRunOnce {
+		err = s.commitRefFunc(ctx, res)
+		if err != nil {
+			return nil, "", err
 		}
 	}
 
@@ -445,20 +449,21 @@ func (m *cacheKeyManager) cacheKeyRecurse(ctx context.Context, d digest.Digest, 
 		io.WriteString(h, c.salt)
 	}
 
-	for _, in := range c.inputs {
-		err := m.cacheKeyRecurse(ctx, in, h)
-		if err != nil {
-			return err
-		}
-	}
-
 	io.WriteString(h, c.digest.String())
+
 	for _, dep := range c.deps {
 		if dep.selector != "" {
 			io.WriteString(h, dep.selector.String())
 		}
 		if dep.computed != "" {
 			io.WriteString(h, dep.computed.String())
+		}
+	}
+
+	for _, in := range c.inputs {
+		err := m.cacheKeyRecurse(ctx, in, h)
+		if err != nil {
+			return err
 		}
 	}
 
