@@ -66,6 +66,7 @@ type ManagerOpt struct {
 // NewManager returns a new Manager
 // earthly-specific: opt param is required for our custom health config
 func NewManager(opt *ManagerOpt) (*Manager, error) {
+	GrpcSessions = make(map[string]chan bool)
 	var historyDuration time.Duration
 	if dur, ok := os.LookupEnv("BUILDKIT_SESSION_HISTORY_DURATION"); ok {
 		var err error
