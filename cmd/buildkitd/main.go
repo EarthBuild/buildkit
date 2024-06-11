@@ -273,9 +273,11 @@ func main() {
 
 		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor(ctx, tp), grpcerrors.UnaryServerInterceptor,
 			unaryTimeoutInterceptor(), // earthly-specific
+			unaryCancelInterceptor(),
 		)
 		stream := grpc_middleware.ChainStreamServer(streamTracer, grpcerrors.StreamServerInterceptor,
 			streamTimeoutInterceptor(), // earthly-specific
+			streamCancelInterceptor(),
 		)
 
 		maxMsgSize := 67108864 // 64MB

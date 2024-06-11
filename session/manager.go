@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -217,6 +218,13 @@ func (sm *Manager) HandleConn(ctx context.Context, conn net.Conn, opts map[strin
 	return sm.handleConn(ctx, conn, opts)
 }
 
+type GRPCSessionID string
+
+const SessionContextKey GRPCSessionID = "grpc_session_id"
+
+// TODO thread safe, getters, setters
+var GrpcSessions map[string]chan bool
+
 // caller needs to take lock, this function will release it
 func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[string][]string) error {
 	if sm.stop {
@@ -240,14 +248,19 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 		return err
 	}
 
+	grpcID, _ := ctx.Value(SessionContextKey).(string)
+
+	fmt.Println("grpcID: " + grpcID)
+
 	c := &client{
 		Session: Session{
-			id:        id,
-			name:      name,
-			sharedKey: sharedKey,
-			ctx:       ctx,
-			cancelCtx: cancel,
-			done:      make(chan struct{}),
+			id:            id,
+			name:          name,
+			sharedKey:     sharedKey,
+			ctx:           ctx,
+			cancelCtx:     cancel,
+			done:          make(chan struct{}),
+			grpcSessionID: grpcID,
 		},
 		cc:        cc,
 		supported: make(map[string]struct{}),

@@ -37,16 +37,17 @@ type Attachable interface {
 
 // Session is a long running connection between client and a daemon
 type Session struct {
-	mu          sync.Mutex // synchronizes conn run and close
-	id          string
-	name        string
-	sharedKey   string
-	ctx         context.Context
-	cancelCtx   func()
-	done        chan struct{}
-	grpcServer  *grpc.Server
-	conn        net.Conn
-	closeCalled bool
+	mu            sync.Mutex // synchronizes conn run and close
+	id            string
+	name          string
+	sharedKey     string
+	ctx           context.Context
+	cancelCtx     func()
+	done          chan struct{}
+	grpcServer    *grpc.Server
+	grpcSessionID string
+	conn          net.Conn
+	closeCalled   bool
 }
 
 // NewSession returns a new long running session
