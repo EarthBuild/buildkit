@@ -210,7 +210,7 @@ func (this *PullRequest) GoString() string {
 	s = append(s, "&pullping.PullRequest{")
 	s = append(s, "Images: "+fmt.Sprintf("%#v", this.Images)+",\n")
 	keysForResp := make([]string, 0, len(this.Resp))
-	for k := range this.Resp {
+	for k, _ := range this.Resp {
 		keysForResp = append(keysForResp, k)
 	}
 	github_com_gogo_protobuf_sortkeys.Strings(keysForResp)
@@ -478,7 +478,7 @@ func (this *PullRequest) String() string {
 		return "nil"
 	}
 	keysForResp := make([]string, 0, len(this.Resp))
-	for k := range this.Resp {
+	for k, _ := range this.Resp {
 		keysForResp = append(keysForResp, k)
 	}
 	github_com_gogo_protobuf_sortkeys.Strings(keysForResp)
