@@ -42,6 +42,11 @@ variable "CGO_ENABLED" {
 variable "DESTDIR" {
   default = ""
 }
+
+variable "TEST_IMAGE_NAME" {
+  default = "buildkit-tests"
+}
+
 function "bindir" {
   params = [defaultdir]
   result = DESTDIR != "" ? DESTDIR : "./bin/${defaultdir}"
@@ -105,6 +110,9 @@ target "integration-tests-base" {
 target "integration-tests" {
   inherits = ["integration-tests-base"]
   target = "integration-tests"
+  output = [
+    "type=docker,name=${TEST_IMAGE_NAME}",
+  ]
 }
 
 group "validate" {
