@@ -20,7 +20,6 @@ type ctxEarthlyDebugLevelKey string // earthly-specific
 // earthlyCtxDebugLevelKey is earthly-specific and is used to pass along the debug level
 const EarthlyCtxDebugLevelKey ctxEarthlyDebugLevelKey = "EARTHLY_DEBUG_LEVEL" // earthly-specific
 
-
 // GitLogLevel is earthly-specific
 type GitLogLevel int
 

@@ -79,7 +79,7 @@ func fromParametersImpl(parameters map[string]interface{}) (*DriverParameters, e
 	if parameters != nil {
 		maxThreads, err = base.GetLimitFromParameter(parameters["maxthreads"], minThreads, defaultMaxThreads)
 		if err != nil {
-			return nil, fmt.Errorf("maxthreads config error: %s", err.Error())
+			return nil, errors.Errorf("maxthreads config error: %s", err.Error())
 		}
 	}
 

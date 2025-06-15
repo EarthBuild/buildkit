@@ -457,7 +457,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			md[safeGrpcMetaKey(mdK)] = string(mdV)
 		}
 		if expSrc.Ref == nil {
-			return nil, nil, fmt.Errorf("dirExpSrcs got nil ref")
+			return nil, nil, errors.Errorf("dirExpSrcs got nil ref")
 		}
 		dirEG.Go(exportDirFunc(egCtx, md, caller, expSrc.Ref, sessionID))
 	}
@@ -508,7 +508,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		}
 		if img.expSrc.Ref != nil { // This is a copy and paste of the above code
 			if len(img.platforms) != 0 {
-				return nil, nil, fmt.Errorf("img.platforms should not be set when a single ref is used")
+				return nil, nil, errors.Errorf("img.platforms should not be set when a single ref is used")
 			}
 
 			var ref cache.ImmutableRef
@@ -518,7 +518,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				if r, ok := img.expSrc.FindRef(p.ID); ok {
 					ref = r
 				} else {
-					return nil, nil, fmt.Errorf("img.expSrc.FindRef failed on %s", p.ID)
+					return nil, nil, errors.Errorf("img.expSrc.FindRef failed on %s", p.ID)
 				}
 			} else {
 				ref = img.expSrc.Ref
@@ -559,7 +559,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				var errStatus remoteserrors.ErrUnexpectedStatus
 				if errors.As(err, &errStatus) {
 					// TODO body might be json, e.g. `{"errors":[{"code":"DENIED","message":"The repository with name 'my-cool-image' in registry with id '123456789' already has the maximum allowed number of images which is '10000'"}]}`, we should attempt to parse this
-					return nil, nil, fmt.Errorf("failed to push %s: %w body=%s", imgName, errStatus, errStatus.Body)
+					return nil, nil, errors.Wrapf(err, "failed to push %s: body=%s", imgName, errStatus.Body)
 				}
 				return nil, nil, err
 			}

@@ -2,11 +2,11 @@ package oci
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/oci"
 	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/pkg/errors"
 )
 
 type OciHook struct {
@@ -45,7 +45,7 @@ func WithHook(hook OciHook) oci.SpecOpts {
 		case "poststop":
 			s.Hooks.Poststop = append(s.Hooks.Poststop, h)
 		default:
-			return fmt.Errorf("%s is not a valid lifecycle hook", hook.Phase)
+			return errors.Errorf("%s is not a valid lifecycle hook", hook.Phase)
 		}
 
 		return nil

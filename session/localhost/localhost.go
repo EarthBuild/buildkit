@@ -73,12 +73,12 @@ func LocalhostExec(ctx context.Context, c session.Caller, args []string, dir str
 			exitCode = int(msg.ExitCode)
 			exitCodeSet = true
 		default:
-			return fmt.Errorf("unhandled exit status: %d", msg.Status)
+			return errors.Errorf("unhandled exit status: %d", msg.Status)
 		}
 	}
 
 	if exitCode != 0 {
-		return fmt.Errorf("exit code: %d", exitCode)
+		return errors.Errorf("exit code: %d", exitCode)
 	}
 
 	return nil
