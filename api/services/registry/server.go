@@ -87,7 +87,7 @@ func (s *Server) Proxy(stream Registry_ProxyServer) error {
 	defer conn.Close()
 
 	ctx := stream.Context()
-	eg, _:= errgroup.WithContext(ctx)
+	eg, _ := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
 		_, err = io.Copy(conn, rw)

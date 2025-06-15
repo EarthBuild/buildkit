@@ -13,8 +13,8 @@ type Info struct {
 	BuildkitVersion BuildkitVersion `json:"buildkitVersion"`
 
 	// Earthly-specific.
-	NumSessions int	`json:"numSessions"`
-	SecondsIdle int	`json:"secondsIdle"`
+	NumSessions int `json:"numSessions"`
+	SecondsIdle int `json:"secondsIdle"`
 }
 
 type BuildkitVersion struct {

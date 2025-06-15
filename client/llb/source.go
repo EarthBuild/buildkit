@@ -404,7 +404,7 @@ func MountSSHSock(sshID string) GitOption {
 }
 
 func SSHCommand(sshCommand string) GitOption {
-	return gitOptionFunc(func (gi *GitInfo) {
+	return gitOptionFunc(func(gi *GitInfo) {
 		gi.SSHCommand = sshCommand
 	})
 }
