@@ -164,6 +164,7 @@ jobs:
           if [ -n "${{ matrix.worker }}" ]; then
             export TESTFLAGS="${TESTFLAGS} --run=//worker=${{ matrix.worker }}$"
           fi
+          echo TESTFLAGS=$TESTFLAGS
           ./hack/test ${{ matrix.kind }}
         env:
           TEST_COVERAGE: 1
