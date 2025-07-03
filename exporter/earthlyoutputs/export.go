@@ -508,7 +508,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		}
 		if img.expSrc.Ref != nil { // This is a copy and paste of the above code
 			if len(img.platforms) != 0 {
-				return nil, nil, errors.Errorf("img.platforms should not be set when a single ref is used")
+				return nil, nil, errors.New("img.platforms should not be set when a single ref is used")
 			}
 
 			var ref cache.ImmutableRef
