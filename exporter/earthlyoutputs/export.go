@@ -457,7 +457,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			md[safeGrpcMetaKey(mdK)] = string(mdV)
 		}
 		if expSrc.Ref == nil {
-			return nil, nil, errors.Errorf("dirExpSrcs got nil ref")
+			return nil, nil, errors.New("dirExpSrcs got nil ref")
 		}
 		dirEG.Go(exportDirFunc(egCtx, md, caller, expSrc.Ref, sessionID))
 	}
