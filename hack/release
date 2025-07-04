@@ -32,7 +32,7 @@ if ${BUILDX_CMD} build --help 2>&1 | grep -- '--attest' >/dev/null; then
     prvattrs="$prvattrs,builder-id=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
   fi
   setFlags+=(--set "*.attest=type=sbom")
-  setFlags+=(--set "*.attest=type=provenance,$prvattrs")
+  # setFlags+=(--set "*.attest=type=provenance,$prvattrs")
 fi
 if [[ "$RELEASE" = "true" ]] && [[ "$GITHUB_ACTIONS" = "true" ]]; then
   setFlags+=(--set "*.no-cache-filter=git,gobuild-base")
