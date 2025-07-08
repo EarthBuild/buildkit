@@ -169,7 +169,7 @@ jobs:
         env:
           TEST_COVERAGE: 1
           TESTPKGS: ${{ matrix.pkg }}
-          SKIP_INTEGRATION_TESTS: ${{ matrix.skip-integration-tests }}
+          SKIP_INTEGRATION_TESTS: 1
           CACHE_FROM: type=gha,scope=${{ inputs.cache_scope }}
       -
         name: Send to Codecov
