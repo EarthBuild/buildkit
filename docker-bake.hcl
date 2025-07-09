@@ -110,10 +110,10 @@ target "integration-tests-base" {
 target "integration-tests" {
   inherits = ["integration-tests-base"]
   target = "integration-tests"
+  attest = []
   output = [
     "type=docker,name=${TEST_IMAGE_NAME}",
-  ],
-  attest = []
+  ]
 }
 
 group "validate" {
