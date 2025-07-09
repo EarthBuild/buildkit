@@ -112,8 +112,8 @@ target "integration-tests" {
   target = "integration-tests"
   output = [
     "type=docker,name=${TEST_IMAGE_NAME}",
-  ]
-  attest = [],
+  ],
+  attest = []
 }
 
 group "validate" {
