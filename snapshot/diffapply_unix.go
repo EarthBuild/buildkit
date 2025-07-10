@@ -128,7 +128,7 @@ func statInode(stat *syscall.Stat_t) inode {
 	}
 	return inode{
 		ino: stat.Ino,
-		dev: stat.Dev,
+		dev: uint64(stat.Dev),
 	}
 }
 
@@ -297,7 +297,7 @@ func (a *applier) applyDelete(ctx context.Context, ca *changeApply) (bool, error
 			if ca.srcStat == nil {
 				ca.srcStat = &syscall.Stat_t{
 					Mode: syscall.S_IFCHR,
-					Rdev: unix.Mkdev(0, 0),
+					Rdev: uint32(unix.Mkdev(0, 0)),
 				}
 				ca.srcPath = ""
 			}
