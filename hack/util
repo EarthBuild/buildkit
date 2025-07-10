@@ -26,13 +26,13 @@ buildxCmd() {
 }
 
 buildAttestFlags() {
-  if ${BUILDX_CMD} build --help 2>&1 | grep -- '--attest' >/dev/null; then
+  # if ${BUILDX_CMD} build --help 2>&1 | grep -- '--attest' >/dev/null; then
     # prvattrs="mode=max"
     # if [ "$GITHUB_ACTIONS" = "true" ]; then
     #   prvattrs="$prvattrs,builder-id=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
     # fi
     # echo "--attest=type=sbom --attest=type=provenance,$prvattrs"
-  fi
+  # fi
 }
 
 currentref=""
