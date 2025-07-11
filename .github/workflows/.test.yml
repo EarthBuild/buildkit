@@ -136,6 +136,7 @@ jobs:
       - name: Build test image
         uses: docker/bake-action@v4
         with:
+          provenance: false
           targets: integration-tests
           set: |
             *.cache-from=type=gha,scope=${{ inputs.cache_scope }}
