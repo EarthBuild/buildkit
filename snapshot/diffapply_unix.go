@@ -297,7 +297,7 @@ func (a *applier) applyDelete(ctx context.Context, ca *changeApply) (bool, error
 			if ca.srcStat == nil {
 				ca.srcStat = &syscall.Stat_t{
 					Mode: syscall.S_IFCHR,
-					Rdev: uint32(unix.Mkdev(0, 0)),
+					Rdev: unix.Mkdev(0, 0),
 				}
 				ca.srcPath = ""
 			}
