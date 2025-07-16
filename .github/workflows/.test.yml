@@ -91,6 +91,7 @@ jobs:
         name: Build
         uses: docker/bake-action@v4
         with:
+          provenance: false
           targets: integration-tests-base
           set: |
             *.cache-from=type=gha,scope=${{ inputs.cache_scope }}
@@ -148,6 +149,7 @@ jobs:
         name: Build test image
         uses: docker/bake-action@v4
         with:
+          provenance: false
           targets: integration-tests
           set: |
             *.cache-from=type=gha,scope=${{ inputs.cache_scope }}
@@ -192,6 +194,7 @@ jobs:
         with:
           name: test-reports
           path: ./bin/testreports
+          overwrite: true
       -
         name: Dump context
         if: failure()
