@@ -32,8 +32,12 @@ jobs:
       cache_scope: frontend-integration-tests
       pkgs: ./frontend/dockerfile
       kinds: |
+        integration
         dockerfile
       codecov_flags: dockerfile-frontend
+      includes: |
+        - pkg: ./...
+          skip-integration-tests: 1
 
   prepare:
     runs-on: ubuntu-22.04
