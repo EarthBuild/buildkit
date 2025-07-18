@@ -32,7 +32,6 @@ jobs:
       cache_scope: frontend-integration-tests
       pkgs: ./frontend/dockerfile
       kinds: |
-        integration
         dockerfile
       codecov_flags: dockerfile-frontend
 
