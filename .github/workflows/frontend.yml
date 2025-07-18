@@ -33,7 +33,6 @@ jobs:
       pkgs: ./frontend/dockerfile
       kinds: |
         integration
-        dockerfile
       codecov_flags: dockerfile-frontend
       includes: |
         - pkg: ./...
