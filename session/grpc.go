@@ -15,10 +15,6 @@ import (
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	// "math"
-	// "time"
-	// "github.com/sirupsen/logrus"
-	// "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 func serve(ctx context.Context, grpcServer *grpc.Server, conn net.Conn) {
