@@ -2,11 +2,11 @@ package socketprovider
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/moby/buildkit/session"
 	socketforward "github.com/moby/buildkit/session/socketforward"
+	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -37,7 +37,7 @@ func (sp *socketProvider) Proxy(stream socketforward.Socket_ProxyServer) error {
 
 	cb, ok := sp.m[id]
 	if !ok {
-		return fmt.Errorf("no callback registered for socket ID: %s", id)
+		return errors.Errorf("no callback registered for socket ID: %s", id)
 	}
 
 	s1, s2 := sockPair()

@@ -81,10 +81,13 @@ func (s *Server) Proxy(stream Registry_ProxyServer) error {
 	addr := strings.ReplaceAll(s.addr, "0.0.0.0", "127.0.0.1")
 
 	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return err
+	}
 	defer conn.Close()
 
 	ctx := stream.Context()
-	eg, ctx := errgroup.WithContext(ctx)
+	eg, _ := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
 		_, err = io.Copy(conn, rw)
