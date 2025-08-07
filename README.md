@@ -288,7 +288,7 @@ To export specific files use multi-stage builds with a scratch stage and copy th
 
 ```dockerfile
 ...
-FROM scratch as testresult
+FROM scratch AS testresult
 
 COPY --from=builder /usr/src/app/testresult.xml .
 ...

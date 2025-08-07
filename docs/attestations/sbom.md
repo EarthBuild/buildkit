@@ -68,14 +68,14 @@ enabled via the build arguments.
 For example:
 
 ```dockerfile
-FROM alpine:latest as build
+FROM alpine:latest AS build
 # enable scanning for the intermediate build stage
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 WORKDIR /src
 COPY . .
 RUN ... # build some software
 
-FROM scratch as final
+FROM scratch AS final
 # scan the build context only if the build is run to completion
 ARG BUILDKIT_SBOM_SCAN_CONTEXT=true
 COPY --from=build /path/to/software /path/to/software

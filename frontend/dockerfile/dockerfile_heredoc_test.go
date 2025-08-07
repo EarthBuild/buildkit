@@ -500,7 +500,7 @@ func testHeredocVarSubstitution(t *testing.T, sb integration.Sandbox) {
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
-FROM busybox as build
+FROM busybox AS build
 
 ARG name=world
 
