@@ -430,14 +430,14 @@ func testExportCacheLoop(t *testing.T, sb integration.Sandbox) {
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
-FROM alpine as base
+FROM alpine AS base
 RUN echo aa > /foo
 WORKDIR /bar
 
-FROM base as base1
+FROM base AS base1
 COPY hello.txt .
 
-FROM base as base2
+FROM base AS base2
 COPY --from=base1 /bar/hello.txt .
 RUN true
 
@@ -6308,7 +6308,7 @@ CMD sh /scan.sh
 
 	// scan an image with no additional sboms
 	dockerfile = []byte(`
-FROM scratch as base
+FROM scratch AS base
 COPY <<EOF /foo
 data
 EOF
@@ -6360,17 +6360,17 @@ FROM base
 	dockerfile = []byte(`
 ARG BUILDKIT_SBOM_SCAN_CONTEXT=true
 
-FROM scratch as file
+FROM scratch AS file
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 COPY <<EOF /file
 data
 EOF
 
-FROM scratch as base
+FROM scratch AS base
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 COPY --from=file /file /foo
 
-FROM scratch as base2
+FROM scratch AS base2
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 COPY --from=file /file /bar
 RUN non-existent-command-would-fail

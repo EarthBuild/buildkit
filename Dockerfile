@@ -177,7 +177,7 @@ RUN --mount=from=containerd-src,src=/usr/src/containerd,readwrite --mount=target
   && mv bin /out
 
 # containerd v1.6 for integration tests
-FROM containerd-base as containerd-alt-16
+FROM containerd-base AS containerd-alt-16
 ARG CONTAINERD_ALT_VERSION_16
 RUN --mount=from=containerd-src,src=/usr/src/containerd,readwrite --mount=target=/root/.cache,type=cache \
   git fetch origin \

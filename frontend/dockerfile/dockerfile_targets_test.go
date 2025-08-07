@@ -35,7 +35,7 @@ func testTargetsList(t *testing.T, sb integration.Sandbox) {
 FROM alpine AS build
 RUN true
 
-FROM busybox as second
+FROM busybox AS second
 RUN false
 
 FROM alpine

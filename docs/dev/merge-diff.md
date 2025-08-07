@@ -201,16 +201,16 @@ combined := llb.Image("alpine").
 Note that this is basically the equivalent of the following Dockerfile:
 
 ```dockerfile
-FROM alpine as a
+FROM alpine AS a
 RUN build a
 
-FROM alpine as b
+FROM alpine AS b
 RUN build b
 
-FROM alpine as c
+FROM alpine AS c
 RUN build c
 
-FROM alpine as combined
+FROM alpine AS combined
 COPY --from=a /bin/a /usr/local/bin/a
 COPY --from=b /bin/b /usr/local/bin/b
 COPY --from=c /bin/c /usr/local/bin/c

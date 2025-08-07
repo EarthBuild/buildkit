@@ -520,7 +520,7 @@ func testClientFrontendProvenance(t *testing.T, sb integration.Sandbox) {
 	}
 
 	dockerfile := []byte(`
-	FROM alpine as x86target
+	FROM alpine AS x86target
 	RUN echo "alpine" > /foo
 
 	FROM busybox:latest AS armtarget
@@ -1127,7 +1127,7 @@ func testFrontendDeduplicateSources(t *testing.T, sb integration.Sandbox) {
 	defer c.Close()
 
 	dockerfile := []byte(`
-FROM scratch as base
+FROM scratch AS base
 COPY foo foo2
 
 FROM linked

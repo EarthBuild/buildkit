@@ -339,7 +339,7 @@ func testMountEnvAcrossStages(t *testing.T, sb integration.Sandbox) {
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
-FROM busybox as stage1
+FROM busybox AS stage1
 
 ENV MNT_ID=mycache
 ENV MNT_TYPE2=cache
@@ -402,7 +402,7 @@ func testMountFromError(t *testing.T, sb integration.Sandbox) {
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
-FROM busybox as test
+FROM busybox AS test
 RUN touch /tmp/test
 
 FROM busybox
