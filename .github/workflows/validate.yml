@@ -16,8 +16,8 @@ on:
   pull_request:
 
 env:
-  SETUP_BUILDX_VERSION: "latest"
-  SETUP_BUILDKIT_IMAGE: "moby/buildkit:latest"
+  SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
+  SETUP_BUILDKIT_IMAGE: "moby/buildkit:v0.19.0"  # TODO(jhorsts): replace with upstream
 
 jobs:
   prepare:
@@ -55,6 +55,6 @@ jobs:
           buildkitd-flags: --debug
       -
         name: Validate
-        uses: docker/bake-action@v4
+        uses: docker/bake-action@v6
         with:
           targets: ${{ matrix.target }}
