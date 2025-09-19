@@ -93,9 +93,10 @@ jobs:
         with:
           provenance: false
           targets: integration-tests-base
-          set: |
-            *.cache-from=type=gha,scope=${{ inputs.cache_scope }}
-            *.cache-to=type=gha,scope=${{ inputs.cache_scope }}
+          # TODO(jhorsts): replace with upstream
+          # set: |
+          #   *.cache-from=type=gha,scope=${{ inputs.cache_scope }}
+          #   *.cache-to=type=gha,scope=${{ inputs.cache_scope }}
 
   run:
     runs-on: ubuntu-22.04
