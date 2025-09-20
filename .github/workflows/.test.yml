@@ -130,6 +130,7 @@ jobs:
           for l in "${{ inputs.env }}"; do
             echo "${l?}" >> $GITHUB_ENV
           done
+          echo "TEST_REPORT_NAME=${{ github.job }}-$(echo "${{ matrix.pkg }}-${{ matrix.skip-integration-tests }}-${{ matrix.kind }}-${{ matrix.worker }}-${{ matrix.tags }}" | tr -dc '[:alnum:]-\n\r' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
       -
         name: Checkout
         uses: actions/checkout@v4
@@ -194,7 +195,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: test-reports-${{ env.TEST_REPORT_NAME }}
           path: ./bin/testreports
           overwrite: true
       -
