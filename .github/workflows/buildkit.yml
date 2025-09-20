@@ -132,7 +132,7 @@ jobs:
         name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: buildkit-${{ env.PLATFORM_PAIR }}
+          name: buildkit
           path: ${{ env.DESTDIR }}/*
           if-no-files-found: error
 
