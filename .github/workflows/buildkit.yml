@@ -194,8 +194,9 @@ jobs:
         name: Download artifacts
         uses: actions/download-artifact@v5
         with:
-          name: buildkit
           path: ${{ env.DESTDIR }}
+          pattern: buildkit-*
+          merge-multiple: true
       -
         name: List artifacts
         run: |
