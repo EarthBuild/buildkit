@@ -31,7 +31,7 @@ on:
 
 env:
   SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
-  REPO_SLUG_TARGET: "moby/buildkit"  # TODO(jhorsts): replace with upstream
+  REPO_SLUG_TARGET: "moby/buildkit"
 
 jobs:
   create:
