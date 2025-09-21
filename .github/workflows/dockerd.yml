@@ -10,7 +10,7 @@ on:
         default: '23.0.1'
 
 env:
-  SETUP_BUILDX_VERSION: "latest"
+  SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
   SETUP_BUILDKIT_IMAGE: "moby/buildkit:latest"
   TESTFLAGS: "-v --parallel=1 --timeout=30m"
 
@@ -109,7 +109,7 @@ jobs:
           buildkitd-flags: --debug
       -
         name: Download dockerd
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5.0.0
         with:
           name: dockerd
           path: ./build/
@@ -127,7 +127,8 @@ jobs:
           TESTPKGS: "${{ matrix.pkg }}"
           TESTFLAGS: "${{ env.TESTFLAGS }} --run=//worker=${{ matrix.worker }}$"
           SKIP_INTEGRATION_TESTS: "${{ matrix.skip-integration-tests }}"
-          CACHE_FROM: "type=gha,scope=build-integration-tests"
+          # TODO(jhorsts): replace with upstream
+          # CACHE_FROM: "type=gha,scope=build-integration-tests"
           BUILDKIT_INTEGRATION_DOCKERD_FLAGS: |
             --bip=10.66.66.1/24
             --default-address-pool=base=10.66.66.0/16,size=24

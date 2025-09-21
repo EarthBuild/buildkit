@@ -101,7 +101,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
       -
         name: Build
-        uses: docker/bake-action@v4
+        uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c  # v6.9.0
         with:
           targets: binaries
           set: |
@@ -116,6 +116,7 @@ jobs:
           retention-days: 1
 
   test-freebsd-amd64:
+    if: false  # TODO(jhorsts): Skip freebsd. Fails. Not supported by EarthBuild. Revisit after upstream merge?
     runs-on: macos-13
     needs:
       - build-freebsd-amd64
@@ -128,7 +129,7 @@ jobs:
         uses: actions/checkout@v4
       -
         name: Download artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5.0.0
         with:
           name: buildkit-freebsd-amd64
           path: ${{ env.DESTDIR }}

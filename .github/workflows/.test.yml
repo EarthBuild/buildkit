@@ -28,7 +28,7 @@ on:
 
 env:
   GO_VERSION: "1.21"
-  SETUP_BUILDX_VERSION: "latest"
+  SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
   SETUP_BUILDKIT_IMAGE: "moby/buildkit:latest"
 
 jobs:
@@ -89,13 +89,14 @@ jobs:
             });
       -
         name: Build
-        uses: docker/bake-action@v4
+        uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c  # v6.9.0
         with:
           provenance: false
           targets: integration-tests-base
-          set: |
-            *.cache-from=type=gha,scope=${{ inputs.cache_scope }}
-            *.cache-to=type=gha,scope=${{ inputs.cache_scope }}
+          # TODO(jhorsts): replace with upstream
+          # set: |
+          #   *.cache-from=type=gha,scope=${{ inputs.cache_scope }}
+          #   *.cache-to=type=gha,scope=${{ inputs.cache_scope }}
 
   run:
     runs-on: ubuntu-22.04
@@ -129,6 +130,7 @@ jobs:
           for l in "${{ inputs.env }}"; do
             echo "${l?}" >> $GITHUB_ENV
           done
+          echo "TEST_REPORT_NAME=${{ github.job }}-$(echo "${{ matrix.pkg }}-${{ matrix.skip-integration-tests }}-${{ matrix.kind }}-${{ matrix.worker }}-${{ matrix.tags }}" | tr -dc '[:alnum:]-\n\r' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
       -
         name: Checkout
         uses: actions/checkout@v4
@@ -147,7 +149,7 @@ jobs:
           buildkitd-flags: --debug
       -
         name: Build test image
-        uses: docker/bake-action@v4
+        uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c  # v6.9.0
         with:
           provenance: false
           targets: integration-tests
@@ -173,7 +175,8 @@ jobs:
           TEST_COVERAGE: 1
           TESTPKGS: ${{ matrix.pkg }}
           SKIP_INTEGRATION_TESTS: 1
-          CACHE_FROM: type=gha,scope=${{ inputs.cache_scope }}
+          # TODO(jhorsts): errors with HTTP 400
+          # CACHE_FROM: type=gha,scope=${{ inputs.cache_scope }}
       -
         name: Send to Codecov
         if: always()
@@ -192,7 +195,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: test-reports-${{ env.TEST_REPORT_NAME }}
           path: ./bin/testreports
           overwrite: true
       -
