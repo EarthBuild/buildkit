@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - 'master'
+      - 'main'
       - 'v[0-9]+.[0-9]+'
     tags:
       - 'v*'
@@ -23,8 +23,8 @@ on:
 env:
   GO_VERSION: "1.21"
   SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
-  SETUP_BUILDKIT_IMAGE: "moby/buildkit:latest"
-  IMAGE_NAME: "moby/buildkit"
+  SETUP_BUILDKIT_IMAGE: "earthbuild/buildkit:latest"
+  IMAGE_NAME: "earthbuild/buildkit"
   PLATFORMS: "linux/amd64,linux/arm/v7,linux/arm64,linux/s390x,linux/ppc64le,linux/riscv64"
   DESTDIR: "./bin"
 
