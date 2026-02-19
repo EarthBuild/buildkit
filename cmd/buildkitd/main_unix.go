@@ -5,6 +5,7 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
 	"os"
 	"syscall"
@@ -25,7 +26,9 @@ func init() {
 		if lim.Max < 1048576 {
 			lim.Max = 1048576
 		}
-		_ = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &lim)
+		if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &lim); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to raise RLIMIT_NOFILE: %v\n", err)
+		}
 	}
 }
 
