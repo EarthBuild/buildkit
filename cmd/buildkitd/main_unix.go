@@ -16,6 +16,17 @@ import (
 
 func init() {
 	syscall.Umask(0)
+
+	// Docker 29+ (containerd v2) lowered the default open file limit from
+	// 1048576 to 1024, which starves buildkitd. Raise it back.
+	var lim syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim); err == nil && lim.Cur < 1048576 {
+		lim.Cur = 1048576
+		if lim.Max < 1048576 {
+			lim.Max = 1048576
+		}
+		_ = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &lim)
+	}
 }
 
 func listenFD(addr string, tlsConfig *tls.Config) (net.Listener, error) {
