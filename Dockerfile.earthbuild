@@ -1,0 +1,66 @@
+# Builds the full earthbuild buildkitd image on top of the base buildkit image.
+# This adds earthbuild-specific tooling, config templates, debugger, and entrypoint.
+ARG BASE_TAG=latest
+
+# Build the earth_debugger from earthbuild2 source.
+FROM golang:1.25-alpine AS debugger
+RUN apk add --no-cache git
+ARG EARTHBUILD_SHA=main
+RUN git clone --depth 1 --branch ${EARTHBUILD_SHA} https://github.com/EarthBuild/earthbuild.git /src
+WORKDIR /src
+RUN CGO_ENABLED=0 go build \
+    -tags netgo -installsuffix netgo \
+    -o /earth_debugger \
+    cmd/debugger/*.go
+
+FROM earthbuild/buildkit:${BASE_TAG}
+
+RUN echo "@edge-community http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+RUN apk add --update --no-cache \
+    cni-plugins@edge-community \
+    gettext \
+    git-lfs \
+    iptables \
+    jq \
+    openssh-client \
+    pigz \
+    util-linux \
+    xz
+
+# Add github, gitlab, and bitbucket to known hosts.
+RUN mkdir -p ~/.ssh && \
+    echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ~/.ssh/known_hosts && \
+    echo "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=" >> ~/.ssh/known_hosts && \
+    echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=" >> ~/.ssh/known_hosts && \
+    echo "gitlab.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCsj2bNKTBSpIYDEGk9KxsGh3mySTRgMtXL583qmBpzeQ+jqCMRgBqB98u3z++J1sKlXHWfM9dyhSevkMwSbhoR8XIq/U0tCNyokEi/ueaBMCvbcTHhO7FcwzY92WK4Yt0aGROY5qX2UKSeOvuP4D6TPqKF1onrSzH9bx9XUf2lEdWT/ia1NEKjunUqu1xOB/StKDHMoX4/OKyIzuS0q/T1zOATthvasJFoPrAjkohTyaDUz2LN5JoH839hViyEG82yB+MjcFV5MU3N1l1QL3cVUCh93xSaua1N85qivl+siMkPGbO5xR/En4iEY6K2XPASUEMaieWVNTRCtJ4S8H+9" >> ~/.ssh/known_hosts && \
+    echo "gitlab.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBFSMqzJeV9rUzU4kWitGjeR4PWSa29SPqJ1fVkhtj3Hw9xjLVXVYrU9QlYWrOLXBpQ6KWjbjTDTdDkoohFzgbEY=" >> ~/.ssh/known_hosts && \
+    echo "gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf" >> ~/.ssh/known_hosts && \
+    echo "bitbucket.com ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAubiN81eDcafrgMeLzaFPsw2kNvEcqTKl/VqLat/MaB33pZy0y3rJZtnqwR2qOOvbwKZYKiEO1O6VqNEBxKvJJelCq0dTXWT5pbO2gDXC6h6QDXCaHo6pOHGPUy+YBaGQRGuSusMEASYiWunYN0vCAI8QaXnWMXNMdFP3jHAJH0eDsoiGnLPBlBp4TNm6rYI74nMzgz3B9IikW4WVK+dc8KZJZWYjAuORU3jc1c/NPskD2ASinf8v3xnfXeukU0sJ5N6m5E8VLjObPEO+mN2t/FZTMZLiFqPWc/ALSqnMnnhwrNi2rbfg/rd/IpL8Le3pSBne8+seeFVBoGqzHM9yXw==" >> ~/.ssh/known_hosts
+
+# Config templates and scripts.
+COPY earthbuild/entrypoint.sh /usr/bin/entrypoint.sh
+COPY earthbuild/buildkitd.toml.template /etc/buildkitd.toml.template
+COPY earthbuild/buildkitd.cache.template /etc/buildkitd.cache.template
+COPY earthbuild/buildkitd.cacheduration.template /etc/buildkitd.cacheduration.template
+COPY earthbuild/buildkitd.tcp.template /etc/buildkitd.tcp.template
+COPY earthbuild/buildkitd.pprof.template /etc/buildkitd.pprof.template
+COPY earthbuild/buildkitd.tls.template /etc/buildkitd.tls.template
+COPY earthbuild/cni-conf.json.template /etc/cni/cni-conf.json.template
+COPY --from=debugger /earth_debugger /usr/bin/earth_debugger
+COPY earthbuild/dockerd-wrapper.sh /var/earthbuild/dockerd-wrapper.sh
+COPY earthbuild/docker-auto-install.sh /var/earthbuild/docker-auto-install.sh
+COPY earthbuild/oom-adjust.sh.template /bin/oom-adjust.sh.template
+COPY earthbuild/runc-ps /bin/runc-ps
+
+ENV EARTHLY_RESET_TMP_DIR=false
+ENV EARTHLY_TMP_DIR=/tmp/earthbuild
+ENV BUILDKIT_DEBUG=false
+ENV BUILDKIT_MAX_PARALLELISM=20
+ENV BUILDKIT_LOCAL_REGISTRY_LISTEN_PORT=8371
+ENV BUILDKIT_STEP_LOG_MAX_SIZE=8388608
+ENV CACHE_SIZE_MB=0
+ENV CACHE_SIZE_PCT=0
+ENV NETWORK_MODE=cni
+ENV EARTHLY_CACHE_VERSION="2"
+VOLUME /tmp/earthbuild
+ENTRYPOINT ["/usr/bin/entrypoint.sh", "buildkitd", "--config=/etc/buildkitd.toml"]
