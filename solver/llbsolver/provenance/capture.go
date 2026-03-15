@@ -5,58 +5,20 @@ import (
 
 	distreference "github.com/distribution/reference"
 	resourcestypes "github.com/moby/buildkit/executor/resources/types"
+	provenancetypes "github.com/moby/buildkit/solver/llbsolver/provenance/types"
 	"github.com/moby/buildkit/solver/result"
 	"github.com/moby/buildkit/util/urlutil"
 	digest "github.com/opencontainers/go-digest"
-	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 type Result = result.Result[*Capture]
 
-type ImageSource struct {
-	Ref      string
-	Platform *ocispecs.Platform
-	Digest   digest.Digest
-	Local    bool
-}
-
-type GitSource struct {
-	URL    string
-	Commit string
-}
-
-type HTTPSource struct {
-	URL    string
-	Digest digest.Digest
-}
-
-type LocalSource struct {
-	Name string `json:"name"`
-}
-
-type Secret struct {
-	ID       string `json:"id"`
-	Optional bool   `json:"optional,omitempty"`
-}
-
-type SSH struct {
-	ID       string `json:"id"`
-	Optional bool   `json:"optional,omitempty"`
-}
-
-type Sources struct {
-	Images []ImageSource
-	Git    []GitSource
-	HTTP   []HTTPSource
-	Local  []LocalSource
-}
-
 type Capture struct {
 	Frontend            string
 	Args                map[string]string
-	Sources             Sources
-	Secrets             []Secret
-	SSH                 []SSH
+	Sources             provenancetypes.Sources
+	Secrets             []provenancetypes.Secret
+	SSH                 []provenancetypes.SSH
 	NetworkAccess       bool
 	IncompleteMaterials bool
 	Samples             map[digest.Digest]*resourcestypes.Samples
@@ -128,7 +90,7 @@ func (c *Capture) OptimizeImageSources() error {
 		}
 	}
 
-	images := make([]ImageSource, 0, len(c.Sources.Images))
+	images := make([]provenancetypes.ImageSource, 0, len(c.Sources.Images))
 	for _, i := range c.Sources.Images {
 		ref, nameTag, err := parseRefName(i.Ref)
 		if err != nil {
@@ -145,14 +107,16 @@ func (c *Capture) OptimizeImageSources() error {
 	return nil
 }
 
-func (c *Capture) AddImage(i ImageSource) {
+func (c *Capture) AddImage(i provenancetypes.ImageSource) {
 	for _, v := range c.Sources.Images {
 		if v.Ref == i.Ref && v.Local == i.Local {
 			if v.Platform == i.Platform {
 				return
 			}
 			if v.Platform != nil && i.Platform != nil {
-				if v.Platform.Architecture == i.Platform.Architecture && v.Platform.OS == i.Platform.OS && v.Platform.Variant == i.Platform.Variant {
+				// NOTE: Deliberately excluding OSFeatures, as there's no extant (or rational) case where a source image is an index and contains images distinguished only by OSFeature
+				// See https://github.com/moby/buildkit/pull/4387#discussion_r1376234241 and https://github.com/opencontainers/image-spec/issues/1147
+				if v.Platform.Architecture == i.Platform.Architecture && v.Platform.OS == i.Platform.OS && v.Platform.OSVersion == i.Platform.OSVersion && v.Platform.Variant == i.Platform.Variant {
 					return
 				}
 			}
@@ -161,7 +125,7 @@ func (c *Capture) AddImage(i ImageSource) {
 	c.Sources.Images = append(c.Sources.Images, i)
 }
 
-func (c *Capture) AddLocal(l LocalSource) {
+func (c *Capture) AddLocal(l provenancetypes.LocalSource) {
 	for _, v := range c.Sources.Local {
 		if v.Name == l.Name {
 			return
@@ -170,7 +134,7 @@ func (c *Capture) AddLocal(l LocalSource) {
 	c.Sources.Local = append(c.Sources.Local, l)
 }
 
-func (c *Capture) AddGit(g GitSource) {
+func (c *Capture) AddGit(g provenancetypes.GitSource) {
 	g.URL = urlutil.RedactCredentials(g.URL)
 	for _, v := range c.Sources.Git {
 		if v.URL == g.URL {
@@ -180,7 +144,7 @@ func (c *Capture) AddGit(g GitSource) {
 	c.Sources.Git = append(c.Sources.Git, g)
 }
 
-func (c *Capture) AddHTTP(h HTTPSource) {
+func (c *Capture) AddHTTP(h provenancetypes.HTTPSource) {
 	h.URL = urlutil.RedactCredentials(h.URL)
 	for _, v := range c.Sources.HTTP {
 		if v.URL == h.URL {
@@ -190,7 +154,7 @@ func (c *Capture) AddHTTP(h HTTPSource) {
 	c.Sources.HTTP = append(c.Sources.HTTP, h)
 }
 
-func (c *Capture) AddSecret(s Secret) {
+func (c *Capture) AddSecret(s provenancetypes.Secret) {
 	for i, v := range c.Secrets {
 		if v.ID == s.ID {
 			if !s.Optional {
@@ -202,7 +166,7 @@ func (c *Capture) AddSecret(s Secret) {
 	c.Secrets = append(c.Secrets, s)
 }
 
-func (c *Capture) AddSSH(s SSH) {
+func (c *Capture) AddSSH(s provenancetypes.SSH) {
 	if s.ID == "" {
 		s.ID = "default"
 	}

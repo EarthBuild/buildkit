@@ -38,6 +38,7 @@ type Backend interface {
 	ContainerdAddress() string
 
 	Rootless() bool
+	NetNSDetached() bool
 	Snapshotter() string
 	Supports(feature string) bool
 }
@@ -66,6 +67,7 @@ type Worker interface {
 	Close() error
 	Name() string
 	Rootless() bool
+	NetNSDetached() bool
 }
 
 type ConfigUpdater interface {
@@ -422,4 +424,11 @@ func prepareValueMatrix(tc testConf) []matrixValue {
 		m = append(m, matrixValue{})
 	}
 	return m
+}
+
+// Skips tests on Windows
+func SkipOnPlatform(t *testing.T, goos string) {
+	if runtime.GOOS == goos {
+		t.Skipf("Skipped on %s", goos)
+	}
 }

@@ -18,7 +18,7 @@ import (
 	"github.com/moby/buildkit/client"
 	controlgateway "github.com/moby/buildkit/control/gateway"
 	"github.com/moby/buildkit/executor/resources"
-	resourcetypes "github.com/moby/buildkit/executor/resources/types"
+	resourcestypes "github.com/moby/buildkit/executor/resources/types"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/frontend"
@@ -55,7 +55,7 @@ const keyEarthlyExporterInstance = "earthly-hack-exporter-instance"
 type ExporterRequest struct {
 	Type           string
 	Attrs          map[string]string
-	Exporter       exporter.ExporterInstance
+	Exporters      []exporter.ExporterInstance
 	CacheExporters []RemoteCacheExporter
 }
 
@@ -92,7 +92,7 @@ type Solver struct {
 	sm                        *session.Manager
 	entitlements              []string
 	history                   *HistoryQueue
-	sysSampler                *resources.Sampler[*resourcetypes.SysSample]
+	sysSampler                *resources.Sampler[*resourcestypes.SysSample]
 }
 
 // Processor defines a processing function to be applied after solving, but
@@ -125,6 +125,12 @@ func New(opt Opt) (*Solver, error) {
 	return s, nil
 }
 
+func (s *Solver) Close() error {
+	s.solver.Close()
+	err := s.sysSampler.Close()
+	return err
+}
+
 func (s *Solver) resolver() solver.ResolveOpFunc {
 	return func(v solver.Vertex, b solver.Builder) (solver.Op, error) {
 		w, err := s.resolveWorker()
@@ -151,11 +157,11 @@ func (s *Solver) Bridge(b solver.Builder) frontend.FrontendLLBBridge {
 	return s.bridge(b)
 }
 
-func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend.SolveRequest, exp ExporterRequest, j *solver.Job, usage *resources.SysSampler) (func(*Result, exporter.DescriptorReference, error) error, error) {
+func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend.SolveRequest, exp ExporterRequest, j *solver.Job, usage *resources.SysSampler) (func(*Result, []exporter.DescriptorReference, error) error, error) {
 	var stopTrace func() []tracetest.SpanStub
 
 	if s := trace.SpanFromContext(ctx); s.SpanContext().IsValid() {
-		if exp, err := detect.Exporter(); err == nil {
+		if exp, _, err := detect.Exporter(); err == nil {
 			if rec, ok := exp.(*detect.TraceRecorder); ok {
 				stopTrace = rec.Record(s.SpanContext().TraceID())
 			}
@@ -184,7 +190,7 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 		return nil, err
 	}
 
-	return func(res *Result, descref exporter.DescriptorReference, err error) error {
+	return func(res *Result, descrefs []exporter.DescriptorReference, err error) error {
 		en := time.Now()
 		rec.CompletedAt = &en
 
@@ -197,8 +203,9 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 			}
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
+		ctx, cancel := context.WithCancelCause(context.Background())
+		ctx, _ = context.WithTimeoutCause(ctx, 20*time.Second, errors.WithStack(context.DeadlineExceeded))
+		defer cancel(errors.WithStack(context.Canceled))
 
 		var mu sync.Mutex
 		ch := make(chan *client.SolveStatus)
@@ -270,6 +277,9 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 			}
 
 			for k, r := range res.Refs {
+				if r == nil {
+					continue
+				}
 				k, r := k, r
 				cp := res.Provenance.Refs[k]
 				eg.Go(func() error {
@@ -315,24 +325,39 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 			return j.Status(ctx2, false, ch)
 		})
 
-		if descref != nil {
+		setDeprecated := true
+		for i, descref := range descrefs {
+			i, descref := i, descref
+			if descref == nil {
+				continue
+			}
+			deprecate := setDeprecated
+			setDeprecated = false
 			eg.Go(func() error {
 				mu.Lock()
-				if rec.Result == nil {
-					rec.Result = &controlapi.BuildResultInfo{}
-				}
 				desc := descref.Descriptor()
-				rec.Result.Result = &controlapi.Descriptor{
+				controlDesc := &controlapi.Descriptor{
 					Digest:      desc.Digest,
 					Size_:       desc.Size,
 					MediaType:   desc.MediaType,
 					Annotations: desc.Annotations,
 				}
+				if rec.Result == nil {
+					rec.Result = &controlapi.BuildResultInfo{}
+				}
+				if rec.Result.Results == nil {
+					rec.Result.Results = make(map[int64]*controlapi.Descriptor)
+				}
+				if deprecate {
+					// write the first available descriptor to the deprecated
+					// field for legacy clients
+					rec.Result.ResultDeprecated = controlDesc
+				}
+				rec.Result.Results[int64(i)] = controlDesc
 				mu.Unlock()
 				return nil
 			})
 		}
-
 		if err1 := eg.Wait(); err == nil {
 			err = err1
 		}
@@ -418,7 +443,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 
 	defer j.Discard()
 
-	var usage *resources.Sub[*resourcetypes.SysSample]
+	var usage *resources.Sub[*resourcestypes.SysSample]
 	if s.sysSampler != nil {
 		usage = s.sysSampler.Record()
 		defer usage.Close(false)
@@ -426,15 +451,17 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 
 	var res *frontend.Result
 	var resProv *Result
-	var descref exporter.DescriptorReference
+	var descrefs []exporter.DescriptorReference
 
 	var releasers []func()
 	defer func() {
 		for _, f := range releasers {
 			f()
 		}
-		if descref != nil {
-			descref.Release()
+		for _, descref := range descrefs {
+			if descref != nil {
+				descref.Release()
+			}
 		}
 	}()
 
@@ -450,6 +477,9 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	j.SetValue(keyEarthlyExporterInstance, &exp)
 
 	if srcPol != nil {
+		if err := validateSourcePolicy(*srcPol); err != nil {
+			return nil, err
+		}
 		j.SetValue(keySourcePolicy, *srcPol)
 	}
 
@@ -458,7 +488,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	br := s.bridge(j)
 	var fwd gateway.LLBBridgeForwarder
 	if s.gatewayForwarder != nil && req.Definition == nil && req.Frontend == "" {
-		fwd = gateway.NewBridgeForwarder(ctx, br, s.workerController, req.FrontendInputs, sessionID, s.sm)
+		fwd = gateway.NewBridgeForwarder(ctx, br, br, s.workerController.Infos(), req.FrontendInputs, sessionID, s.sm)
 		defer fwd.Discard()
 		// Register build before calling s.recordBuildHistory, because
 		// s.recordBuildHistory can block for several seconds on
@@ -477,7 +507,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 			return nil, err1
 		}
 		defer func() {
-			err = rec(resProv, descref, err)
+			err = rec(resProv, descrefs, err)
 		}()
 	}
 
@@ -487,7 +517,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		case <-fwd.Done():
 			res, err = fwd.Result()
 		case <-ctx.Done():
-			err = ctx.Err()
+			err = context.Cause(ctx)
 		}
 		if err != nil {
 			return nil, err
@@ -556,21 +586,9 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	cacheExporters, inlineCacheExporter := splitCacheExporters(exp.CacheExporters)
 
 	var exporterResponse map[string]string
-	if e := exp.Exporter; e != nil {
-		meta, err := runInlineCacheExporter(ctx, e, inlineCacheExporter, j, cached)
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range meta {
-			inp.AddMeta(k, v)
-		}
-
-		if err := inBuilderContext(ctx, j, e.Name(), j.SessionID+"-export", func(ctx context.Context, _ session.Group) error {
-			exporterResponse, descref, err = e.Export(ctx, inp, j.SessionID)
-			return err
-		}); err != nil {
-			return nil, err
-		}
+	exporterResponse, descrefs, err = s.runExporters(ctx, exp.Exporters, inlineCacheExporter, j, cached, inp)
+	if err != nil {
+		return nil, err
 	}
 
 	cacheExporterResponse, err := runCacheExporters(ctx, cacheExporters, j, cached, inp)
@@ -598,47 +616,66 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	}, nil
 }
 
+func validateSourcePolicy(pol spb.Policy) error {
+	for _, r := range pol.Rules {
+		if r == nil {
+			return errors.New("invalid nil rule in policy")
+		}
+		if r.Selector == nil {
+			return errors.New("invalid nil selector in policy")
+		}
+		for _, c := range r.Selector.Constraints {
+			if c == nil {
+				return errors.New("invalid nil constraint in policy")
+			}
+		}
+	}
+	return nil
+}
+
 func runCacheExporters(ctx context.Context, exporters []RemoteCacheExporter, j *solver.Job, cached *result.Result[solver.CachedResult], inp *result.Result[cache.ImmutableRef]) (map[string]string, error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	g := session.NewGroup(j.SessionID)
 	var cacheExporterResponse map[string]string
 	resps := make([]map[string]string, len(exporters))
 	for i, exp := range exporters {
-		func(exp RemoteCacheExporter, i int) {
-			eg.Go(func() (err error) {
-				id := fmt.Sprint(j.SessionID, "-cache-", i)
-				err = inBuilderContext(ctx, j, exp.Exporter.Name(), id, func(ctx context.Context, _ session.Group) error {
-					prepareDone := progress.OneOff(ctx, "preparing build cache for export")
-					if err := result.EachRef(cached, inp, func(res solver.CachedResult, ref cache.ImmutableRef) error {
-						ctx = withDescHandlerCacheOpts(ctx, ref)
+		i, exp := i, exp
+		eg.Go(func() (err error) {
+			id := fmt.Sprint(j.SessionID, "-cache-", i)
+			err = inBuilderContext(ctx, j, exp.Exporter.Name(), id, func(ctx context.Context, _ session.Group) error {
+				prepareDone := progress.OneOff(ctx, "preparing build cache for export")
+				if err := result.EachRef(cached, inp, func(res solver.CachedResult, ref cache.ImmutableRef) error {
+					ctx = withDescHandlerCacheOpts(ctx, ref)
 
-						// Configure compression
-						compressionConfig := exp.Config().Compression
+					// Configure compression
+					compressionConfig := exp.Config().Compression
 
-						// all keys have same export chain so exporting others is not needed
-						_, err = res.CacheKeys()[0].Exporter.ExportTo(ctx, exp, solver.CacheExportOpt{
-							ResolveRemotes: workerRefResolver(cacheconfig.RefConfig{Compression: compressionConfig}, false, g),
-							Mode:           exp.CacheExportMode,
-							Session:        g,
-							CompressionOpt: &compressionConfig,
-						})
-						return err
-					}); err != nil {
-						return prepareDone(err)
-					}
-					resps[i], err = exp.Finalize(ctx)
+					// all keys have same export chain so exporting others is not needed
+					_, err = res.CacheKeys()[0].Exporter.ExportTo(ctx, exp, solver.CacheExportOpt{
+						ResolveRemotes: workerRefResolver(cacheconfig.RefConfig{Compression: compressionConfig}, false, g),
+						Mode:           exp.CacheExportMode,
+						Session:        g,
+						CompressionOpt: &compressionConfig,
+					})
+					return err
+				}); err != nil {
 					return prepareDone(err)
-				})
-				if exp.IgnoreError {
-					err = nil
 				}
-				return err
+				resps[i], err = exp.Finalize(ctx)
+				return prepareDone(err)
 			})
-		}(exp, i)
+			if exp.IgnoreError {
+				err = nil
+			}
+			return err
+		})
 	}
 	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
+
+	// TODO: separate these out, and return multiple cache exporter responses
+	// to the client
 	for _, resp := range resps {
 		for k, v := range resp {
 			if cacheExporterResponse == nil {
@@ -650,42 +687,69 @@ func runCacheExporters(ctx context.Context, exporters []RemoteCacheExporter, j *
 	return cacheExporterResponse, nil
 }
 
-func runInlineCacheExporter(ctx context.Context, e exporter.ExporterInstance, inlineExporter *RemoteCacheExporter, j *solver.Job, cached *result.Result[solver.CachedResult]) (map[string][]byte, error) {
-	meta := map[string][]byte{}
+func runInlineCacheExporter(ctx context.Context, e exporter.ExporterInstance, inlineExporter inlineCacheExporter, j *solver.Job, cached *result.Result[solver.CachedResult]) (*result.Result[*exptypes.InlineCacheEntry], error) {
 	if inlineExporter == nil {
 		return nil, nil
 	}
-	if err := inBuilderContext(ctx, j, "preparing layers for inline cache", j.SessionID+"-cache-inline", func(ctx context.Context, _ session.Group) error {
-		if res := cached.Ref; res != nil {
-			dtic, err := inlineCache(ctx, inlineExporter.Exporter, res, e.Config().Compression(), session.NewGroup(j.SessionID))
-			if err != nil {
-				return err
-			}
-			if dtic != nil {
-				meta[exptypes.ExporterInlineCache] = dtic
-			}
+
+	done := progress.OneOff(ctx, "preparing layers for inline cache")
+	res, err := result.ConvertResult(cached, func(res solver.CachedResult) (*exptypes.InlineCacheEntry, error) {
+		dtic, err := inlineCache(ctx, inlineExporter, res, e.Config().Compression(), session.NewGroup(j.SessionID))
+		if err != nil {
+			return nil, err
 		}
-		for k, res := range cached.Refs {
-			dtic, err := inlineCache(ctx, inlineExporter.Exporter, res, e.Config().Compression(), session.NewGroup(j.SessionID))
-			if err != nil {
-				return err
-			}
-			if dtic != nil {
-				meta[fmt.Sprintf("%s/%s", exptypes.ExporterInlineCache, k)] = dtic
-			}
+		if dtic == nil {
+			return nil, nil
 		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return meta, nil
+		return &exptypes.InlineCacheEntry{Data: dtic}, nil
+	})
+	return res, done(err)
 }
 
-func splitCacheExporters(exporters []RemoteCacheExporter) (rest []RemoteCacheExporter, inline *RemoteCacheExporter) {
-	rest = make([]RemoteCacheExporter, 0, len(exporters))
+func (s *Solver) runExporters(ctx context.Context, exporters []exporter.ExporterInstance, inlineCacheExporter inlineCacheExporter, job *solver.Job, cached *result.Result[solver.CachedResult], inp *result.Result[cache.ImmutableRef]) (exporterResponse map[string]string, descrefs []exporter.DescriptorReference, err error) {
+	eg, ctx := errgroup.WithContext(ctx)
+	resps := make([]map[string]string, len(exporters))
+	descs := make([]exporter.DescriptorReference, len(exporters))
 	for i, exp := range exporters {
-		if _, ok := asInlineCache(exp.Exporter); ok {
-			inline = &exporters[i]
+		i, exp := i, exp
+		eg.Go(func() error {
+			id := fmt.Sprint(job.SessionID, "-export-", i)
+			return inBuilderContext(ctx, job, exp.Name(), id, func(ctx context.Context, _ session.Group) error {
+				inlineCache := exptypes.InlineCache(func(ctx context.Context) (*result.Result[*exptypes.InlineCacheEntry], error) {
+					return runInlineCacheExporter(ctx, exp, inlineCacheExporter, job, cached)
+				})
+
+				resps[i], descs[i], err = exp.Export(ctx, inp, inlineCache, job.SessionID)
+				if err != nil {
+					return err
+				}
+				return nil
+			})
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return nil, nil, err
+	}
+
+	// TODO: separate these out, and return multiple exporter responses to the
+	// client
+	for _, resp := range resps {
+		for k, v := range resp {
+			if exporterResponse == nil {
+				exporterResponse = make(map[string]string)
+			}
+			exporterResponse[k] = v
+		}
+	}
+
+	return exporterResponse, descs, nil
+}
+
+func splitCacheExporters(exporters []RemoteCacheExporter) (rest []RemoteCacheExporter, inline inlineCacheExporter) {
+	rest = make([]RemoteCacheExporter, 0, len(exporters))
+	for _, exp := range exporters {
+		if ic, ok := asInlineCache(exp.Exporter); ok {
+			inline = ic
 			continue
 		}
 		rest = append(rest, exp)
@@ -721,6 +785,9 @@ func addProvenanceToResult(res *frontend.Result, br *provenanceBridge) (*Result,
 		out.Provenance.Refs = make(map[string]*provenance.Capture, len(res.Refs))
 	}
 	for k, ref := range res.Refs {
+		if ref == nil {
+			continue
+		}
 		cp, err := getProvenance(ref, reqs.refs[k].bridge, k, reqs)
 		if err != nil {
 			return nil, err
@@ -823,6 +890,7 @@ func getProvenance(ref solver.ResultProxy, br *provenanceBridge, id string, reqs
 }
 
 type inlineCacheExporter interface {
+	solver.CacheExporterTarget
 	ExportForLayers(context.Context, []digest.Digest) ([]byte, error)
 }
 
@@ -831,11 +899,7 @@ func asInlineCache(e remotecache.Exporter) (inlineCacheExporter, bool) {
 	return ie, ok
 }
 
-func inlineCache(ctx context.Context, e remotecache.Exporter, res solver.CachedResult, compressionopt compression.Config, g session.Group) ([]byte, error) {
-	ie, ok := asInlineCache(e)
-	if !ok {
-		return nil, nil
-	}
+func inlineCache(ctx context.Context, ie inlineCacheExporter, res solver.CachedResult, compressionopt compression.Config, g session.Group) ([]byte, error) {
 	workerRef, ok := res.Sys().(*worker.WorkerRef)
 	if !ok {
 		return nil, errors.Errorf("invalid reference: %T", res.Sys())
@@ -854,7 +918,7 @@ func inlineCache(ctx context.Context, e remotecache.Exporter, res solver.CachedR
 
 	ctx = withDescHandlerCacheOpts(ctx, workerRef.ImmutableRef)
 	refCfg := cacheconfig.RefConfig{Compression: compressionopt}
-	if _, err := res.CacheKeys()[0].Exporter.ExportTo(ctx, e, solver.CacheExportOpt{
+	if _, err := res.CacheKeys()[0].Exporter.ExportTo(ctx, ie, solver.CacheExportOpt{
 		ResolveRemotes: workerRefResolver(refCfg, true, g), // load as many compression blobs as possible
 		Mode:           solver.CacheExportModeMin,
 		Session:        g,
@@ -994,6 +1058,9 @@ func loadSourcePolicy(b solver.Builder) (*spb.Policy, error) {
 			return errors.Errorf("invalid source policy %T", v)
 		}
 		for _, f := range x.Rules {
+			if f == nil {
+				return errors.Errorf("invalid nil policy rule")
+			}
 			r := *f
 			srcPol.Rules = append(srcPol.Rules, &r)
 		}

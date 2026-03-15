@@ -60,7 +60,8 @@ const (
 	CapExecMountTmpfsSize                apicaps.CapID = "exec.mount.tmpfs.size"
 	CapExecMountSecret                   apicaps.CapID = "exec.mount.secret"
 	CapExecMountSSH                      apicaps.CapID = "exec.mount.ssh"
-	CapExecMountSock                     apicaps.CapID = "exec.mount.sock"
+	CapExecMountSock                     apicaps.CapID = "exec.mount.sock"         // earthly-specific
+	CapExecMountContentCache             apicaps.CapID = "exec.mount.cache.content"
 	CapExecCgroupsMounted                apicaps.CapID = "exec.cgroup"
 	CapExecSecretEnv                     apicaps.CapID = "exec.secretenv"
 
@@ -88,6 +89,8 @@ const (
 
 	// CapSourceDateEpoch is the capability to automatically handle the date epoch
 	CapSourceDateEpoch apicaps.CapID = "exporter.sourcedateepoch"
+
+	CapMultipleExporters apicaps.CapID = "exporter.multiple"
 
 	CapSourcePolicy apicaps.CapID = "source.policy"
 
@@ -366,6 +369,12 @@ func init() {
 	})
 
 	Caps.Init(apicaps.Cap{
+		ID:      CapExecMountContentCache,
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
 		ID:      CapExecCgroupsMounted,
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
@@ -480,6 +489,12 @@ func init() {
 	Caps.Init(apicaps.Cap{
 		ID:      CapSourceDateEpoch,
 		Name:    "source date epoch",
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
+		ID:      CapMultipleExporters,
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
 	})

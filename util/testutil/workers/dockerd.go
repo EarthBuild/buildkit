@@ -71,6 +71,10 @@ func (c Moby) Rootless() bool {
 	return c.IsRootless
 }
 
+func (c Moby) NetNSDetached() bool {
+	return false
+}
+
 func (c Moby) New(ctx context.Context, cfg *integration.BackendConfig) (b integration.Backend, cl func() error, err error) {
 	if err := requireRoot(); err != nil {
 		return nil, nil, err
@@ -159,7 +163,7 @@ func (c Moby) New(ctx context.Context, cfg *integration.BackendConfig) (b integr
 	}
 	deferF.Append(d.StopWithError)
 
-	if err := integration.WaitUnix(d.Sock(), 5*time.Second, nil); err != nil {
+	if err := integration.WaitSocket(d.Sock(), 5*time.Second, nil); err != nil {
 		return nil, nil, errors.Errorf("dockerd did not start up: %q, %s", err, integration.FormatLogs(cfg.Logs))
 	}
 
@@ -224,6 +228,7 @@ func (c Moby) New(ctx context.Context, cfg *integration.BackendConfig) (b integr
 		address:             "unix://" + listener.Addr().String(),
 		dockerAddress:       d.Sock(),
 		rootless:            c.IsRootless,
+		netnsDetached:       false,
 		isDockerd:           true,
 		unsupportedFeatures: c.Unsupported,
 	}, cl, nil

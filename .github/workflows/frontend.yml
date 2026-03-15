@@ -28,6 +28,7 @@ env:
 jobs:
   test:
     uses: ./.github/workflows/.test.yml
+    secrets: inherit
     with:
       cache_scope: frontend-integration-tests
       pkgs: ./frontend/dockerfile
@@ -62,6 +63,9 @@ jobs:
             if [ $GITHUB_REF = "refs/heads/${{ github.event.repository.default_branch }}" ]; then
               PUSH=push
             fi
+          fi
+          if [ "$GITHUB_REPOSITORY" != "moby/buildkit" ]; then
+            PUSH=false
           fi
           echo "typ=${TYP}" >>${GITHUB_OUTPUT}
           echo "push=${PUSH}" >>${GITHUB_OUTPUT}

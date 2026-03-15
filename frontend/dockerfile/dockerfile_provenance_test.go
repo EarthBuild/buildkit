@@ -29,7 +29,7 @@ import (
 	"github.com/moby/buildkit/frontend/dockerui"
 	gateway "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/identity"
-	"github.com/moby/buildkit/solver/llbsolver/provenance"
+	provenancetypes "github.com/moby/buildkit/solver/llbsolver/provenance/types"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/testutil"
@@ -38,9 +38,11 @@ import (
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
+	"github.com/tonistiigi/fsutil"
 )
 
 func testProvenanceAttestation(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureDirectPush, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -79,7 +81,7 @@ RUN echo "ok" > /foo
 				provReq = "mode=" + mode
 			}
 			_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-				LocalDirs: map[string]string{
+				LocalMounts: map[string]fsutil.FS{
 					dockerui.DefaultLocalNameDockerfile: dir,
 					dockerui.DefaultLocalNameContext:    dir,
 				},
@@ -124,7 +126,7 @@ RUN echo "ok" > /foo
 			require.Equal(t, "https://slsa.dev/provenance/v0.2", attest.PredicateType) // intentionally not const
 
 			type stmtT struct {
-				Predicate provenance.ProvenancePredicate `json:"predicate"`
+				Predicate provenancetypes.ProvenancePredicate `json:"predicate"`
 			}
 			var stmt stmtT
 			require.NoError(t, json.Unmarshal(att.LayersRaw[0], &stmt))
@@ -231,6 +233,7 @@ RUN echo "ok" > /foo
 }
 
 func testGitProvenanceAttestation(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureDirectPush, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -256,7 +259,7 @@ COPY myapp.Dockerfile /
 		fstest.CreateFile("myapp.Dockerfile", dockerfile, 0600),
 	)
 
-	err = runShell(dir,
+	err = runShell(dir.Name,
 		"git init",
 		"git config --local user.email test",
 		"git config --local user.name test",
@@ -268,11 +271,11 @@ COPY myapp.Dockerfile /
 	require.NoError(t, err)
 
 	cmd := exec.Command("git", "rev-parse", "v1")
-	cmd.Dir = dir
+	cmd.Dir = dir.Name
 	expectedGitSHA, err := cmd.Output()
 	require.NoError(t, err)
 
-	server := httptest.NewServer(http.FileServer(http.Dir(filepath.Join(dir))))
+	server := httptest.NewServer(http.FileServer(http.Dir(filepath.Join(dir.Name))))
 	defer server.Close()
 
 	target := registry + "/buildkit/testwithprovenance:git"
@@ -320,7 +323,7 @@ COPY myapp.Dockerfile /
 	require.Equal(t, "https://slsa.dev/provenance/v0.2", attest.PredicateType) // intentionally not const
 
 	type stmtT struct {
-		Predicate provenance.ProvenancePredicate `json:"predicate"`
+		Predicate provenancetypes.ProvenancePredicate `json:"predicate"`
 	}
 	var stmt stmtT
 	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &stmt))
@@ -378,6 +381,7 @@ COPY myapp.Dockerfile /
 }
 
 func testMultiPlatformProvenance(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureDirectPush, workers.FeatureMultiPlatform, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -406,7 +410,7 @@ RUN echo "ok-$TARGETARCH" > /foo
 	target := registry + "/buildkit/testmultiprovenance:latest"
 
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -455,7 +459,7 @@ RUN echo "ok-$TARGETARCH" > /foo
 		require.Equal(t, "https://slsa.dev/provenance/v0.2", attest.PredicateType) // intentionally not const
 
 		type stmtT struct {
-			Predicate provenance.ProvenancePredicate `json:"predicate"`
+			Predicate provenancetypes.ProvenancePredicate `json:"predicate"`
 		}
 		var stmt stmtT
 		require.NoError(t, json.Unmarshal(att.LayersRaw[0], &stmt))
@@ -493,6 +497,7 @@ RUN echo "ok-$TARGETARCH" > /foo
 }
 
 func testClientFrontendProvenance(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureDirectPush, workers.FeatureProvenance)
 	// Building with client frontend does not capture frontend provenance
 	// because frontend runs in client, not in BuildKit.
@@ -610,7 +615,7 @@ func testClientFrontendProvenance(t *testing.T, sb integration.Sandbox) {
 				},
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -636,7 +641,7 @@ func testClientFrontendProvenance(t *testing.T, sb integration.Sandbox) {
 	require.Equal(t, "https://slsa.dev/provenance/v0.2", attest.PredicateType) // intentionally not const
 
 	type stmtT struct {
-		Predicate provenance.ProvenancePredicate `json:"predicate"`
+		Predicate provenancetypes.ProvenancePredicate `json:"predicate"`
 	}
 	var stmt stmtT
 	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &stmt))
@@ -687,6 +692,7 @@ func testClientFrontendProvenance(t *testing.T, sb integration.Sandbox) {
 }
 
 func testClientLLBProvenance(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureDirectPush, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -756,7 +762,7 @@ func testClientLLBProvenance(t *testing.T, sb integration.Sandbox) {
 				},
 			},
 		},
-		LocalDirs: map[string]string{},
+		LocalMounts: map[string]fsutil.FS{},
 	}, "", frontend, nil)
 	require.NoError(t, err)
 
@@ -781,7 +787,7 @@ func testClientLLBProvenance(t *testing.T, sb integration.Sandbox) {
 	require.Equal(t, "https://slsa.dev/provenance/v0.2", attest.PredicateType) // intentionally not const
 
 	type stmtT struct {
-		Predicate provenance.ProvenancePredicate `json:"predicate"`
+		Predicate provenancetypes.ProvenancePredicate `json:"predicate"`
 	}
 	var stmt stmtT
 	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &stmt))
@@ -801,6 +807,7 @@ func testClientLLBProvenance(t *testing.T, sb integration.Sandbox) {
 }
 
 func testSecretSSHProvenance(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureDirectPush, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -827,7 +834,7 @@ RUN --mount=type=secret,id=mysecret --mount=type=secret,id=othersecret --mount=t
 
 	target := registry + "/buildkit/testsecretprovenance:latest"
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -860,7 +867,7 @@ RUN --mount=type=secret,id=mysecret --mount=type=secret,id=othersecret --mount=t
 
 	att := imgs.FindAttestation(expPlatform)
 	type stmtT struct {
-		Predicate provenance.ProvenancePredicate `json:"predicate"`
+		Predicate provenancetypes.ProvenancePredicate `json:"predicate"`
 	}
 	var stmt stmtT
 	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &stmt))
@@ -878,6 +885,7 @@ RUN --mount=type=secret,id=mysecret --mount=type=secret,id=othersecret --mount=t
 }
 
 func testOCILayoutProvenance(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -908,7 +916,7 @@ EOF
 	)
 
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -948,7 +956,7 @@ EOF
 	)
 
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -986,7 +994,7 @@ EOF
 
 	att := imgs.FindAttestation(expPlatform)
 	type stmtT struct {
-		Predicate provenance.ProvenancePredicate `json:"predicate"`
+		Predicate provenancetypes.ProvenancePredicate `json:"predicate"`
 	}
 	var stmt stmtT
 	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &stmt))
@@ -1011,6 +1019,7 @@ EOF
 }
 
 func testNilProvenance(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -1030,7 +1039,7 @@ ENV FOO=bar
 	)
 
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -1048,6 +1057,7 @@ ENV FOO=bar
 
 // https://github.com/moby/buildkit/issues/3562
 func testDuplicatePlatformProvenance(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -1068,7 +1078,7 @@ func testDuplicatePlatformProvenance(t *testing.T, sb integration.Sandbox) {
 			"attest:provenance": "mode=max",
 			"platform":          "linux/amd64,linux/amd64",
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -1078,6 +1088,7 @@ func testDuplicatePlatformProvenance(t *testing.T, sb integration.Sandbox) {
 
 // https://github.com/moby/buildkit/issues/3928
 func testDockerIgnoreMissingProvenance(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureProvenance)
 	c, err := client.New(sb.Context(), sb.Address())
 	require.NoError(t, err)
@@ -1094,7 +1105,7 @@ func testDockerIgnoreMissingProvenance(t *testing.T, sb integration.Sandbox) {
 		// remove the directory to simulate the case where the context
 		// directory does not exist, and either no validation checks were run,
 		// or they passed erroneously
-		if err := os.RemoveAll(dirContext); err != nil {
+		if err := os.RemoveAll(dirContext.Name); err != nil {
 			return nil, err
 		}
 
@@ -1111,7 +1122,7 @@ func testDockerIgnoreMissingProvenance(t *testing.T, sb integration.Sandbox) {
 		FrontendAttrs: map[string]string{
 			"attest:provenance": "mode=max",
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dirDockerfile,
 			dockerui.DefaultLocalNameContext:    dirContext,
 		},
@@ -1120,6 +1131,7 @@ func testDockerIgnoreMissingProvenance(t *testing.T, sb integration.Sandbox) {
 }
 
 func testFrontendDeduplicateSources(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	ctx := sb.Context()
 
 	c, err := client.New(ctx, sb.Address())
@@ -1200,7 +1212,7 @@ COPY bar bar2
 	ref := identity.NewID()
 
 	_, err = c.Build(ctx, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -1256,7 +1268,7 @@ COPY bar bar2
 
 	require.NotEqual(t, len(provDt), 0)
 
-	var pred provenance.ProvenancePredicate
+	var pred provenancetypes.ProvenancePredicate
 	require.NoError(t, json.Unmarshal(provDt, &pred))
 
 	sources := pred.Metadata.BuildKitMetadata.Source.Infos
@@ -1267,4 +1279,86 @@ COPY bar bar2
 
 	require.Equal(t, dockerfile, sources[0].Data)
 	require.NotEqual(t, 0, len(sources[0].Definition))
+}
+
+func testDuplicateLayersProvenance(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
+	workers.CheckFeatureCompat(t, sb, workers.FeatureDirectPush, workers.FeatureProvenance)
+	ctx := sb.Context()
+
+	c, err := client.New(ctx, sb.Address())
+	require.NoError(t, err)
+	defer c.Close()
+
+	registry, err := sb.NewRegistry()
+	if errors.Is(err, integration.ErrRequirements) {
+		t.Skip(err.Error())
+	}
+	require.NoError(t, err)
+
+	f := getFrontend(t, sb)
+
+	// Create a triangle shape with the layers.
+	// This will trigger the provenance attestation to attempt to add the base
+	// layer multiple times.
+	dockerfile := []byte(`
+FROM busybox:latest AS base
+
+FROM base AS a
+RUN date +%s > /a.txt
+
+FROM base AS b
+COPY --from=a /a.txt /
+RUN date +%s > /b.txt
+`)
+	dir := integration.Tmpdir(
+		t,
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
+	)
+
+	target := registry + "/buildkit/testwithprovenance:dup"
+
+	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
+		LocalMounts: map[string]fsutil.FS{
+			dockerui.DefaultLocalNameDockerfile: dir,
+			dockerui.DefaultLocalNameContext:    dir,
+		},
+		FrontendAttrs: map[string]string{
+			"attest:provenance": "mode=max",
+			"filename":          "Dockerfile",
+		},
+		Exports: []client.ExportEntry{
+			{
+				Type: client.ExporterImage,
+				Attrs: map[string]string{
+					"name": target,
+					"push": "true",
+				},
+			},
+		},
+	}, nil)
+	require.NoError(t, err)
+
+	desc, provider, err := contentutil.ProviderFromRef(target)
+	require.NoError(t, err)
+	imgs, err := testutil.ReadImages(sb.Context(), provider, desc)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(imgs.Images))
+
+	att := imgs.Find("unknown/unknown")
+	require.NotNil(t, att)
+
+	var stmt struct {
+		Predicate provenancetypes.ProvenancePredicate `json:"predicate"`
+	}
+	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &stmt))
+	pred := stmt.Predicate
+
+	// Search for the layer list for step0.
+	metadata := pred.Metadata
+	require.NotNil(t, metadata)
+
+	layers := metadata.BuildKitMetadata.Layers["step0:0"]
+	require.NotNil(t, layers)
+	require.Len(t, layers, 1)
 }

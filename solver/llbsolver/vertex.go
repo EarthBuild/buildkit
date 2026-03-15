@@ -79,17 +79,29 @@ func NormalizeRuntimePlatforms() LoadOpt {
 					OS:           p.OS,
 					Architecture: p.Architecture,
 					Variant:      p.Variant,
+					OSVersion:    p.OSVersion,
+					OSFeatures:   p.OSFeatures,
 				}
 			}
 			op.Platform = defaultPlatform
 		}
-		platform := ocispecs.Platform{OS: op.Platform.OS, Architecture: op.Platform.Architecture, Variant: op.Platform.Variant}
+		platform := ocispecs.Platform{
+			OS:           op.Platform.OS,
+			Architecture: op.Platform.Architecture,
+			Variant:      op.Platform.Variant,
+			OSVersion:    op.Platform.OSVersion,
+			OSFeatures:   op.Platform.OSFeatures,
+		}
 		normalizedPlatform := platforms.Normalize(platform)
 
 		op.Platform = &pb.Platform{
 			OS:           normalizedPlatform.OS,
 			Architecture: normalizedPlatform.Architecture,
 			Variant:      normalizedPlatform.Variant,
+			OSVersion:    normalizedPlatform.OSVersion,
+		}
+		if normalizedPlatform.OSFeatures != nil {
+			op.Platform.OSFeatures = append([]string{}, normalizedPlatform.OSFeatures...)
 		}
 
 		return nil
@@ -100,16 +112,12 @@ func ValidateEntitlements(ent entitlements.Set) LoadOpt {
 	return func(op *pb.Op, _ *pb.OpMetadata, opt *solver.VertexOptions) error {
 		switch op := op.Op.(type) {
 		case *pb.Op_Exec:
-			if op.Exec.Network == pb.NetMode_HOST {
-				if !ent.Allowed(entitlements.EntitlementNetworkHost) {
-					return errors.Errorf("%s is not allowed", entitlements.EntitlementNetworkHost)
-				}
+			v := entitlements.Values{
+				NetworkHost:      op.Exec.Network == pb.NetMode_HOST,
+				SecurityInsecure: op.Exec.Security == pb.SecurityMode_INSECURE,
 			}
-
-			if op.Exec.Security == pb.SecurityMode_INSECURE {
-				if !ent.Allowed(entitlements.EntitlementSecurityInsecure) {
-					return errors.Errorf("%s is not allowed", entitlements.EntitlementSecurityInsecure)
-				}
+			if err := ent.Check(v); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -194,8 +202,10 @@ func recomputeDigests(ctx context.Context, all map[digest.Digest]*pb.Op, visited
 
 	var mutated bool
 	for _, input := range op.Inputs {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
+		select {
+		case <-ctx.Done():
+			return "", context.Cause(ctx)
+		default:
 		}
 
 		iDgst, err := recomputeDigests(ctx, all, visited, input.Digest)
@@ -243,7 +253,7 @@ func loadLLB(ctx context.Context, def *pb.Definition, polEngine SourcePolicyEval
 		}
 		dgst := digest.FromBytes(dt)
 		if polEngine != nil {
-			mutated, err := polEngine.Evaluate(ctx, &op)
+			mutated, err := polEngine.Evaluate(ctx, op.GetSource())
 			if err != nil {
 				return solver.Edge{}, errors.Wrap(err, "error evaluating the source policy")
 			}

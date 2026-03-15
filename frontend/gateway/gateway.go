@@ -25,9 +25,9 @@ import (
 	cacheutil "github.com/moby/buildkit/cache/util"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/executor"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
-	"github.com/moby/buildkit/exporter/containerimage/image"
 	"github.com/moby/buildkit/frontend"
 	"github.com/moby/buildkit/frontend/dockerui"
 	gwclient "github.com/moby/buildkit/frontend/gateway/client"
@@ -47,6 +47,7 @@ import (
 	"github.com/moby/buildkit/util/stack"
 	"github.com/moby/buildkit/util/tracing"
 	"github.com/moby/buildkit/worker"
+	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 	"github.com/moby/sys/signal"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -86,14 +87,14 @@ func filterPrefix(opts map[string]string, pfx string) map[string]string {
 	return m
 }
 
-func (gf *gatewayFrontend) Solve(ctx context.Context, llbBridge frontend.FrontendLLBBridge, opts map[string]string, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) (*frontend.Result, error) {
+func (gf *gatewayFrontend) Solve(ctx context.Context, llbBridge frontend.FrontendLLBBridge, exec executor.Executor, opts map[string]string, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) (*frontend.Result, error) {
 	source, ok := opts[keySource]
 	if !ok {
 		return nil, errors.Errorf("no source specified for gateway")
 	}
 
 	_, isDevel := opts[keyDevel]
-	var img image.Image
+	var img dockerspec.DockerOCIImage
 	var mfstDigest digest.Digest
 	var rootFS cache.MutableRef
 	var readonly bool // TODO: try to switch to read-only by default.
@@ -141,7 +142,7 @@ func (gf *gatewayFrontend) Solve(ctx context.Context, llbBridge frontend.Fronten
 			}
 		}
 	} else {
-		c, err := forwarder.LLBBridgeToGatewayClient(ctx, llbBridge, opts, inputs, gf.workers, sid, sm)
+		c, err := forwarder.LLBBridgeToGatewayClient(ctx, llbBridge, exec, opts, inputs, gf.workers, sid, sm)
 		if err != nil {
 			return nil, err
 		}
@@ -164,7 +165,8 @@ func (gf *gatewayFrontend) Solve(ctx context.Context, llbBridge frontend.Fronten
 				return nil, err
 			}
 
-			ref, dgst, config, err := llbBridge.ResolveImageConfig(ctx, reference.TagNameOnly(sourceRef).String(), llb.ResolveImageConfigOpt{})
+			imr := sourceresolver.NewImageMetaResolver(llbBridge)
+			ref, dgst, config, err := imr.ResolveImageConfig(ctx, reference.TagNameOnly(sourceRef).String(), sourceresolver.Opt{})
 			if err != nil {
 				return nil, err
 			}
@@ -281,17 +283,12 @@ func (gf *gatewayFrontend) Solve(ctx context.Context, llbBridge frontend.Fronten
 		}
 	}
 
-	lbf, ctx, err := serveLLBBridgeForwarder(ctx, llbBridge, gf.workers, inputs, sid, sm)
+	lbf, ctx, err := serveLLBBridgeForwarder(ctx, llbBridge, exec, gf.workers, inputs, sid, sm)
 	defer lbf.conn.Close() //nolint
 	if err != nil {
 		return nil, err
 	}
 	defer lbf.Discard()
-
-	w, err := gf.workers.GetDefault()
-	if err != nil {
-		return nil, err
-	}
 
 	mdmnt, release, err := metadataMount(frontendDef)
 	if err != nil {
@@ -305,7 +302,7 @@ func (gf *gatewayFrontend) Solve(ctx context.Context, llbBridge frontend.Fronten
 		mnts = append(mnts, *mdmnt)
 	}
 
-	_, err = w.Executor().Run(ctx, "", container.MountWithSession(rootFS, session.NewGroup(sid)), mnts, executor.ProcessInfo{Meta: meta, Stdin: lbf.Stdin, Stdout: lbf.Stdout, Stderr: os.Stderr}, nil)
+	_, err = exec.Run(ctx, "", container.MountWithSession(rootFS, session.NewGroup(sid)), mnts, executor.ProcessInfo{Meta: meta, Stdin: lbf.Stdin, Stdout: lbf.Stdout, Stderr: os.Stderr}, nil)
 	if err != nil {
 		if errdefs.IsCanceled(ctx, err) && lbf.isErrServerClosed {
 			err = errors.Errorf("frontend grpc server closed unexpectedly")
@@ -364,7 +361,7 @@ func (b *bindMount) Mount() ([]mount.Mount, func() error, error) {
 	return []mount.Mount{{
 		Type:    "bind",
 		Source:  b.dir,
-		Options: []string{"bind", "ro"},
+		Options: []string{"bind", "ro", "nosuid", "nodev", "noexec"},
 	}}, func() error { return nil }, nil
 }
 func (b *bindMount) IdentityMapping() *idtools.IdentityMapping {
@@ -434,11 +431,11 @@ func (lbf *llbBridgeForwarder) Result() (*frontend.Result, error) {
 	return lbf.result, nil
 }
 
-func NewBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridge, workers worker.Infos, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) LLBBridgeForwarder {
-	return newBridgeForwarder(ctx, llbBridge, workers, inputs, sid, sm)
+func NewBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridge, exec executor.Executor, workers worker.Infos, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) LLBBridgeForwarder {
+	return newBridgeForwarder(ctx, llbBridge, exec, workers, inputs, sid, sm)
 }
 
-func newBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridge, workers worker.Infos, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) *llbBridgeForwarder {
+func newBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridge, exec executor.Executor, workers worker.Infos, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) *llbBridgeForwarder {
 	lbf := &llbBridgeForwarder{
 		callCtx:       ctx,
 		llbBridge:     llbBridge,
@@ -451,13 +448,14 @@ func newBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridg
 		sid:           sid,
 		sm:            sm,
 		ctrs:          map[string]gwclient.Container{},
+		executor:      exec,
 	}
 	return lbf
 }
 
-func serveLLBBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridge, workers worker.Infos, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) (*llbBridgeForwarder, context.Context, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	lbf := newBridgeForwarder(ctx, llbBridge, workers, inputs, sid, sm)
+func serveLLBBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridge, exec executor.Executor, workers worker.Infos, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) (*llbBridgeForwarder, context.Context, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	lbf := newBridgeForwarder(ctx, llbBridge, exec, workers, inputs, sid, sm)
 	maxMsgSize := 67108864 // 64MB
 	server := grpc.NewServer(
 		grpc.UnaryInterceptor(grpcerrors.UnaryServerInterceptor),
@@ -476,7 +474,7 @@ func serveLLBBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLB
 		default:
 			lbf.isErrServerClosed = true
 		}
-		cancel()
+		cancel(errors.WithStack(context.Canceled))
 	}()
 
 	return lbf, ctx, nil
@@ -559,9 +557,52 @@ type llbBridgeForwarder struct {
 	isErrServerClosed bool
 	sid               string
 	sm                *session.Manager
+	executor          executor.Executor
 	*pipe
 	ctrs   map[string]gwclient.Container
 	ctrsMu sync.Mutex
+}
+
+func (lbf *llbBridgeForwarder) ResolveSourceMeta(ctx context.Context, req *pb.ResolveSourceMetaRequest) (*pb.ResolveSourceMetaResponse, error) {
+	if req.Source == nil {
+		return nil, status.Error(codes.InvalidArgument, "source is required")
+	}
+
+	ctx = tracing.ContextWithSpanFromContext(ctx, lbf.callCtx)
+	var platform *ocispecs.Platform
+	if p := req.Platform; p != nil {
+		platform = &ocispecs.Platform{
+			OS:           p.OS,
+			Architecture: p.Architecture,
+			Variant:      p.Variant,
+			OSVersion:    p.OSVersion,
+			OSFeatures:   p.OSFeatures,
+		}
+	}
+	resolveopt := sourceresolver.Opt{
+		LogName:        req.LogName,
+		SourcePolicies: req.SourcePolicies,
+		Platform:       platform,
+	}
+	resolveopt.ImageOpt = &sourceresolver.ResolveImageOpt{
+		ResolveMode: req.ResolveMode,
+	}
+	resp, err := lbf.llbBridge.ResolveSourceMetadata(ctx, req.Source, resolveopt)
+	if err != nil {
+		return nil, err
+	}
+
+	r := &pb.ResolveSourceMetaResponse{
+		Source: resp.Op,
+	}
+
+	if resp.Image != nil {
+		r.Image = &pb.ResolveSourceImageResponse{
+			Digest: resp.Image.Digest,
+			Config: resp.Image.Config,
+		}
+	}
+	return r, nil
 }
 
 func (lbf *llbBridgeForwarder) ResolveImageConfig(ctx context.Context, req *pb.ResolveImageConfigRequest) (*pb.ResolveImageConfigResponse, error) {
@@ -576,17 +617,26 @@ func (lbf *llbBridgeForwarder) ResolveImageConfig(ctx context.Context, req *pb.R
 			OSFeatures:   p.OSFeatures,
 		}
 	}
-	ref, dgst, dt, err := lbf.llbBridge.ResolveImageConfig(ctx, req.Ref, llb.ResolveImageConfigOpt{
-		ResolverType: llb.ResolverType(req.ResolverType),
-		Platform:     platform,
-		ResolveMode:  req.ResolveMode,
-		LogName:      req.LogName,
-		Store: llb.ResolveImageConfigOptStore{
-			SessionID: req.SessionID,
-			StoreID:   req.StoreID,
-		},
+	imr := sourceresolver.NewImageMetaResolver(lbf.llbBridge)
+	resolveopt := sourceresolver.Opt{
+		LogName:        req.LogName,
 		SourcePolicies: req.SourcePolicies,
-	})
+		Platform:       platform,
+	}
+	if sourceresolver.ResolverType(req.ResolverType) == sourceresolver.ResolverTypeRegistry {
+		resolveopt.ImageOpt = &sourceresolver.ResolveImageOpt{
+			ResolveMode: req.ResolveMode,
+		}
+	} else if sourceresolver.ResolverType(req.ResolverType) == sourceresolver.ResolverTypeOCILayout {
+		resolveopt.OCILayoutOpt = &sourceresolver.ResolveOCILayoutOpt{
+			Store: sourceresolver.ResolveImageConfigOptStore{
+				SessionID: req.SessionID,
+				StoreID:   req.StoreID,
+			},
+		}
+	}
+
+	ref, dgst, dt, err := imr.ResolveImageConfig(ctx, req.Ref, resolveopt)
 	if err != nil {
 		return nil, err
 	}
@@ -653,10 +703,19 @@ func (lbf *llbBridgeForwarder) registerResultIDs(results ...solver.Result) (ids 
 func (lbf *llbBridgeForwarder) Solve(ctx context.Context, req *pb.SolveRequest) (*pb.SolveResponse, error) {
 	var cacheImports []frontend.CacheOptionsEntry
 	for _, e := range req.CacheImports {
+		if e == nil {
+			return nil, errors.Errorf("invalid nil cache import")
+		}
 		cacheImports = append(cacheImports, frontend.CacheOptionsEntry{
 			Type:  e.Type,
 			Attrs: e.Attrs,
 		})
+	}
+
+	for _, p := range req.SourcePolicies {
+		if p == nil {
+			return nil, errors.Errorf("invalid nil source policy")
+		}
 	}
 
 	ctx = tracing.ContextWithSpanFromContext(ctx, lbf.callCtx)
@@ -689,14 +748,15 @@ func (lbf *llbBridgeForwarder) Solve(ctx context.Context, req *pb.SolveRequest) 
 		ids := make(map[string]string, len(res.Refs))
 		defs := make(map[string]*opspb.Definition, len(res.Refs))
 		for k, ref := range res.Refs {
-			id := identity.NewID()
-			if ref == nil {
-				id = ""
-			} else {
+			var id string
+			var def *opspb.Definition
+			if ref != nil {
+				id = identity.NewID()
+				def = ref.Definition()
 				lbf.refs[id] = ref
 			}
 			ids[k] = id
-			defs[k] = ref.Definition()
+			defs[k] = def
 		}
 
 		if req.AllowResultArrayRef {
@@ -710,12 +770,10 @@ func (lbf *llbBridgeForwarder) Solve(ctx context.Context, req *pb.SolveRequest) 
 		}
 	} else {
 		ref := res.Ref
-		id := identity.NewID()
-
+		var id string
 		var def *opspb.Definition
-		if ref == nil {
-			id = ""
-		} else {
+		if ref != nil {
+			id = identity.NewID()
 			def = ref.Definition()
 			lbf.refs[id] = ref
 		}
@@ -1060,7 +1118,7 @@ func (lbf *llbBridgeForwarder) NewContainer(ctx context.Context, in *pb.NewConta
 	// and we want the context to live for the duration of the container.
 	group := session.NewGroup(lbf.sid)
 
-	w, err := lbf.workers.GetDefault()
+	cm, err := lbf.workers.DefaultCacheManager()
 	if err != nil {
 		return nil, stack.Enable(err)
 	}
@@ -1070,7 +1128,7 @@ func (lbf *llbBridgeForwarder) NewContainer(ctx context.Context, in *pb.NewConta
 		return nil, stack.Enable(err)
 	}
 
-	ctr, err := container.NewContainer(context.Background(), w, lbf.sm, group, ctrReq)
+	ctr, err := container.NewContainer(context.Background(), cm, lbf.executor, lbf.sm, group, ctrReq)
 	if err != nil {
 		return nil, stack.Enable(err)
 	}
@@ -1104,6 +1162,12 @@ func (lbf *llbBridgeForwarder) ReleaseContainer(ctx context.Context, in *pb.Rele
 }
 
 func (lbf *llbBridgeForwarder) Warn(ctx context.Context, in *pb.WarnRequest) (*pb.WarnResponse, error) {
+	// validate ranges are valid
+	for _, r := range in.Ranges {
+		if r == nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid source range")
+		}
+	}
 	err := lbf.llbBridge.Warn(ctx, in.Digest, string(in.Short), frontend.WarnOpts{
 		Level:      int(in.Level),
 		SourceInfo: in.Info,
@@ -1182,6 +1246,17 @@ func (pio *processIO) Close() (err error) {
 	return err
 }
 
+func (pio *processIO) Discard() {
+	pio.mu.Lock()
+	defer pio.mu.Unlock()
+	pio.processReaders = nil
+	pio.processWriters = nil
+	pio.serverReaders = nil
+	pio.serverWriters = nil
+	pio.Done()
+}
+
+// hold lock before calling
 func (pio *processIO) Done() {
 	stillOpen := len(pio.processReaders) + len(pio.processWriters) + len(pio.serverReaders) + len(pio.serverWriters)
 	if stillOpen == 0 {
@@ -1291,6 +1366,7 @@ func (lbf *llbBridgeForwarder) ExecProcess(srv pb.LLBBridge_ExecProcessServer) e
 		defer func() {
 			for _, pio := range pios {
 				pio.Close()
+				pio.Discard()
 			}
 		}()
 
@@ -1349,8 +1425,8 @@ func (lbf *llbBridgeForwarder) ExecProcess(srv pb.LLBBridge_ExecProcessServer) e
 					return stack.Enable(status.Errorf(codes.NotFound, "container %q previously released or not created", id))
 				}
 
-				initCtx, initCancel := context.WithCancel(context.Background())
-				defer initCancel()
+				initCtx, initCancel := context.WithCancelCause(context.Background())
+				defer initCancel(errors.WithStack(context.Canceled))
 
 				pio := newProcessIO(pid, init.Fds)
 				pios[pid] = pio
