@@ -25,14 +25,15 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/containerd/log"
+	"github.com/containerd/platforms"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/labels"
-	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/platforms"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"golang.org/x/sync/semaphore"
 )
 
 type refKeyPrefix struct{}
@@ -80,6 +81,8 @@ func MakeRefKey(ctx context.Context, desc ocispec.Descriptor) string {
 		return "layer-" + key
 	case images.IsKnownConfig(mt):
 		return "config-" + key
+	case images.IsAttestationType(desc.MediaType):
+		return "attestation-" + key
 	default:
 		log.G(ctx).Warnf("reference for unknown type: %s", mt)
 		return "unknown-" + key
@@ -361,8 +364,15 @@ func annotateDistributionSourceHandler(f images.HandlerFunc, provider content.In
 			return children, nil
 		}
 
-		// parentInfo can be used to inherit info for non-existent blobs
-		var parentInfo *content.Info
+		parentSourceAnnotations := desc.Annotations
+		var parentLabels map[string]string
+		if pi, err := provider.Info(ctx, desc.Digest); err != nil {
+			if !errdefs.IsNotFound(err) {
+				return nil, err
+			}
+		} else {
+			parentLabels = pi.Labels
+		}
 
 		for i := range children {
 			child := children[i]
@@ -372,32 +382,35 @@ func annotateDistributionSourceHandler(f images.HandlerFunc, provider content.In
 				if !errdefs.IsNotFound(err) {
 					return nil, err
 				}
-				if parentInfo == nil {
-					pi, err := provider.Info(ctx, desc.Digest)
-					if err != nil {
-						return nil, err
-					}
-					parentInfo = &pi
-				}
-				// Blob may not exist locally, annotate with parent labels for cross repo
-				// mount or fetch. Parent sources may apply to all children since most
-				// registries enforce that children exist before the manifests.
-				info = *parentInfo
 			}
+			copyDistributionSourceLabels(info.Labels, &child)
 
-			for k, v := range info.Labels {
-				if !strings.HasPrefix(k, labels.LabelDistributionSource+".") {
-					continue
-				}
-
-				if child.Annotations == nil {
-					child.Annotations = map[string]string{}
-				}
-				child.Annotations[k] = v
-			}
+			// Annotate with parent labels for cross repo mount or fetch.
+			// Parent sources may apply to all children since most registries
+			// enforce that children exist before the manifests.
+			copyDistributionSourceLabels(parentSourceAnnotations, &child)
+			copyDistributionSourceLabels(parentLabels, &child)
 
 			children[i] = child
 		}
 		return children, nil
+	}
+}
+
+func copyDistributionSourceLabels(from map[string]string, to *ocispec.Descriptor) {
+	for k, v := range from {
+		if !strings.HasPrefix(k, labels.LabelDistributionSource+".") {
+			continue
+		}
+
+		if to.Annotations == nil {
+			to.Annotations = make(map[string]string)
+		} else {
+			// Only propagate the parent label if the child doesn't already have it.
+			if _, has := to.Annotations[k]; has {
+				continue
+			}
+		}
+		to.Annotations[k] = v
 	}
 }
