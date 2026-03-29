@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/docker/distribution/configuration"
 	"github.com/docker/distribution/registry/handlers"
@@ -31,7 +32,8 @@ storage:
 	}
 	app := handlers.NewApp(ctx, config)
 	server := &http.Server{
-		Handler: app,
+		Handler:           app,
+		ReadHeaderTimeout: 30 * time.Second,
 	}
 	ctx2, cancel := context.WithCancel(ctx)
 	go func() {

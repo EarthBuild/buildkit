@@ -96,7 +96,7 @@ func (sm *Manager) NumSessions() (sessions int, durationIdle time.Duration) {
 	defer sm.mu.Unlock()
 	sessions = len(sm.sessions)
 	if sessions == 0 {
-		durationIdle = time.Now().Sub(sm.idleAt)
+		durationIdle = time.Since(sm.idleAt)
 	}
 	return sessions, durationIdle
 }

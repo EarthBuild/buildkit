@@ -45,7 +45,7 @@ func (lp *localhostProvider) Exec(stream localhost.Localhost_ExecServer) error {
 	}
 
 	if len(msg.Command) == 0 {
-		return fmt.Errorf("command is empty")
+		return errors.Errorf("command is empty")
 	}
 	cmdStr := msg.Command[0]
 	args := msg.Command[1:]

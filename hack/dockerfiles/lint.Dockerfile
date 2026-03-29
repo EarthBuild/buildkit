@@ -15,19 +15,19 @@ RUN wget -O- -nv https://raw.githubusercontent.com/golangci/golangci-lint/master
 COPY --link --from=protolint-base /usr/local/bin/protolint /usr/local/bin/protolint
 WORKDIR /go/src/github.com/moby/buildkit
 
-FROM base as golangci-lint
+FROM base AS golangci-lint
 ARG BUILDTAGS
 RUN --mount=target=/go/src/github.com/moby/buildkit --mount=target=/root/.cache,type=cache,sharing=locked \
   GOARCH=amd64 golangci-lint run --build-tags "${BUILDTAGS}" && \
   GOARCH=arm64 golangci-lint run --build-tags "${BUILDTAGS}" && \
   touch /golangci-lint.done
 
-FROM base as yamllint
+FROM base AS yamllint
 RUN --mount=target=/go/src/github.com/moby/buildkit --mount=target=/root/.cache,type=cache \
   yamllint -c .yamllint.yml --strict . && \
   touch /yamllint.done
 
-FROM base as protolint
+FROM base AS protolint
 RUN --mount=target=/go/src/github.com/moby/buildkit \
   protolint lint . && \
   touch /protolint.done

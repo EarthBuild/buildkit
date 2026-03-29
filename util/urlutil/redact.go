@@ -46,6 +46,6 @@ func RedactAllCredentials(s string) string {
 		sb.WriteString(RedactCredentials(s[m[0]:m[1]]))
 		i = m[1]
 	}
-	sb.WriteString(s[i:len(s)])
+	sb.WriteString(s[i:])
 	return sb.String()
 }

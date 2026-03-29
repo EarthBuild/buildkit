@@ -220,7 +220,7 @@ func init() {
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
 	})
-	
+
 	Caps.Init(apicaps.Cap{
 		ID:      CapSourceHTTP,
 		Enabled: true,

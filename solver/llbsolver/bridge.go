@@ -184,7 +184,7 @@ func (b *llbBridge) getExporter(ctx context.Context) (*ExporterRequest, error) {
 		return nil
 	})
 	if numExporters != 1 {
-		return nil, fmt.Errorf("Export found %d exporters (should have been 1)", numExporters) // shouldn't happen
+		return nil, errors.Errorf("Export found %d exporters (should have been 1)", numExporters) // shouldn't happen
 	}
 	return exp, nil
 }
@@ -207,13 +207,13 @@ func (b *llbBridge) Export(ctx context.Context, refs map[string]cache.ImmutableR
 		return err
 	}
 	if exp.Exporter == nil {
-		return fmt.Errorf("Export had no exporter configured")
+		return errors.Errorf("Export had no exporter configured")
 	}
 
 	return inBuilderContext(ctx, b.builder, exp.Exporter.Name(), id, func(ctx context.Context, g session.Group) error {
 		sessionIDs := session.AllSessionIDs(g)
 		if len(sessionIDs) == 0 {
-			return fmt.Errorf("group has no session IDs") // shouldnt happen
+			return errors.Errorf("group has no session IDs") // shouldnt happen
 		}
 		sessionID := sessionIDs[0]
 		var err error

@@ -338,7 +338,7 @@ func main() {
 		lrPort, ok := os.LookupEnv("BUILDKIT_LOCAL_REGISTRY_LISTEN_PORT")
 		lrAddr := fmt.Sprintf("0.0.0.0:%s", lrPort)
 		if ok {
-			logrus.Infof("Starting local registry for outputs on port %s", lrPort)
+			bklog.G(ctx).Infof("Starting local registry for outputs on port %s", lrPort)
 			serveErr := registry.Serve(ctxReg, lrAddr)
 			go func() {
 				for {
@@ -347,7 +347,7 @@ func main() {
 						cancelReg()
 					case err := <-serveErr:
 						if err != nil {
-							logrus.Errorf("Registry serve error: %s\n", err.Error())
+							bklog.G(ctx).Errorf("Registry serve error: %s\n", err.Error())
 						}
 						return
 					case <-ctxReg.Done():

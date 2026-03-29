@@ -3,9 +3,9 @@ syntax = "proto3";
 package earthly.registry.v1;
 
 message ByteMessage {
-  bytes data = 1;
+	bytes data = 1;
 }
 
 service Registry {
-  rpc Proxy(stream ByteMessage) returns (stream ByteMessage);
+	rpc Proxy(stream ByteMessage) returns (stream ByteMessage);
 }

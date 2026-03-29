@@ -314,7 +314,7 @@ func Git(url, ref string, opts ...GitOption) State {
 				attrs[pb.AttrKnownSSHHosts] = keyscan
 			} else {
 				// earthly-specific: panic in order to raise errors (should be caught by earthly cli)
-				panic(fmt.Sprintf("Git(%s,%s) failed to scan ssh keys: %v", remote, ref, err))
+				panic(fmt.Sprintf("Git(%s,%s) failed to scan ssh keys: %v", url, ref, err))
 			}
 			attrs[pb.AttrKnownSSHHosts] = keyscan
 		}
@@ -404,7 +404,7 @@ func MountSSHSock(sshID string) GitOption {
 }
 
 func SSHCommand(sshCommand string) GitOption {
-	return gitOptionFunc(func (gi *GitInfo) {
+	return gitOptionFunc(func(gi *GitInfo) {
 		gi.SSHCommand = sshCommand
 	})
 }

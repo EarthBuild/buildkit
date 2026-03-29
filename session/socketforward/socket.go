@@ -1,7 +1,6 @@
 package socketforward
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -96,7 +95,7 @@ func MountSocket(ctx context.Context, c session.Caller, opt SocketOpt) (sockPath
 
 	id := opt.ID
 	if id == "" {
-		return "", nil, fmt.Errorf("socket ID is missing")
+		return "", nil, errors.Errorf("socket ID is missing")
 	}
 
 	go s.run(ctx, l, id) // erroring per connection allowed

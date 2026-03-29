@@ -30,7 +30,7 @@ on:
         default: 'true'
 
 env:
-  SETUP_BUILDX_VERSION: "latest"
+  SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
   REPO_SLUG_TARGET: "moby/buildkit"
 
 jobs:
@@ -54,7 +54,7 @@ jobs:
         if: github.event.inputs.dry-run != 'true'
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
         name: Create

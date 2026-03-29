@@ -481,7 +481,7 @@ func (e *ExecOp) doFromLocalHack(ctx context.Context, root executor.Mount, mount
 
 func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
 	if len(meta.Args) != 3 {
-		return fmt.Errorf("CopyFileMagicStr takes exactly 2 args")
+		return errors.Errorf("CopyFileMagicStr takes exactly 2 args")
 	}
 	if meta.Args[0] != localhost.CopyFileMagicStr {
 		panic("arg[0] must be CopyFileMagicStr; this should not have happened")
@@ -494,7 +494,7 @@ func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session
 	dst := meta.Args[2]
 
 	if src == "/" {
-		return fmt.Errorf("copyLocally does not support copying the entire root filesystem")
+		return errors.Errorf("copyLocally does not support copying the entire root filesystem")
 	}
 
 	if strings.HasSuffix(dst, ".") || strings.HasSuffix(dst, "/") {
@@ -531,7 +531,7 @@ func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session
 	})
 }
 
-var errSendFileMagicStrMissingArgs = fmt.Errorf("SendFileMagicStr args missing; should be SendFileMagicStr [--dir] [--] <src> [<src> ...] <dst>")
+var errSendFileMagicStrMissingArgs = errors.Errorf("SendFileMagicStr args missing; should be SendFileMagicStr [--dir] [--] <src> [<src> ...] <dst>")
 
 func (e *ExecOp) sendLocally(ctx context.Context, root executor.Mount, mounts []executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
 	i := 0
@@ -563,13 +563,13 @@ func (e *ExecOp) sendLocally(ctx context.Context, root executor.Mount, mounts []
 	dstIndex := len(meta.Args) - 1
 	numFiles := dstIndex - i
 	if numFiles <= 0 {
-		return fmt.Errorf("SendFileMagicStr args missing; should be SendFileMagicStr [--dir] [--] <src> [<src> ...] <dst>")
+		return errors.Errorf("SendFileMagicStr args missing; should be SendFileMagicStr [--dir] [--] <src> [<src> ...] <dst>")
 	}
 	files := meta.Args[i:dstIndex]
 	dst := meta.Args[dstIndex]
 
 	if len(mounts) != 1 {
-		return fmt.Errorf("SendFileMagicStr must be given a mount with the artifacts to copy from")
+		return errors.Errorf("SendFileMagicStr must be given a mount with the artifacts to copy from")
 	}
 
 	return e.sm.Any(ctx, g, func(ctx context.Context, _ string, caller session.Caller) error {

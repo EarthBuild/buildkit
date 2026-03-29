@@ -31,7 +31,7 @@ func newDgstTracker() *dgstTracker {
 }
 
 func (d *dgstTracker) add(dgst digest.Digest, action string) {
-	d.head += 1
+	d.head++
 	if d.head >= len(d.records) {
 		d.head = 0
 	}

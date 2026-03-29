@@ -2,7 +2,6 @@ package forwarder
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	cacheutil "github.com/moby/buildkit/cache/util"
@@ -95,7 +94,7 @@ func (c *BridgeClient) Solve(ctx context.Context, req client.SolveRequest) (*cli
 
 // Export is only used by earthly via the grpcclient implementation
 func (c *BridgeClient) Export(ctx context.Context, req client.ExportRequest) error {
-	return fmt.Errorf("forwarder.bridgeClient does not support Export")
+	return errors.Errorf("forwarder.bridgeClient does not support Export")
 }
 
 func (c *BridgeClient) loadBuildOpts() client.BuildOpts {

@@ -64,7 +64,7 @@ func streamTimeoutInterceptor() grpc.StreamServerInterceptor {
 			defer close(done)
 			go handleTimeout(done, cancel)
 			// End of TODO
-			err := handler(srv, newWrappedStream(stream, ctx))
+			err := handler(srv, newWrappedStream(ctx, stream))
 			if errors.Is(err, context.Canceled) && context.Cause(ctx) == errSessionTimeout {
 				return errors.Errorf("build exceeded max duration of %s", sessionTimeout.String())
 			}
@@ -114,6 +114,6 @@ func (w *wrappedStream) SetTrailer(m metadata.MD) {
 	w.s.SetTrailer(m)
 }
 
-func newWrappedStream(s grpc.ServerStream, ctx context.Context) grpc.ServerStream {
+func newWrappedStream(ctx context.Context, s grpc.ServerStream) grpc.ServerStream {
 	return &wrappedStream{s: s, ctx: ctx}
 }

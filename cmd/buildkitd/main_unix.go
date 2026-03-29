@@ -5,6 +5,7 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
 	"os"
 	"syscall"
@@ -16,6 +17,19 @@ import (
 
 func init() {
 	syscall.Umask(0)
+
+	// Docker 29+ (containerd v2) lowered the default open file limit from
+	// 1048576 to 1024, which starves buildkitd. Raise it back.
+	var lim syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim); err == nil && lim.Cur < 1048576 {
+		lim.Cur = 1048576
+		if lim.Max < 1048576 {
+			lim.Max = 1048576
+		}
+		if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &lim); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to raise RLIMIT_NOFILE: %v\n", err)
+		}
+	}
 }
 
 func listenFD(addr string, tlsConfig *tls.Config) (net.Listener, error) {

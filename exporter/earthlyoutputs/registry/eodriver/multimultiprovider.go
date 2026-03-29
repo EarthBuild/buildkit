@@ -3,7 +3,6 @@ package eodriver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 
 	"github.com/containerd/containerd/content"
@@ -90,7 +89,7 @@ func (mmp *MultiMultiProvider) AddImgSub(imgName string, dgst digest.Digest, p c
 // AddImg adds a new child image. The image is removed from the collection when the context is canceled.
 func (mmp *MultiMultiProvider) AddImg(ctx context.Context, imgName string, base content.Provider, baseDigest digest.Digest) error {
 	if baseDigest == "" {
-		return fmt.Errorf("baseDigest cant be empty")
+		return errors.Errorf("baseDigest cant be empty")
 	}
 
 	// The config digest needs to be mapped manually - read out the manifest
@@ -110,12 +109,12 @@ func (mmp *MultiMultiProvider) AddImg(ctx context.Context, imgName string, base 
 		return err
 	}
 	if mfst.Config.Digest == "" {
-		return fmt.Errorf("manifest config digest is missing")
+		return errors.Errorf("manifest config digest is missing")
 	}
 
 	configDgst := digest.Digest(mfst.Config.Digest)
 	if configDgst == "" {
-		return fmt.Errorf("configDgst cant be empty")
+		return errors.Errorf("configDgst cant be empty")
 	}
 
 	mmp.mu.Lock()
