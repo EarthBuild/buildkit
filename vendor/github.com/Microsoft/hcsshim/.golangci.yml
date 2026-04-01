@@ -135,7 +135,7 @@ issues:
       linters:
         - stylecheck
       Text: "ST1003:"
-
+    
     # v0 APIs are deprecated, but still retained for backwards compatability
     - path: cmd\\ncproxy\\
       linters:

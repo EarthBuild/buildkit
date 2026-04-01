@@ -77,3 +77,6 @@ issues:
     - linters:
         - revive
       text: "if-return"
+    - linters:
+        - errname
+      text: "should conform to the"
