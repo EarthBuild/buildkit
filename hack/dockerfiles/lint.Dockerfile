@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile-upstream:master
 
-ARG GO_VERSION=1.21
+ARG GO_VERSION=1.23
 ARG PROTOLINT_VERSION=0.45.0
-ARG GOLANGCI_LINT_VERSION=1.55.0
+ARG GOLANGCI_LINT_VERSION=1.64.8
 
 FROM golang:${GO_VERSION}-alpine AS golang-base
 FROM yoheimuta/protolint:${PROTOLINT_VERSION} AS protolint-base

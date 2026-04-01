@@ -70,4 +70,3 @@ binaries: ${PREFIX}/bin/continuity
 clean:
 	@echo "+ $@"
 	@rm -rf "${PREFIX}/bin/continuity" "${PREFIX}/bin/continuity.exe"
-
