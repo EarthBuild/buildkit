@@ -91,3 +91,9 @@ issues:
     - linters:
         - gosimple
       text: "S1016:"
+    - linters:
+        - nolintlint
+      text: "staticcheck"
+    - linters:
+        - nolintlint
+      text: "errname"
