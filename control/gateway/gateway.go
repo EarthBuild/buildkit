@@ -59,8 +59,9 @@ func (gwf *GatewayForwarder) lookupForwarder(ctx context.Context) (gateway.LLBBr
 		return nil, errors.New("no buildid found in context")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	ctx, _ = context.WithTimeoutCause(ctx, 3*time.Second, errors.WithStack(context.DeadlineExceeded)) //nolint:govet
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	go func() {
 		<-ctx.Done()
@@ -93,6 +94,15 @@ func (gwf *GatewayForwarder) ResolveImageConfig(ctx context.Context, req *gwapi.
 	}
 
 	return fwd.ResolveImageConfig(ctx, req)
+}
+
+func (gwf *GatewayForwarder) ResolveSourceMeta(ctx context.Context, req *gwapi.ResolveSourceMetaRequest) (*gwapi.ResolveSourceMetaResponse, error) {
+	fwd, err := gwf.lookupForwarder(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "forwarding ResolveSourceMeta")
+	}
+
+	return fwd.ResolveSourceMeta(ctx, req)
 }
 
 func (gwf *GatewayForwarder) Solve(ctx context.Context, req *gwapi.SolveRequest) (*gwapi.SolveResponse, error) {
@@ -184,6 +194,30 @@ func (gwf *GatewayForwarder) ReleaseContainer(ctx context.Context, req *gwapi.Re
 		return nil, errors.Wrap(err, "forwarding ReleaseContainer")
 	}
 	return fwd.ReleaseContainer(ctx, req)
+}
+
+func (gwf *GatewayForwarder) ReadFileContainer(ctx context.Context, req *gwapi.ReadFileRequest) (*gwapi.ReadFileResponse, error) {
+	fwd, err := gwf.lookupForwarder(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "forwarding ReadFileContainer")
+	}
+	return fwd.ReadFileContainer(ctx, req)
+}
+
+func (gwf *GatewayForwarder) ReadDirContainer(ctx context.Context, req *gwapi.ReadDirRequest) (*gwapi.ReadDirResponse, error) {
+	fwd, err := gwf.lookupForwarder(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "forwarding ReadDirContainer")
+	}
+	return fwd.ReadDirContainer(ctx, req)
+}
+
+func (gwf *GatewayForwarder) StatFileContainer(ctx context.Context, req *gwapi.StatFileRequest) (*gwapi.StatFileResponse, error) {
+	fwd, err := gwf.lookupForwarder(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "forwarding StatFileContainer")
+	}
+	return fwd.StatFileContainer(ctx, req)
 }
 
 func (gwf *GatewayForwarder) ExecProcess(srv gwapi.LLBBridge_ExecProcessServer) error {

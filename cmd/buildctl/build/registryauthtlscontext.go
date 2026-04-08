@@ -1,24 +1,25 @@
 package build
 
 import (
-	"encoding/csv"
+	"strconv"
 	"strings"
 
 	"github.com/moby/buildkit/session/auth/authprovider"
 	"github.com/pkg/errors"
+	"github.com/tonistiigi/go-csvvalue"
 )
 
 type authTLSContextEntry struct {
-	Host string
-	CA   string
-	Cert string
-	Key  string
+	Host     string
+	CA       string
+	Cert     string
+	Key      string
+	Insecure bool
 }
 
 func parseRegistryAuthTLSContextCSV(s string) (authTLSContextEntry, error) {
 	authTLSContext := authTLSContextEntry{}
-	csvReader := csv.NewReader(strings.NewReader(s))
-	fields, err := csvReader.Read()
+	fields, err := csvvalue.Fields(s, nil)
 	if err != nil {
 		return authTLSContext, err
 	}
@@ -37,14 +38,18 @@ func parseRegistryAuthTLSContextCSV(s string) (authTLSContextEntry, error) {
 			authTLSContext.Cert = value
 		case "key":
 			authTLSContext.Key = value
+		case "insecure":
+			authTLSContext.Insecure, _ = strconv.ParseBool(value)
 		}
 	}
 	if authTLSContext.Host == "" {
 		return authTLSContext, errors.New("--registry-auth-tlscontext requires host=<host>")
 	}
 	if authTLSContext.CA == "" {
-		if authTLSContext.Cert == "" || authTLSContext.Key == "" {
-			return authTLSContext, errors.New("--registry-auth-tlscontext requires ca=<ca> or cert=<cert>,key=<key>")
+		if !authTLSContext.Insecure {
+			if authTLSContext.Cert == "" || authTLSContext.Key == "" {
+				return authTLSContext, errors.New("--registry-auth-tlscontext requires ca=<ca> or cert=<cert>,key=<key> or insecure=true")
+			}
 		}
 	} else {
 		if (authTLSContext.Cert != "" && authTLSContext.Key == "") || (authTLSContext.Cert == "" && authTLSContext.Key != "") {
@@ -69,6 +74,9 @@ func ParseRegistryAuthTLSContext(registryAuthTLSContext []string) (map[string]*a
 		_, ok := authConfigs[c.Host]
 		if !ok {
 			authConfigs[c.Host] = &authprovider.AuthTLSConfig{}
+		}
+		if c.Insecure {
+			authConfigs[c.Host].Insecure = true
 		}
 		if c.CA != "" {
 			authConfigs[c.Host].RootCAs = append(authConfigs[c.Host].RootCAs, c.CA)

@@ -2,6 +2,7 @@ package dockerd
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -16,16 +17,16 @@ import (
 )
 
 type LogT interface {
-	Logf(string, ...interface{})
+	Logf(string, ...any)
 }
 
 type nopLog struct{}
 
-func (nopLog) Logf(string, ...interface{}) {}
+func (nopLog) Logf(string, ...any) {}
 
 const (
 	shortLen             = 12
-	defaultDockerdBinary = "dockerd"
+	DefaultDockerdBinary = "dockerd"
 )
 
 type Option func(*Daemon)
@@ -43,6 +44,7 @@ type Daemon struct {
 	pidFile       string
 	sockPath      string
 	args          []string
+	envs          []string
 }
 
 var sockRoot = filepath.Join(os.TempDir(), "docker-integration")
@@ -69,9 +71,10 @@ func NewDaemon(workingDir string, ops ...Option) (*Daemon, error) {
 		storageDriver: os.Getenv("DOCKER_GRAPHDRIVER"),
 		// dxr stands for docker-execroot (shortened for avoiding unix(7) path length limitation)
 		execRoot:      filepath.Join(os.TempDir(), "dxr", id),
-		dockerdBinary: defaultDockerdBinary,
+		dockerdBinary: DefaultDockerdBinary,
 		Log:           nopLog{},
-		sockPath:      filepath.Join(sockRoot, id+".sock"),
+		sockPath:      getDockerdSockPath(sockRoot, id),
+		envs:          os.Environ(),
 	}
 
 	for _, op := range ops {
@@ -81,14 +84,26 @@ func NewDaemon(workingDir string, ops ...Option) (*Daemon, error) {
 	return d, nil
 }
 
+func WithBinary(bin string) Option {
+	return func(d *Daemon) {
+		d.dockerdBinary = bin
+	}
+}
+
+func WithExtraEnv(envs []string) Option {
+	return func(d *Daemon) {
+		d.envs = append(d.envs, envs...)
+	}
+}
+
 func (d *Daemon) Sock() string {
-	return "unix://" + d.sockPath
+	return socketScheme + d.sockPath
 }
 
 func (d *Daemon) StartWithError(daemonLogs map[string]*bytes.Buffer, providedArgs ...string) error {
 	dockerdBinary, err := exec.LookPath(d.dockerdBinary)
 	if err != nil {
-		return errors.Wrapf(err, "[%s] could not find docker binary in $PATH", d.id)
+		return errors.Wrapf(err, "[%s] could not find dockerd binary %q in $PATH", d.id, d.dockerdBinary)
 	}
 
 	if d.pidFile == "" {
@@ -126,8 +141,8 @@ func (d *Daemon) StartWithError(daemonLogs map[string]*bytes.Buffer, providedArg
 	}
 
 	d.args = append(d.args, providedArgs...)
-	d.cmd = exec.Command(dockerdBinary, d.args...)
-	d.cmd.Env = append(os.Environ(), "DOCKER_SERVICE_PREFER_OFFLINE_IMAGE=1", "BUILDKIT_DEBUG_EXEC_OUTPUT=1", "BUILDKIT_DEBUG_PANIC_ON_ERROR=1")
+	d.cmd = exec.CommandContext(context.TODO(), dockerdBinary, d.args...)
+	d.cmd.Env = append(d.envs, "DOCKER_SERVICE_PREFER_OFFLINE_IMAGE=1", "BUILDKIT_DEBUG_EXEC_OUTPUT=1", "BUILDKIT_DEBUG_PANIC_ON_ERROR=1")
 
 	if daemonLogs != nil {
 		b := new(bytes.Buffer)

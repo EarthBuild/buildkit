@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package runc
 
@@ -7,26 +6,31 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
-	ctdsnapshot "github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/overlay"
+	ctdsnapshot "github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/plugins/snapshots/overlay"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/executor"
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
+	"github.com/moby/buildkit/util/iohelper"
 	"github.com/moby/buildkit/util/network/netproviders"
 	"github.com/moby/buildkit/worker/base"
 	"github.com/moby/buildkit/worker/tests"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	defer tests.RunMirror()()
+	m.Run()
+}
 
 func newWorkerOpt(t *testing.T, processMode oci.ProcessMode) base.WorkerOpt {
 	tmpdir := t.TempDir()
@@ -38,7 +42,7 @@ func newWorkerOpt(t *testing.T, processMode oci.ProcessMode) base.WorkerOpt {
 		},
 	}
 	rootless := false
-	workerOpt, err := NewWorkerOpt(tmpdir, snFactory, rootless, processMode, nil, nil, netproviders.Opt{Mode: "host"}, nil, "", "", false, nil, "", "", []oci.OciHook{}, 0)
+	workerOpt, err := NewWorkerOpt(tmpdir, snFactory, rootless, processMode, nil, nil, netproviders.Opt{Mode: "host"}, nil, "", "", false, nil, "", "", []oci.OciHook{}, 0, nil)
 	require.NoError(t, err)
 
 	return workerOpt
@@ -86,7 +90,7 @@ func TestRuncWorker(t *testing.T) {
 
 	names, err := f.Readdirnames(-1)
 	require.NoError(t, err)
-	require.True(t, len(names) > 5)
+	require.Greater(t, len(names), 5)
 
 	err = f.Close()
 	require.NoError(t, err)
@@ -102,7 +106,7 @@ func TestRuncWorker(t *testing.T) {
 	// }
 
 	for _, d := range du {
-		require.True(t, d.Size >= 8192)
+		require.GreaterOrEqual(t, d.Size, int64(8192))
 	}
 
 	meta := executor.Meta{
@@ -111,7 +115,7 @@ func TestRuncWorker(t *testing.T) {
 	}
 
 	stderr := bytes.NewBuffer(nil)
-	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(snap, true), nil, executor.ProcessInfo{Meta: meta, Stderr: &nopCloser{stderr}}, nil)
+	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(snap, true), nil, executor.ProcessInfo{Meta: meta, Stderr: &iohelper.NopWriteCloser{Writer: stderr}}, nil)
 	require.Error(t, err) // Read-only root
 	// typical error is like `mkdir /.../rootfs/proc: read-only file system`.
 	// make sure the error is caused before running `echo foo > /bar`.
@@ -120,7 +124,7 @@ func TestRuncWorker(t *testing.T) {
 	root, err := w.CacheMgr.New(ctx, snap, nil, cache.CachePolicyRetain)
 	require.NoError(t, err)
 
-	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(root, false), nil, executor.ProcessInfo{Meta: meta, Stderr: &nopCloser{stderr}}, nil)
+	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(root, false), nil, executor.ProcessInfo{Meta: meta, Stderr: &iohelper.NopWriteCloser{Writer: stderr}}, nil)
 	require.NoError(t, err)
 
 	meta = executor.Meta{
@@ -128,7 +132,7 @@ func TestRuncWorker(t *testing.T) {
 		Cwd:  "/",
 	}
 
-	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(root, false), nil, executor.ProcessInfo{Meta: meta, Stderr: &nopCloser{stderr}}, nil)
+	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(root, false), nil, executor.ProcessInfo{Meta: meta, Stderr: &iohelper.NopWriteCloser{Writer: stderr}}, nil)
 	require.NoError(t, err)
 
 	rf, err := root.Commit(ctx)
@@ -142,11 +146,11 @@ func TestRuncWorker(t *testing.T) {
 	target, err = lm.Mount()
 	require.NoError(t, err)
 
-	//Verifies fix for issue https://github.com/moby/buildkit/issues/429
+	// verifies fix for issue https://github.com/moby/buildkit/issues/429
 	dt, err := os.ReadFile(filepath.Join(target, "run", "bar"))
 
 	require.NoError(t, err)
-	require.Equal(t, string(dt), "foo\n")
+	require.Equal(t, "foo\n", string(dt))
 
 	lm.Unmount()
 	require.NoError(t, err)
@@ -210,8 +214,8 @@ func TestRuncWorkerNoProcessSandbox(t *testing.T) {
 	}
 	stdout := bytes.NewBuffer(nil)
 	stderr := bytes.NewBuffer(nil)
-	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(root, false), nil, executor.ProcessInfo{Meta: meta, Stdout: &nopCloser{stdout}, Stderr: &nopCloser{stderr}}, nil)
-	require.NoError(t, err, fmt.Sprintf("stdout=%q, stderr=%q", stdout.String(), stderr.String()))
+	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(root, false), nil, executor.ProcessInfo{Meta: meta, Stdout: &iohelper.NopWriteCloser{Writer: stdout}, Stderr: &iohelper.NopWriteCloser{Writer: stderr}}, nil)
+	require.NoError(t, err, "stdout=%q, stderr=%q", stdout.String(), stderr.String())
 	require.Equal(t, string(selfCmdline), stdout.String())
 }
 
@@ -246,14 +250,6 @@ func TestRuncWorkerCancel(t *testing.T) {
 	require.NoError(t, err)
 
 	tests.TestWorkerCancel(t, w)
-}
-
-type nopCloser struct {
-	io.Writer
-}
-
-func (n *nopCloser) Close() error {
-	return nil
 }
 
 func execMount(m cache.Mountable, readonly bool) executor.Mount {

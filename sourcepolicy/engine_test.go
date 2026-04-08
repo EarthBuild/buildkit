@@ -1,7 +1,6 @@
 package sourcepolicy
 
 import (
-	"context"
 	"testing"
 
 	"github.com/moby/buildkit/solver/pb"
@@ -53,12 +52,8 @@ func testLastRuleWins(t *testing.T) {
 	}
 
 	e := NewEngine(pol)
-	mut, err := e.Evaluate(context.Background(), &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/busybox:latest",
-			},
-		},
+	mut, err := e.Evaluate(t.Context(), &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/busybox:latest",
 	})
 	require.NoError(t, err)
 	require.False(t, mut)
@@ -89,12 +84,8 @@ func testMultiplePolicies(t *testing.T) {
 	}
 
 	e := NewEngine(pol)
-	mut, err := e.Evaluate(context.Background(), &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/busybox:latest",
-			},
-		},
+	mut, err := e.Evaluate(t.Context(), &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/busybox:latest",
 	})
 	require.ErrorIs(t, err, ErrSourceDenied)
 	require.False(t, mut)
@@ -135,15 +126,11 @@ func testConvertMultiple(t *testing.T) {
 		},
 	}
 
-	op := &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/busybox:latest",
-			},
-		},
+	op := &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/busybox:latest",
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	e := NewEngine(pol)
 
 	mutated, err := e.Evaluate(ctx, op)
@@ -169,21 +156,17 @@ func testConvertWildcard(t *testing.T) {
 		},
 	}
 
-	op := &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/golang:1.19",
-			},
-		},
+	op := &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/golang:1.19",
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	e := NewEngine(pol)
 
 	mutated, err := e.Evaluate(ctx, op)
 	require.True(t, mutated)
 	require.NoError(t, err)
-	require.Equal(t, "docker-image://fakereg.io/library/golang:1.19", op.GetSource().Identifier)
+	require.Equal(t, "docker-image://fakereg.io/library/golang:1.19", op.Identifier)
 }
 
 func testConvertRegex(t *testing.T) {
@@ -202,21 +185,17 @@ func testConvertRegex(t *testing.T) {
 		},
 	}
 
-	op := &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/golang:1.19",
-			},
-		},
+	op := &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/golang:1.19",
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	e := NewEngine([]*spb.Policy{pol})
 
 	mutated, err := e.Evaluate(ctx, op)
 	require.True(t, mutated)
 	require.NoError(t, err)
-	require.Equal(t, "docker-image://fakereg.io/library/golang:1.19", op.GetSource().Identifier)
+	require.Equal(t, "docker-image://fakereg.io/library/golang:1.19", op.Identifier)
 }
 
 func testConvertHTTP(t *testing.T) {
@@ -234,21 +213,17 @@ func testConvertHTTP(t *testing.T) {
 		},
 	}
 
-	op := &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "https://example.com/foo",
-			},
-		},
+	op := &pb.SourceOp{
+		Identifier: "https://example.com/foo",
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	e := NewEngine([]*spb.Policy{pol})
 
 	mutated, err := e.Evaluate(ctx, op)
 	require.True(t, mutated)
 	require.NoError(t, err)
-	require.Equal(t, "https://example.com/foo", op.GetSource().Identifier)
+	require.Equal(t, "https://example.com/foo", op.Identifier)
 }
 
 func testConvertLoop(t *testing.T) {
@@ -275,15 +250,11 @@ func testConvertLoop(t *testing.T) {
 		},
 	}
 
-	op := &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/busybox:latest",
-			},
-		},
+	op := &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/busybox:latest",
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	e := NewEngine([]*spb.Policy{pol})
 
 	mutated, err := e.Evaluate(ctx, op)
@@ -324,21 +295,17 @@ func testAllowConvertDeny(t *testing.T) {
 		},
 	}
 
-	op := &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/busybox:latest",
-			},
-		},
+	op := &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/busybox:latest",
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	e := NewEngine([]*spb.Policy{pol})
 
 	mutated, err := e.Evaluate(ctx, op)
 	require.True(t, mutated)
 	require.ErrorIs(t, err, ErrSourceDenied)
-	require.Equal(t, op.GetSource().Identifier, "docker-image://docker.io/library/alpine:latest")
+	require.Equal(t, "docker-image://docker.io/library/alpine:latest", op.Identifier)
 }
 
 func testConvertDeny(t *testing.T) {
@@ -362,21 +329,17 @@ func testConvertDeny(t *testing.T) {
 		},
 	}
 
-	op := &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/busybox:latest",
-			},
-		},
+	op := &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/busybox:latest",
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	e := NewEngine([]*spb.Policy{pol})
 
 	mutated, err := e.Evaluate(ctx, op)
 	require.True(t, mutated)
 	require.ErrorIs(t, err, ErrSourceDenied)
-	require.Equal(t, op.GetSource().Identifier, "docker-image://docker.io/library/alpine:latest")
+	require.Equal(t, "docker-image://docker.io/library/alpine:latest", op.Identifier)
 }
 
 func testConvert(t *testing.T) {
@@ -388,12 +351,8 @@ func testConvert(t *testing.T) {
 
 	for src, dst := range cases {
 		t.Run(src+"=>"+dst, func(t *testing.T) {
-			op := &pb.Op{
-				Op: &pb.Op_Source{
-					Source: &pb.SourceOp{
-						Identifier: src,
-					},
-				},
+			op := &pb.SourceOp{
+				Identifier: src,
 			}
 
 			pol := &spb.Policy{
@@ -410,24 +369,20 @@ func testConvert(t *testing.T) {
 				},
 			}
 
-			ctx := context.Background()
+			ctx := t.Context()
 			e := NewEngine([]*spb.Policy{pol})
 
 			mutated, err := e.Evaluate(ctx, op)
 			require.True(t, mutated)
 			require.NoError(t, err)
-			require.Equal(t, dst, op.GetSource().Identifier)
+			require.Equal(t, dst, op.Identifier)
 		})
 	}
 }
 
 func testAllowDeny(t *testing.T) {
-	op := &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/alpine:latest",
-			},
-		},
+	op := &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/alpine:latest",
 	}
 	pol := &spb.Policy{
 		Rules: []*spb.Rule{
@@ -446,19 +401,15 @@ func testAllowDeny(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	e := NewEngine([]*spb.Policy{pol})
 
 	mutated, err := e.Evaluate(ctx, op)
 	require.False(t, mutated)
 	require.ErrorIs(t, err, ErrSourceDenied)
 
-	op = &pb.Op{
-		Op: &pb.Op_Source{
-			Source: &pb.SourceOp{
-				Identifier: "docker-image://docker.io/library/busybox:latest",
-			},
-		},
+	op = &pb.SourceOp{
+		Identifier: "docker-image://docker.io/library/busybox:latest",
 	}
 
 	mutated, err = e.Evaluate(ctx, op)
@@ -487,14 +438,10 @@ func testDenyAll(t *testing.T) {
 			}
 
 			e := NewEngine([]*spb.Policy{pol})
-			ctx := context.Background()
+			ctx := t.Context()
 
-			op := &pb.Op{
-				Op: &pb.Op_Source{
-					Source: &pb.SourceOp{
-						Identifier: ref,
-					},
-				},
+			op := &pb.SourceOp{
+				Identifier: ref,
 			}
 
 			mutated, err := e.Evaluate(ctx, op)

@@ -2,12 +2,14 @@ package tarconverter
 
 import (
 	"archive/tar"
+	"errors"
 	"io"
 )
 
 type HeaderConverter func(*tar.Header)
 
 // NewReader returns a reader that applies headerConverter.
+// srcContent is drained until hitting EOF.
 // Forked from https://github.com/moby/moby/blob/v24.0.6/pkg/archive/copy.go#L308-L373 .
 func NewReader(srcContent io.Reader, headerConverter HeaderConverter) io.ReadCloser {
 	rebased, w := io.Pipe()
@@ -18,10 +20,17 @@ func NewReader(srcContent io.Reader, headerConverter HeaderConverter) io.ReadClo
 
 		for {
 			hdr, err := srcTar.Next()
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				// Signals end of archive.
 				rebasedTar.Close()
-				w.Close()
+				// drain the reader into io.Discard, until hitting EOF
+				// https://github.com/moby/buildkit/pull/4807#discussion_r1544621787
+				_, err = io.Copy(io.Discard, srcContent)
+				if err != nil {
+					w.CloseWithError(err)
+				} else {
+					w.Close()
+				}
 				return
 			}
 			if err != nil {

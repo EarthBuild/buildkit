@@ -20,7 +20,7 @@ import (
 func ReadAll(ctx context.Context, s session.Group, att exporter.Attestation) ([]byte, error) {
 	var content []byte
 	if att.ContentFunc != nil {
-		data, err := att.ContentFunc()
+		data, err := att.ContentFunc(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +61,6 @@ func MakeInTotoStatements(ctx context.Context, s session.Group, attestations []e
 	statements := make([]intoto.Statement, len(attestations))
 
 	for i, att := range attestations {
-		i, att := i, att
 		eg.Go(func() error {
 			content, err := ReadAll(ctx, s, att)
 			if err != nil {
@@ -69,13 +68,13 @@ func MakeInTotoStatements(ctx context.Context, s session.Group, attestations []e
 			}
 
 			switch att.Kind {
-			case gatewaypb.AttestationKindInToto:
-				stmt, err := makeInTotoStatement(ctx, content, att, defaultSubjects)
+			case gatewaypb.AttestationKind_InToto:
+				stmt, err := makeInTotoStatement(content, att, defaultSubjects)
 				if err != nil {
 					return err
 				}
 				statements[i] = *stmt
-			case gatewaypb.AttestationKindBundle:
+			case gatewaypb.AttestationKind_Bundle:
 				return errors.New("bundle attestation kind must be un-bundled first")
 			}
 			return nil
@@ -87,10 +86,10 @@ func MakeInTotoStatements(ctx context.Context, s session.Group, attestations []e
 	return statements, nil
 }
 
-func makeInTotoStatement(ctx context.Context, content []byte, attestation exporter.Attestation, defaultSubjects []intoto.Subject) (*intoto.Statement, error) {
+func makeInTotoStatement(content []byte, attestation exporter.Attestation, defaultSubjects []intoto.Subject) (*intoto.Statement, error) {
 	if len(attestation.InToto.Subjects) == 0 {
 		attestation.InToto.Subjects = []result.InTotoSubject{{
-			Kind: gatewaypb.InTotoSubjectKindSelf,
+			Kind: gatewaypb.InTotoSubjectKind_Self,
 		}}
 	}
 	subjects := []intoto.Subject{}
@@ -101,7 +100,7 @@ func makeInTotoStatement(ctx context.Context, content []byte, attestation export
 		}
 
 		switch subject.Kind {
-		case gatewaypb.InTotoSubjectKindSelf:
+		case gatewaypb.InTotoSubjectKind_Self:
 			for _, defaultSubject := range defaultSubjects {
 				subjectNames := []string{}
 				subjectNames = append(subjectNames, defaultSubject.Name)
@@ -116,7 +115,7 @@ func makeInTotoStatement(ctx context.Context, content []byte, attestation export
 					})
 				}
 			}
-		case gatewaypb.InTotoSubjectKindRaw:
+		case gatewaypb.InTotoSubjectKind_Raw:
 			subjects = append(subjects, intoto.Subject{
 				Name:   subjectName,
 				Digest: result.ToDigestMap(subject.Digest...),

@@ -8,11 +8,17 @@ import (
 	"io"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/labels"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/moby/buildkit/cache/remotecache"
 	v1 "github.com/moby/buildkit/cache/remotecache/v1"
+	cacheimporttypes "github.com/moby/buildkit/cache/remotecache/v1/types"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/util/bklog"
@@ -27,12 +33,12 @@ func ResolveCacheExporterFunc() remotecache.ResolveCacheExporterFunc {
 	return func(ctx context.Context, g session.Group, attrs map[string]string) (remotecache.Exporter, error) {
 		config, err := getConfig(attrs)
 		if err != nil {
-			return nil, errors.WithMessage(err, "failed to create azblob config")
+			return nil, errors.Wrap(err, "failed to create azblob config")
 		}
 
 		containerClient, err := createContainerClient(ctx, config)
 		if err != nil {
-			return nil, errors.WithMessage(err, "failed to create container client")
+			return nil, errors.Wrap(err, "failed to create container client")
 		}
 
 		cc := v1.NewCacheChains()
@@ -50,7 +56,7 @@ var _ remotecache.Exporter = &exporter{}
 type exporter struct {
 	solver.CacheExporterTarget
 	chains          *v1.CacheChains
-	containerClient *azblob.ContainerClient
+	containerClient *container.Client
 	config          *Config
 }
 
@@ -79,11 +85,11 @@ func (ce *exporter) Finalize(ctx context.Context) (map[string]string, error) {
 		}
 		dgst, err := digest.Parse(v)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse uncompressed annotation")
+			return nil, errors.Wrap(err, "failed to parse uncompressed annotation")
 		}
 		diffID = dgst
 
-		key := blobKey(ce.config, dgstPair.Descriptor.Digest.String())
+		key := blobKey(ce.config, dgstPair.Descriptor.Digest)
 
 		exists, err := blobExists(ctx, ce.containerClient, key)
 		if err != nil {
@@ -105,7 +111,7 @@ func (ce *exporter) Finalize(ctx context.Context) (map[string]string, error) {
 			layerDone(nil)
 		}
 
-		la := &v1.LayerAnnotations{
+		la := &cacheimporttypes.LayerAnnotations{
 			DiffID:    diffID,
 			Size:      dgstPair.Descriptor.Size,
 			MediaType: dgstPair.Descriptor.MediaType,
@@ -145,15 +151,13 @@ func (ce *exporter) Config() remotecache.Config {
 // https://github.com/Azure/azure-sdk-for-go/issues/18490#issuecomment-1170806877
 func (ce *exporter) uploadManifest(ctx context.Context, manifestKey string, reader io.ReadSeekCloser) error {
 	defer reader.Close()
-	blobClient, err := ce.containerClient.NewBlockBlobClient(manifestKey)
-	if err != nil {
-		return errors.Wrap(err, "error creating container client")
-	}
+	blobClient := ce.containerClient.NewBlockBlobClient(manifestKey)
 
-	ctx, cnclFn := context.WithTimeout(ctx, time.Minute*5)
-	defer cnclFn()
+	ctx, cnclFn := context.WithCancelCause(ctx)
+	ctx, _ = context.WithTimeoutCause(ctx, time.Minute*5, errors.WithStack(context.DeadlineExceeded)) //nolint:govet
+	defer cnclFn(errors.WithStack(context.Canceled))
 
-	_, err = blobClient.Upload(ctx, reader, &azblob.BlockBlobUploadOptions{})
+	_, err := blobClient.Upload(ctx, reader, &blockblob.UploadOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "failed to upload blob %s: %v", manifestKey, err)
 	}
@@ -165,22 +169,19 @@ func (ce *exporter) uploadManifest(ctx context.Context, manifestKey string, read
 // does not already exist. Since blobs are content addressable, this is the right thing to do for blobs and it gives
 // a performance improvement over the Upload API used for uploading manifests.
 func (ce *exporter) uploadBlobIfNotExists(ctx context.Context, blobKey string, reader io.Reader) error {
-	blobClient, err := ce.containerClient.NewBlockBlobClient(blobKey)
-	if err != nil {
-		return errors.Wrap(err, "error creating container client")
-	}
+	blobClient := ce.containerClient.NewBlockBlobClient(blobKey)
 
-	uploadCtx, cnclFn := context.WithTimeout(ctx, time.Minute*5)
-	defer cnclFn()
+	uploadCtx, cnclFn := context.WithCancelCause(ctx)
+	uploadCtx, _ = context.WithTimeoutCause(uploadCtx, time.Minute*5, errors.WithStack(context.DeadlineExceeded)) //nolint:govet
+	defer cnclFn(errors.WithStack(context.Canceled))
 
 	// Only upload if the blob doesn't exist
-	eTagAny := azblob.ETagAny
-	_, err = blobClient.UploadStream(uploadCtx, reader, azblob.UploadStreamOptions{
-		BufferSize: IOChunkSize,
-		MaxBuffers: IOConcurrency,
-		BlobAccessConditions: &azblob.BlobAccessConditions{
-			ModifiedAccessConditions: &azblob.ModifiedAccessConditions{
-				IfNoneMatch: &eTagAny,
+	_, err := blobClient.UploadStream(uploadCtx, reader, &blockblob.UploadStreamOptions{
+		BlockSize:   IOChunkSize,
+		Concurrency: IOConcurrency,
+		AccessConditions: &blob.AccessConditions{
+			ModifiedAccessConditions: &blob.ModifiedAccessConditions{
+				IfNoneMatch: to.Ptr(azcore.ETagAny),
 			},
 		},
 	})
@@ -189,8 +190,7 @@ func (ce *exporter) uploadBlobIfNotExists(ctx context.Context, blobKey string, r
 		return nil
 	}
 
-	var se *azblob.StorageError
-	if errors.As(err, &se) && se.ErrorCode == azblob.StorageErrorCodeBlobAlreadyExists {
+	if bloberror.HasCode(err, bloberror.BlobAlreadyExists) {
 		return nil
 	}
 

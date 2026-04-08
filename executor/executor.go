@@ -6,9 +6,10 @@ import (
 	"net"
 	"syscall"
 
+	"github.com/containerd/containerd/v2/core/mount"
 	resourcestypes "github.com/moby/buildkit/executor/resources/types"
-	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver/pb"
+	"github.com/moby/sys/user"
 )
 
 type Meta struct {
@@ -21,15 +22,22 @@ type Meta struct {
 	ReadonlyRootFS bool
 	ExtraHosts     []HostIP
 	Ulimit         []*pb.Ulimit
+	CDIDevices     []*pb.CDIDevice
 	CgroupParent   string
 	NetMode        pb.NetMode
 	SecurityMode   pb.SecurityMode
+	ValidExitCodes []int
 
 	RemoveMountStubsRecursive bool
 }
 
+type MountableRef interface {
+	Mount() ([]mount.Mount, func() error, error)
+	IdentityMapping() *user.IdentityMapping
+}
+
 type Mountable interface {
-	Mount(ctx context.Context, readonly bool) (snapshot.Mountable, error)
+	Mount(ctx context.Context, readonly bool) (MountableRef, error)
 }
 
 type Mount struct {

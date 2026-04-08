@@ -37,7 +37,7 @@ func main() {
 }
 
 func goBuildBase() llb.State {
-	goAlpine := llb.Image("docker.io/library/golang:1.20-alpine")
+	goAlpine := llb.Image("docker.io/library/golang:1.26-alpine")
 	return goAlpine.
 		AddEnv("PATH", "/usr/local/go/bin:"+system.DefaultPathEnvUnix).
 		AddEnv("GOPATH", "/go").
@@ -65,7 +65,7 @@ func runc(version string) llb.State {
 }
 
 func containerd(version string) llb.State {
-	repo := "github.com/containerd/containerd"
+	repo := "github.com/containerd/containerd/v2/client"
 	src := llb.Git(repo, version, llb.KeepGitDir())
 	if version == "local" {
 		src = llb.Local("containerd-src")

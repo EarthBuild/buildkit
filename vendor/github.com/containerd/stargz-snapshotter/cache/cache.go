@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,7 +27,7 @@ import (
 
 	"github.com/containerd/stargz-snapshotter/util/cacheutil"
 	"github.com/containerd/stargz-snapshotter/util/namedmutex"
-	"github.com/hashicorp/go-multierror"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -61,6 +62,9 @@ type DirectoryCacheConfig struct {
 	// Direct forcefully enables direct mode for all operation in cache.
 	// Thus operation won't use on-memory caches.
 	Direct bool
+
+	// FadvDontNeed forcefully clean fscache pagecache for saving memory.
+	FadvDontNeed bool
 }
 
 // TODO: contents validation.
@@ -82,6 +86,9 @@ type BlobCache interface {
 type Reader interface {
 	io.ReaderAt
 	Close() error
+
+	// If a blob is backed by a file, it should return *os.File so that it can be used for FUSE passthrough
+	GetReaderAt() io.ReaderAt
 }
 
 // Writer enables the client to cache byte data. Commit() must be
@@ -94,7 +101,8 @@ type Writer interface {
 }
 
 type cacheOpt struct {
-	direct bool
+	direct      bool
+	passThrough bool
 }
 
 type Option func(o *cacheOpt) *cacheOpt
@@ -106,6 +114,15 @@ type Option func(o *cacheOpt) *cacheOpt
 func Direct() Option {
 	return func(o *cacheOpt) *cacheOpt {
 		o.direct = true
+		return o
+	}
+}
+
+// PassThrough option indicates whether to enable FUSE passthrough mode
+// to improve local file read performance.
+func PassThrough() Option {
+	return func(o *cacheOpt) *cacheOpt {
+		o.passThrough = true
 		return o
 	}
 }
@@ -160,6 +177,7 @@ func NewDirectoryCache(directory string, config DirectoryCacheConfig) (BlobCache
 		wipDirectory: wipdir,
 		bufPool:      bufPool,
 		direct:       config.Direct,
+		fadvDontNeed: config.FadvDontNeed,
 	}
 	dc.syncAdd = config.SyncAdd
 	return dc, nil
@@ -175,8 +193,9 @@ type directoryCache struct {
 
 	bufPool *sync.Pool
 
-	syncAdd bool
-	direct  bool
+	syncAdd      bool
+	direct       bool
+	fadvDontNeed bool
 
 	closed   bool
 	closedMu sync.Mutex
@@ -229,8 +248,16 @@ func (dc *directoryCache) Get(key string, opts ...Option) (Reader, error) {
 	// that won't be accessed immediately.
 	if dc.direct || opt.direct {
 		return &reader{
-			ReaderAt:  file,
-			closeFunc: func() error { return file.Close() },
+			ReaderAt: file,
+			closeFunc: func() error {
+				if dc.fadvDontNeed {
+					if err := dropFilePageCache(file); err != nil {
+						fmt.Printf("Warning: failed to drop page cache: %v\n", err)
+					}
+				}
+
+				return file.Close()
+			},
 		}, nil
 	}
 
@@ -273,13 +300,20 @@ func (dc *directoryCache) Add(key string, opts ...Option) (Writer, error) {
 			// Commit the cache contents
 			c := dc.cachePath(key)
 			if err := os.MkdirAll(filepath.Dir(c), os.ModePerm); err != nil {
-				var allErr error
+				var errs []error
 				if err := os.Remove(wip.Name()); err != nil {
-					allErr = multierror.Append(allErr, err)
+					errs = append(errs, err)
 				}
-				return multierror.Append(allErr,
-					fmt.Errorf("failed to create cache directory %q: %w", c, err))
+				errs = append(errs, fmt.Errorf("failed to create cache directory %q: %w", c, err))
+				return errors.Join(errs...)
 			}
+
+			if dc.fadvDontNeed {
+				if err := dropFilePageCache(wip); err != nil {
+					fmt.Printf("Warning: failed to drop page cache: %v\n", err)
+				}
+			}
+
 			return os.Rename(wip.Name(), c)
 		},
 		abortFunc: func() error {
@@ -384,7 +418,7 @@ func (mc *MemoryCache) Get(key string, opts ...Option) (Reader, error) {
 	defer mc.mu.Unlock()
 	b, ok := mc.Membuf[key]
 	if !ok {
-		return nil, fmt.Errorf("Missed cache: %q", key)
+		return nil, fmt.Errorf("missed cache: %q", key)
 	}
 	return &reader{bytes.NewReader(b.Bytes()), func() error { return nil }}, nil
 }
@@ -414,6 +448,10 @@ type reader struct {
 
 func (r *reader) Close() error { return r.closeFunc() }
 
+func (r *reader) GetReaderAt() io.ReaderAt {
+	return r.ReaderAt
+}
+
 type writer struct {
 	io.WriteCloser
 	commitFunc func() error
@@ -437,4 +475,17 @@ func (w *writeCloser) Close() error { return w.closeFunc() }
 
 func nopWriteCloser(w io.Writer) io.WriteCloser {
 	return &writeCloser{w, func() error { return nil }}
+}
+
+func dropFilePageCache(file *os.File) error {
+	if file == nil {
+		return nil
+	}
+
+	fd := file.Fd()
+	err := unix.Fadvise(int(fd), 0, 0, unix.FADV_DONTNEED)
+	if err != nil {
+		return fmt.Errorf("posix_fadvise failed, ret=%d", err)
+	}
+	return nil
 }

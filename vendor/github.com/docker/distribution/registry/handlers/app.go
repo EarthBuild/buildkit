@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/distribution/reference"
 	"github.com/docker/distribution"
 	"github.com/docker/distribution/configuration"
 	dcontext "github.com/docker/distribution/context"
@@ -23,7 +24,6 @@ import (
 	"github.com/docker/distribution/health/checks"
 	prometheus "github.com/docker/distribution/metrics"
 	"github.com/docker/distribution/notifications"
-	"github.com/docker/distribution/reference"
 	"github.com/docker/distribution/registry/api/errcode"
 	v2 "github.com/docker/distribution/registry/api/v2"
 	"github.com/docker/distribution/registry/auth"
@@ -620,8 +620,6 @@ func (app *App) configureSecret(configuration *configuration.Configuration) {
 }
 
 func (app *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close() // ensure that request body is always closed.
-
 	// Prepare the context with our own little decorations.
 	ctx := r.Context()
 	ctx = dcontext.WithRequest(ctx, r)

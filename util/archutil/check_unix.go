@@ -1,19 +1,19 @@
-//go:build !windows
-// +build !windows
+//go:build linux
 
 package archutil
 
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
 
-	"github.com/moby/sys/mount"
 	"github.com/pkg/errors"
+	"golang.org/x/sys/unix"
 )
 
 func withChroot(cmd *exec.Cmd, dir string) {
@@ -24,12 +24,12 @@ func withChroot(cmd *exec.Cmd, dir string) {
 
 // Earthly-specific.
 func mountProc(target string) (func() error, error) {
-	err := mount.Mount("proc", target, "proc", "")
+	err := unix.Mount("proc", target, "proc", 0, "")
 	if err != nil {
 		return nil, err
 	}
 	return func() error {
-		return mount.Unmount(target)
+		return unix.Unmount(target, 0)
 	}, nil
 }
 
@@ -59,7 +59,7 @@ func check(arch, bin string) (string, error) {
 	}
 	f.Close()
 
-	cmd := exec.Command("/check")
+	cmd := exec.CommandContext(context.TODO(), "/check")
 	withChroot(cmd, tmpdir)
 
 	// Earthly-specific.
@@ -84,7 +84,8 @@ func check(arch, bin string) (string, error) {
 	if err == nil {
 		return "", errors.Errorf("invalid zero exit code")
 	}
-	if exitError, ok := err.(*exec.ExitError); ok {
+	exitError := &exec.ExitError{}
+	if errors.As(err, &exitError) {
 		switch exitError.ExitCode() {
 		case 65:
 			return "v1", nil

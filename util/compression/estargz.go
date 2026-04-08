@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"sync"
 
-	cdcompression "github.com/containerd/containerd/archive/compression"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/labels"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	cdcompression "github.com/containerd/containerd/v2/pkg/archive/compression"
+	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/moby/buildkit/util/iohelper"
 	digest "github.com/opencontainers/go-digest"
@@ -142,10 +142,6 @@ func (c estargzType) OnlySupportOCITypes() bool {
 	return true
 }
 
-func (c estargzType) NeedsForceCompression() bool {
-	return false
-}
-
 func (c estargzType) MediaType() string {
 	return ocispecs.MediaTypeImageLayerGzip
 }
@@ -195,7 +191,7 @@ func (c estargzType) Is(ctx context.Context, cs content.Store, dgst digest.Diges
 		if h.Name != estargz.TOCTarName {
 			return false
 		}
-		if _, err = tr.Next(); err != io.EOF { // must be EOF
+		if _, err = tr.Next(); !errors.Is(err, io.EOF) { // must be EOF
 			return false
 		}
 

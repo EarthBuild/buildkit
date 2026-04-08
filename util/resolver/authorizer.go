@@ -4,19 +4,21 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/containerd/remotes/docker/auth"
-	remoteserrors "github.com/containerd/containerd/remotes/errors"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/core/remotes/docker/auth"
+	remoteserrors "github.com/containerd/containerd/v2/core/remotes/errors"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/buildkit/session"
 	sessionauth "github.com/moby/buildkit/session/auth"
-	log "github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/errutil"
 	"github.com/moby/buildkit/util/flightcontrol"
 	"github.com/moby/buildkit/version"
 	"github.com/pkg/errors"
@@ -28,7 +30,7 @@ const defaultExpiration = 60
 type authHandlerNS struct {
 	counter int64 // needs to be 64bit aligned for 32bit systems
 
-	handlers   map[string]*authHandler
+	fetchers   map[string]*authFetcher
 	muHandlers sync.Mutex
 	hosts      map[string][]docker.RegistryHost
 	muHosts    sync.Mutex
@@ -38,13 +40,13 @@ type authHandlerNS struct {
 
 func newAuthHandlerNS(sm *session.Manager) *authHandlerNS {
 	return &authHandlerNS{
-		handlers: map[string]*authHandler{},
+		fetchers: map[string]*authFetcher{},
 		hosts:    map[string][]docker.RegistryHost{},
 		sm:       sm,
 	}
 }
 
-func (a *authHandlerNS) get(ctx context.Context, host string, sm *session.Manager, g session.Group) *authHandler {
+func (a *authHandlerNS) get(ctx context.Context, host string, sm *session.Manager, g session.Group) *authFetcher {
 	if g != nil {
 		if iter := g.SessionIterator(); iter != nil {
 			for {
@@ -52,7 +54,7 @@ func (a *authHandlerNS) get(ctx context.Context, host string, sm *session.Manage
 				if id == "" {
 					break
 				}
-				h, ok := a.handlers[host+"/"+id]
+				h, ok := a.fetchers[host+"/"+id]
 				if ok {
 					h.lastUsed = time.Now()
 					return h
@@ -61,25 +63,25 @@ func (a *authHandlerNS) get(ctx context.Context, host string, sm *session.Manage
 		}
 	}
 
-	// link another handler
-	for k, h := range a.handlers {
+	// link existing fetcher
+	for k, h := range a.fetchers {
 		parts := strings.SplitN(k, "/", 2)
 		if len(parts) != 2 {
 			continue
 		}
 		if parts[0] == host {
 			if h.authority != nil {
-				session, ok, err := sessionauth.VerifyTokenAuthority(ctx, host, h.authority, sm, g)
+				sessionID, ok, err := sessionauth.VerifyTokenAuthority(ctx, host, h.authority, sm, g)
 				if err == nil && ok {
-					a.handlers[host+"/"+session] = h
+					a.fetchers[host+"/"+sessionID] = h
 					h.lastUsed = time.Now()
 					return h
 				}
 			} else {
-				session, username, password, err := sessionauth.CredentialsFunc(sm, g)(host)
+				sessionID, username, password, err := sessionauth.CredentialsFunc(ctx, sm, g)(host)
 				if err == nil {
 					if username == h.common.Username && password == h.common.Secret {
-						a.handlers[host+"/"+session] = h
+						a.fetchers[host+"/"+sessionID] = h
 						h.lastUsed = time.Now()
 						return h
 					}
@@ -91,80 +93,81 @@ func (a *authHandlerNS) get(ctx context.Context, host string, sm *session.Manage
 	return nil
 }
 
-func (a *authHandlerNS) set(host, session string, h *authHandler) {
-	a.handlers[host+"/"+session] = h
+func (a *authHandlerNS) set(host, session string, f *authFetcher) {
+	a.fetchers[host+"/"+session] = f
 }
 
-func (a *authHandlerNS) delete(h *authHandler) {
-	for k, v := range a.handlers {
-		if v == h {
-			delete(a.handlers, k)
-		}
-	}
+func (a *authHandlerNS) delete(f *authFetcher) {
+	maps.DeleteFunc(a.fetchers, func(_ string, v *authFetcher) bool {
+		return v == f
+	})
 }
 
 type dockerAuthorizer struct {
 	client *http.Client
 
-	sm       *session.Manager
-	session  session.Group
-	handlers *authHandlerNS
+	sm        *session.Manager
+	session   session.Group
+	handlerNS *authHandlerNS
 }
 
-func newDockerAuthorizer(client *http.Client, handlers *authHandlerNS, sm *session.Manager, group session.Group) *dockerAuthorizer {
+func newDockerAuthorizer(client *http.Client, handlerNS *authHandlerNS, sm *session.Manager, group session.Group) *dockerAuthorizer {
 	return &dockerAuthorizer{
-		client:   client,
-		handlers: handlers,
-		sm:       sm,
-		session:  group,
+		client:    client,
+		handlerNS: handlerNS,
+		sm:        sm,
+		session:   group,
 	}
 }
 
 // Authorize handles auth request.
 func (a *dockerAuthorizer) Authorize(ctx context.Context, req *http.Request) error {
-	a.handlers.muHandlers.Lock()
-	defer a.handlers.muHandlers.Unlock()
+	a.handlerNS.muHandlers.Lock()
+	defer a.handlerNS.muHandlers.Unlock()
 
 	// skip if there is no auth handler
-	ah := a.handlers.get(ctx, req.URL.Host, a.sm, a.session)
+	ah := a.handlerNS.get(ctx, req.URL.Host, a.sm, a.session)
 	if ah == nil {
 		return nil
 	}
 
-	auth, err := ah.authorize(ctx, a.sm, a.session)
+	authHeader, err := ah.authorize(ctx, a.sm, a.session)
 	if err != nil {
 		return err
 	}
 
-	req.Header.Set("Authorization", auth)
+	req.Header.Set("Authorization", authHeader)
 	return nil
 }
 
-func (a *dockerAuthorizer) getCredentials(host string) (sessionID, username, secret string, err error) {
-	return sessionauth.CredentialsFunc(a.sm, a.session)(host)
+func (a *dockerAuthorizer) getCredentials(ctx context.Context, host string) (sessionID, username, secret string, err error) {
+	return sessionauth.CredentialsFunc(ctx, a.sm, a.session)(host)
 }
 
 func (a *dockerAuthorizer) AddResponses(ctx context.Context, responses []*http.Response) error {
-	a.handlers.muHandlers.Lock()
-	defer a.handlers.muHandlers.Unlock()
+	handlerNS := a.handlerNS
+
+	handlerNS.muHandlers.Lock()
+	defer handlerNS.muHandlers.Unlock()
 
 	last := responses[len(responses)-1]
 	host := last.Request.URL.Host
 
-	handler := a.handlers.get(ctx, host, a.sm, a.session)
+	handler := handlerNS.get(ctx, host, a.sm, a.session)
 
 	for _, c := range auth.ParseAuthHeader(last.Header) {
-		if c.Scheme == auth.BearerAuth {
+		switch c.Scheme {
+		case auth.BearerAuth:
 			var oldScopes []string
 			if err := invalidAuthorization(c, responses); err != nil {
-				a.handlers.delete(handler)
+				handlerNS.delete(handler)
 
 				if handler != nil {
 					oldScopes = handler.common.Scopes
 				}
 				handler = nil
 
-				// this hacky way seems to be best method to detect that error is fatal and should not be retried with a new token
+				// this hacky way seems to be the best method to detect that error is fatal and should not be retried with a new token
 				if c.Parameters["error"] == "insufficient_scope" && parseScopes(oldScopes).contains(parseScopes(strings.Split(c.Parameters["scope"], " "))) {
 					return err
 				}
@@ -181,12 +184,12 @@ func (a *dockerAuthorizer) AddResponses(ctx context.Context, responses []*http.R
 			}
 
 			var username, secret string
-			session, pubKey, err := sessionauth.GetTokenAuthority(ctx, host, a.sm, a.session)
+			sessionID, pubKey, err := sessionauth.GetTokenAuthority(ctx, host, a.sm, a.session)
 			if err != nil {
 				return err
 			}
 			if pubKey == nil {
-				session, username, secret, err = a.getCredentials(host)
+				sessionID, username, secret, err = a.getCredentials(ctx, host)
 				if err != nil {
 					return err
 				}
@@ -198,28 +201,25 @@ func (a *dockerAuthorizer) AddResponses(ctx context.Context, responses []*http.R
 			}
 			common.Scopes = parseScopes(append(common.Scopes, oldScopes...)).normalize()
 
-			a.handlers.set(host, session, newAuthHandler(host, a.client, c.Scheme, pubKey, common))
+			handlerNS.set(host, sessionID, newAuthFetcher(host, a.client, c.Scheme, pubKey, common))
 
 			return nil
-		} else if c.Scheme == auth.BasicAuth {
-			session, username, secret, err := a.getCredentials(host)
+		case auth.BasicAuth:
+			sessionID, username, secret, err := a.getCredentials(ctx, host)
 			if err != nil {
 				return err
 			}
 
 			if username != "" && secret != "" {
-				common := auth.TokenOptions{
+				handlerNS.set(host, sessionID, newAuthFetcher(host, a.client, c.Scheme, nil, auth.TokenOptions{
 					Username: username,
 					Secret:   secret,
-				}
-
-				a.handlers.set(host, session, newAuthHandler(host, a.client, c.Scheme, nil, common))
-
+				}))
 				return nil
 			}
 		}
 	}
-	return errors.Wrap(errdefs.ErrNotImplemented, "failed to find supported auth scheme")
+	return errors.Wrap(cerrdefs.ErrNotImplemented, "failed to find supported auth scheme")
 }
 
 // authResult is used to control limit rate.
@@ -228,8 +228,8 @@ type authResult struct {
 	expires time.Time
 }
 
-// authHandler is used to handle auth request per registry server.
-type authHandler struct {
+// authFetcher is used to process auth request return the token.
+type authFetcher struct {
 	g flightcontrol.Group[*authResult]
 
 	client *http.Client
@@ -252,8 +252,8 @@ type authHandler struct {
 	authority *[32]byte
 }
 
-func newAuthHandler(host string, client *http.Client, scheme auth.AuthenticationScheme, authority *[32]byte, opts auth.TokenOptions) *authHandler {
-	return &authHandler{
+func newAuthFetcher(host string, client *http.Client, scheme auth.AuthenticationScheme, authority *[32]byte, opts auth.TokenOptions) *authFetcher {
+	return &authFetcher{
 		host:         host,
 		client:       client,
 		scheme:       scheme,
@@ -264,35 +264,35 @@ func newAuthHandler(host string, client *http.Client, scheme auth.Authentication
 	}
 }
 
-func (ah *authHandler) authorize(ctx context.Context, sm *session.Manager, g session.Group) (string, error) {
+func (ah *authFetcher) authorize(ctx context.Context, sm *session.Manager, g session.Group) (string, error) {
 	switch ah.scheme {
 	case auth.BasicAuth:
-		return ah.doBasicAuth(ctx)
+		return ah.doBasicAuth()
 	case auth.BearerAuth:
 		return ah.doBearerAuth(ctx, sm, g)
 	default:
-		return "", errors.Wrapf(errdefs.ErrNotImplemented, "failed to find supported auth scheme: %s", string(ah.scheme))
+		return "", errors.Wrapf(cerrdefs.ErrNotImplemented, "failed to find supported auth scheme: %s", string(ah.scheme))
 	}
 }
 
-func (ah *authHandler) doBasicAuth(ctx context.Context) (string, error) {
+func (ah *authFetcher) doBasicAuth() (string, error) {
 	username, secret := ah.common.Username, ah.common.Secret
 
 	if username == "" || secret == "" {
 		return "", errors.New("failed to handle basic auth because missing username or secret")
 	}
 
-	auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + secret))
-	return fmt.Sprintf("Basic %s", auth), nil
+	authHeader := base64.StdEncoding.EncodeToString([]byte(username + ":" + secret))
+	return fmt.Sprintf("Basic %s", authHeader), nil
 }
 
-func (ah *authHandler) doBearerAuth(ctx context.Context, sm *session.Manager, g session.Group) (token string, err error) {
+func (ah *authFetcher) doBearerAuth(ctx context.Context, sm *session.Manager, g session.Group) (token string, err error) {
 	// copy common tokenOptions
 	to := ah.common
 
 	to.Scopes = parseScopes(docker.GetTokenScopes(ctx, to.Scopes)).normalize()
 
-	// Docs: https://docs.docker.com/registry/spec/auth/scope
+	// Docs: https://distribution.github.io/distribution/spec/auth/scope
 	scoped := strings.Join(to.Scopes, " ")
 
 	res, err := ah.g.Do(ctx, scoped, func(ctx context.Context) (*authResult, error) {
@@ -319,7 +319,7 @@ func (ah *authHandler) doBearerAuth(ctx context.Context, sm *session.Manager, g 
 	return res.token, nil
 }
 
-func (ah *authHandler) fetchToken(ctx context.Context, sm *session.Manager, g session.Group, to auth.TokenOptions) (r *authResult, err error) {
+func (ah *authFetcher) fetchToken(ctx context.Context, sm *session.Manager, g session.Group, to auth.TokenOptions) (r *authResult, err error) {
 	var issuedAt time.Time
 	var expires int
 	var token string
@@ -376,7 +376,7 @@ func (ah *authHandler) fetchToken(ctx context.Context, sm *session.Manager, g se
 	// fetch token for the resource scope
 	if to.Secret != "" {
 		defer func() {
-			err = errors.Wrap(err, "failed to fetch oauth token")
+			err = errors.Wrap(errutil.WithDetails(err), "failed to fetch oauth token")
 		}()
 		// try GET first because Docker Hub does not support POST
 		// switch once support has landed
@@ -387,29 +387,29 @@ func (ah *authHandler) fetchToken(ctx context.Context, sm *session.Manager, g se
 				// retry with POST request
 				// As of September 2017, GCR is known to return 404.
 				// As of February 2018, JFrog Artifactory is known to return 401.
-				if (errStatus.StatusCode == 405 && to.Username != "") || errStatus.StatusCode == 404 || errStatus.StatusCode == 401 {
+				if (errStatus.StatusCode == http.StatusMethodNotAllowed && to.Username != "") || errStatus.StatusCode == http.StatusNotFound || errStatus.StatusCode == http.StatusUnauthorized {
 					resp, err := auth.FetchTokenWithOAuth(ctx, ah.client, hdr, "buildkit-client", to)
 					if err != nil {
 						return nil, err
 					}
-					if resp.ExpiresIn == 0 {
-						resp.ExpiresIn = defaultExpiration
+					if resp.ExpiresInSeconds == 0 {
+						resp.ExpiresInSeconds = defaultExpiration
 					}
-					issuedAt, expires = resp.IssuedAt, resp.ExpiresIn
+					issuedAt, expires = resp.IssuedAt, resp.ExpiresInSeconds
 					token = resp.AccessToken
 					return nil, nil
 				}
-				log.G(ctx).WithFields(logrus.Fields{
+				bklog.G(ctx).WithFields(logrus.Fields{
 					"status": errStatus.Status,
 					"body":   string(errStatus.Body),
 				}).Debugf("token request failed")
 			}
 			return nil, err
 		}
-		if resp.ExpiresIn == 0 {
-			resp.ExpiresIn = defaultExpiration
+		if resp.ExpiresInSeconds == 0 {
+			resp.ExpiresInSeconds = defaultExpiration
 		}
-		issuedAt, expires = resp.IssuedAt, resp.ExpiresIn
+		issuedAt, expires = resp.IssuedAt, resp.ExpiresInSeconds
 		token = resp.Token
 		return nil, nil
 	}
@@ -418,10 +418,10 @@ func (ah *authHandler) fetchToken(ctx context.Context, sm *session.Manager, g se
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to fetch anonymous token")
 	}
-	if resp.ExpiresIn == 0 {
-		resp.ExpiresIn = defaultExpiration
+	if resp.ExpiresInSeconds == 0 {
+		resp.ExpiresInSeconds = defaultExpiration
 	}
-	issuedAt, expires = resp.IssuedAt, resp.ExpiresIn
+	issuedAt, expires = resp.IssuedAt, resp.ExpiresInSeconds
 
 	token = resp.Token
 	return nil, nil
@@ -454,11 +454,14 @@ func sameRequest(r1, r2 *http.Request) bool {
 type scopes map[string]map[string]struct{}
 
 func parseScopes(s []string) scopes {
-	// https://docs.docker.com/registry/spec/auth/scope/
+	// https://distribution.github.io/distribution/spec/auth/scope/
 	m := map[string]map[string]struct{}{}
 	for _, scopeStr := range s {
+		if scopeStr == "" {
+			return nil
+		}
 		// The scopeStr may have strings that contain multiple scopes separated by a space.
-		for _, scope := range strings.Split(scopeStr, " ") {
+		for scope := range strings.SplitSeq(scopeStr, " ") {
 			parts := strings.SplitN(scope, ":", 3)
 			names := []string{parts[0]}
 			if len(parts) > 1 {
@@ -488,7 +491,7 @@ func (s scopes) normalize() []string {
 	for n := range s {
 		names = append(names, n)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	out := make([]string, 0, len(s))
 
@@ -497,7 +500,7 @@ func (s scopes) normalize() []string {
 		for a := range s[n] {
 			actions = append(actions, a)
 		}
-		sort.Strings(actions)
+		slices.Sort(actions)
 
 		out = append(out, n+":"+strings.Join(actions, ","))
 	}

@@ -2,6 +2,8 @@ package parser
 
 import (
 	"testing"
+
+	"github.com/pkg/errors"
 )
 
 var invalidJSONArraysOfStrings = []string{
@@ -28,9 +30,7 @@ var validJSONArraysOfStrings = map[string][]string{
 
 func TestJSONArraysOfStrings(t *testing.T) {
 	for json, expected := range validJSONArraysOfStrings {
-		d := newDefaultDirectives()
-
-		if node, _, err := parseJSON(json, d); err != nil {
+		if node, _, err := parseJSON(json); err != nil {
 			t.Fatalf("%q should be a valid JSON array of strings, but wasn't! (err: %q)", json, err)
 		} else {
 			i := 0
@@ -50,9 +50,7 @@ func TestJSONArraysOfStrings(t *testing.T) {
 		}
 	}
 	for _, json := range invalidJSONArraysOfStrings {
-		d := newDefaultDirectives()
-
-		if _, _, err := parseJSON(json, d); err != errDockerfileNotStringArray {
+		if _, _, err := parseJSON(json); !errors.Is(err, errDockerfileNotStringArray) {
 			t.Fatalf("%q should be an invalid JSON array of strings, but wasn't!", json)
 		}
 	}

@@ -1,5 +1,4 @@
 //go:build !windows
-// +build !windows
 
 package main
 
@@ -10,10 +9,12 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/containerd/containerd/sys"
+	"github.com/containerd/containerd/v2/pkg/sys"
 	"github.com/coreos/go-systemd/v22/activation"
 	"github.com/pkg/errors"
 )
+
+const socketScheme = "unix://"
 
 func init() {
 	syscall.Umask(0)
@@ -60,7 +61,7 @@ func listenFD(addr string, tlsConfig *tls.Config) (net.Listener, error) {
 	return nil, errors.New("not supported yet")
 }
 
-func getLocalListener(listenerPath string) (net.Listener, error) {
+func getLocalListener(listenerPath, _ string) (net.Listener, error) {
 	uid := os.Getuid()
 	l, err := sys.GetLocalListener(listenerPath, uid, uid)
 	if err != nil {
@@ -71,4 +72,8 @@ func getLocalListener(listenerPath string) (net.Listener, error) {
 		return nil, err
 	}
 	return l, nil
+}
+
+func groupToSecurityDescriptor(_ string) (string, error) {
+	return "", nil
 }

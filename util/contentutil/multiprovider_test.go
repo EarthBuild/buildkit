@@ -5,8 +5,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/v2/core/content"
+	cerrdefs "github.com/containerd/errdefs"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -32,13 +32,13 @@ func TestMultiProvider(t *testing.T) {
 
 	dt, err := content.ReadBlob(ctx, mp, ocispecs.Descriptor{Digest: digest.FromBytes([]byte("foo0"))})
 	require.NoError(t, err)
-	require.Equal(t, string(dt), "foo0")
+	require.Equal(t, "foo0", string(dt))
 
 	dt, err = content.ReadBlob(ctx, mp, ocispecs.Descriptor{Digest: digest.FromBytes([]byte("foo1"))})
 	require.NoError(t, err)
-	require.Equal(t, string(dt), "foo1")
+	require.Equal(t, "foo1", string(dt))
 
 	_, err = content.ReadBlob(ctx, mp, ocispecs.Descriptor{Digest: digest.FromBytes([]byte("foo2"))})
 	require.Error(t, err)
-	require.Equal(t, true, errors.Is(err, errdefs.ErrNotFound))
+	require.Equal(t, true, errors.Is(err, cerrdefs.ErrNotFound))
 }

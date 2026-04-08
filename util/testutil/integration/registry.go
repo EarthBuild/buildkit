@@ -56,7 +56,7 @@ http:
 		}
 	}
 
-	cmd := exec.Command("registry", "serve", filepath.Join(dir, "config.yaml")) //nolint:gosec // test utility
+	cmd := exec.CommandContext(context.TODO(), "registry", "serve", filepath.Join(dir, "config.yaml")) //nolint:gosec // test utility
 	rc, err := cmd.StderrPipe()
 	if err != nil {
 		return "", nil, err
@@ -67,8 +67,9 @@ http:
 	}
 	deferF.Append(stop)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx, _ = context.WithTimeoutCause(ctx, 5*time.Second, errors.WithStack(context.DeadlineExceeded)) //nolint:govet
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 	url, err = detectPort(ctx, rc)
 	if err != nil {
 		return "", nil, err

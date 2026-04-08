@@ -4,13 +4,14 @@ import (
 	"io"
 	"os"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/content/proxy"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/content/proxy"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client"
 	bccommon "github.com/moby/buildkit/cmd/buildctl/common"
 	"github.com/moby/buildkit/util/appcontext"
 	"github.com/moby/buildkit/util/progress/progresswriter"
+	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -56,7 +57,7 @@ func logs(clicontext *cli.Context) error {
 		}
 		he, err := cl.Recv()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return errors.Errorf("ref %s not found", ref)
 			}
 			return err
@@ -65,9 +66,13 @@ func logs(clicontext *cli.Context) error {
 			return errors.Errorf("ref %s does not have trace", ref)
 		}
 		store := proxy.NewContentStore(c.ContentClient())
+		dgst, err := digest.Parse(he.Record.Trace.Digest)
+		if err != nil {
+			return err
+		}
 		ra, err := store.ReaderAt(ctx, ocispecs.Descriptor{
-			Digest:    he.Record.Trace.Digest,
-			Size:      he.Record.Trace.Size_,
+			Digest:    dgst,
+			Size:      he.Record.Trace.Size,
 			MediaType: he.Record.Trace.MediaType,
 		})
 		if err != nil {

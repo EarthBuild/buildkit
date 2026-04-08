@@ -24,14 +24,14 @@ func TestMarshal(t *testing.T) {
 	require.NoError(t, err)
 
 	buildop := op.GetBuild()
-	require.NotEqual(t, buildop, nil)
+	require.NotNil(t, buildop)
 
-	require.Equal(t, len(op.Inputs), 1)
-	require.Equal(t, buildop.Builder, pb.LLBBuilder)
-	require.Equal(t, len(buildop.Inputs), 1)
-	require.Equal(t, buildop.Inputs[pb.LLBDefinitionInput], &pb.BuildInput{Input: pb.InputIndex(0)})
+	require.Equal(t, 1, len(op.Inputs))
+	require.Equal(t, pb.LLBBuilder, pb.InputIndex(buildop.Builder))
+	require.Equal(t, 1, len(buildop.Inputs))
+	require.Equal(t, &pb.BuildInput{Input: 0}, buildop.Inputs[string(pb.LLBDefinitionInput)])
 
-	require.Equal(t, buildop.Attrs[pb.AttrLLBDefinitionFilename], "myfilename")
+	require.Equal(t, "myfilename", buildop.Attrs[pb.AttrLLBDefinitionFilename])
 }
 
 func newDummyOutput(key string) llb.Output {
@@ -45,10 +45,11 @@ type dummyOutput struct {
 
 func (d *dummyOutput) ToInput(context.Context, *llb.Constraints) (*pb.Input, error) {
 	return &pb.Input{
-		Digest: d.dgst,
-		Index:  pb.OutputIndex(7), // random constant
+		Digest: string(d.dgst),
+		Index:  7, // random constant
 	}, nil
 }
+
 func (d *dummyOutput) Vertex(context.Context, *llb.Constraints) llb.Vertex {
 	return nil
 }

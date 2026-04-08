@@ -1,10 +1,9 @@
 //go:build !linux
-// +build !linux
 
 package mountopts
 
 import (
-	"github.com/containerd/containerd/mount"
+	"github.com/containerd/containerd/v2/core/mount"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 

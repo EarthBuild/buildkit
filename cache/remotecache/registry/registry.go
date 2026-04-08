@@ -2,11 +2,14 @@ package registry
 
 import (
 	"context"
+	"maps"
 	"strconv"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/pkg/snapshotters"
+
 	"github.com/distribution/reference"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/session"
@@ -68,13 +71,15 @@ func ResolveCacheExporterFunc(sm *session.Manager, hosts docker.RegistryHosts) r
 			}
 			ociMediatypes = b
 		}
-		imageManifest := false
+		imageManifest := true
 		if v, ok := attrs[attrImageManifest]; ok {
 			b, err := strconv.ParseBool(v)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to parse %s", attrImageManifest)
 			}
 			imageManifest = b
+		} else if !ociMediatypes {
+			imageManifest = false
 		}
 		insecure := false
 		if v, ok := attrs[attrInsecure]; ok {
@@ -85,7 +90,7 @@ func ResolveCacheExporterFunc(sm *session.Manager, hosts docker.RegistryHosts) r
 			insecure = b
 		}
 
-		scope, hosts := registryConfig(hosts, ref, "push", insecure)
+		scope, hosts := registryConfig(hosts, ref, resolver.ScopeType{Push: true}, insecure)
 		remote := resolver.DefaultPool.GetResolver(hosts, refString, scope, sm, g)
 		pusher, err := push.Pusher(ctx, remote, refString)
 		if err != nil {
@@ -111,7 +116,7 @@ func ResolveCacheImporterFunc(sm *session.Manager, cs content.Store, hosts docke
 			insecure = b
 		}
 
-		scope, hosts := registryConfig(hosts, ref, "pull", insecure)
+		scope, hosts := registryConfig(hosts, ref, resolver.ScopeType{}, insecure)
 		remote := resolver.DefaultPool.GetResolver(hosts, refString, scope, sm, g)
 		xref, desc, err := remote.Resolve(ctx, refString)
 		if err != nil {
@@ -163,13 +168,12 @@ func (dsl *withDistributionSourceLabel) SnapshotLabels(descs []ocispecs.Descript
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	for k, v := range estargz.SnapshotLabels(dsl.ref, descs, index) {
-		labels[k] = v
-	}
+	maps.Copy(labels, estargz.SnapshotLabels(dsl.ref, descs, index))
+	labels[snapshotters.TargetRefLabel] = dsl.ref
 	return labels
 }
 
-func registryConfig(hosts docker.RegistryHosts, ref reference.Named, scope string, insecure bool) (string, docker.RegistryHosts) {
+func registryConfig(hosts docker.RegistryHosts, ref reference.Named, scope resolver.ScopeType, insecure bool) (resolver.ScopeType, docker.RegistryHosts) {
 	if insecure {
 		insecureTrue := true
 		httpTrue := true
@@ -179,7 +183,7 @@ func registryConfig(hosts docker.RegistryHosts, ref reference.Named, scope strin
 				PlainHTTP: &httpTrue,
 			},
 		})
-		scope += ":insecure"
+		scope.Insecure = true
 	}
 	return scope, hosts
 }

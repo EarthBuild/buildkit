@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/containerd/containerd/platforms"
-	"github.com/moby/buildkit/solver/pb"
+	"github.com/containerd/platforms"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -28,13 +27,12 @@ func TestDefinitionEquivalence(t *testing.T) {
 		{"platform constraint", Image("ref", LinuxArm64)},
 		{"mount", Image("busybox").Run(Shlex(`sh -c "echo foo > /out/foo"`)).AddMount("/out", Scratch())},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			ctx := context.TODO()
+			ctx := t.Context()
 
-			def, err := tc.state.Marshal(context.TODO())
+			def, err := tc.state.Marshal(ctx)
 			require.NoError(t, err)
 
 			op, err := NewDefinitionOp(def.ToPB())
@@ -45,14 +43,14 @@ func TestDefinitionEquivalence(t *testing.T) {
 
 			st2 := NewState(op.Output())
 
-			def2, err := st2.Marshal(context.TODO())
+			def2, err := st2.Marshal(ctx)
 			require.NoError(t, err)
 			require.Equal(t, len(def.Def), len(def2.Def))
 			require.Equal(t, len(def.Metadata), len(def2.Metadata))
 
-			for i := 0; i < len(def.Def); i++ {
+			for i := range def.Def {
 				res := bytes.Compare(def.Def[i], def2.Def[i])
-				require.Equal(t, res, 0)
+				require.Equal(t, 0, res)
 			}
 
 			for dgst := range def.Metadata {
@@ -95,9 +93,9 @@ func TestDefinitionInputCache(t *testing.T) {
 		AddMount("/b2", stB.GetMount("/mnt")),
 	).Root()
 
-	ctx := context.TODO()
+	ctx := t.Context()
 
-	def, err := st.Marshal(context.TODO())
+	def, err := st.Marshal(ctx)
 	require.NoError(t, err)
 
 	op, err := NewDefinitionOp(def.ToPB())
@@ -108,7 +106,7 @@ func TestDefinitionInputCache(t *testing.T) {
 
 	st2 := NewState(op.Output())
 	marshalDef := &Definition{
-		Metadata: make(map[digest.Digest]pb.OpMetadata, 0),
+		Metadata: make(map[digest.Digest]OpMetadata, 0),
 	}
 	constraints := &Constraints{}
 	smc := newSourceMapCollector()
@@ -122,18 +120,18 @@ func TestDefinitionInputCache(t *testing.T) {
 
 	// make sure that walking vertices in parallel doesn't cause panic
 	var all []RunOption
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		var sts []RunOption
-		for j := 0; j < 100; j++ {
+		for j := range 100 {
 			sts = append(sts, AddMount("/mnt", Scratch().Run(Shlex(fmt.Sprintf("%d-%d", i, j))).Root()))
 		}
 		all = append(all, AddMount("/mnt", Scratch().Run(append([]RunOption{Shlex("args")}, sts...)...).Root()))
 	}
-	def, err = Scratch().Run(append([]RunOption{Shlex("args")}, all...)...).Root().Marshal(context.TODO())
+	def, err = Scratch().Run(append([]RunOption{Shlex("args")}, all...)...).Root().Marshal(ctx)
 	require.NoError(t, err)
 	op, err = NewDefinitionOp(def.ToPB())
 	require.NoError(t, err)
-	require.NoError(t, testParallelWalk(context.Background(), op.Output()))
+	require.NoError(t, testParallelWalk(ctx, op.Output()))
 }
 
 func TestDefinitionNil(t *testing.T) {
@@ -145,7 +143,6 @@ func TestDefinitionNil(t *testing.T) {
 func testParallelWalk(ctx context.Context, out Output) error {
 	eg, egCtx := errgroup.WithContext(ctx)
 	for _, o := range out.Vertex(ctx, nil).Inputs() {
-		o := o
 		eg.Go(func() error {
 			return testParallelWalk(egCtx, o)
 		})

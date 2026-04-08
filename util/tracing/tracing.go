@@ -7,20 +7,22 @@ import (
 	"net/http/httptrace"
 
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/stack"
+	"github.com/pkg/errors"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
-	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // StartSpan starts a new span as a child of the span in context.
 // If there is no span in context then this is a no-op.
 func StartSpan(ctx context.Context, operationName string, opts ...trace.SpanStartOption) (trace.Span, context.Context) {
 	parent := trace.SpanFromContext(ctx)
-	tracer := trace.NewNoopTracerProvider().Tracer("")
+	tracer := noop.NewTracerProvider().Tracer("")
 	if parent != nil && parent.SpanContext().IsValid() {
 		tracer = parent.TracerProvider().Tracer("")
 	}
@@ -29,14 +31,24 @@ func StartSpan(ctx context.Context, operationName string, opts ...trace.SpanStar
 	return span, ctx
 }
 
+func hasStacktrace(err error) bool {
+	var stack interface{ StackTrace() *stack.Stack }
+	var pkgStack interface{ StackTrace() errors.StackTrace }
+	return errors.As(err, &stack) || errors.As(err, &pkgStack)
+}
+
+// exceptionStacktraceKey is the OTEL semantic convention key for an exception
+// stacktrace. See [exception.stacktrace],
+//
+// [exception.stacktrace]: https://opentelemetry.io/docs/specs/semconv/registry/attributes/exception/#exception-stacktrace
+const exceptionStacktraceKey = "exception.stacktrace"
+
 // FinishWithError finalizes the span and sets the error if one is passed
 func FinishWithError(span trace.Span, err error) {
 	if err != nil {
 		span.RecordError(err)
-		if _, ok := err.(interface {
-			Cause() error
-		}); ok {
-			span.SetAttributes(attribute.String(string(semconv.ExceptionStacktraceKey), fmt.Sprintf("%+v", err)))
+		if hasStacktrace(err) {
+			span.SetAttributes(attribute.String(exceptionStacktraceKey, fmt.Sprintf("%+v", stack.Formatter(err))))
 		}
 		span.SetStatus(codes.Error, err.Error())
 	}

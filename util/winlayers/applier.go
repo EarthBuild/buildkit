@@ -8,13 +8,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/containerd/containerd/archive"
-	"github.com/containerd/containerd/archive/compression"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/diff"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/mount"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/diff"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/containerd/v2/pkg/archive"
+	"github.com/containerd/containerd/v2/pkg/archive/compression"
+	cerrdefs "github.com/containerd/errdefs"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -49,7 +49,7 @@ func (s *winApplier) Apply(ctx context.Context, desc ocispecs.Descriptor, mounts
 
 	compressed, err := images.DiffCompression(ctx, desc.MediaType)
 	if err != nil {
-		return ocispecs.Descriptor{}, errors.Wrapf(errdefs.ErrNotImplemented, "unsupported diff media type: %v", desc.MediaType)
+		return ocispecs.Descriptor{}, errors.Wrapf(cerrdefs.ErrNotImplemented, "unsupported diff media type: %v", desc.MediaType)
 	}
 
 	var ocidesc ocispecs.Descriptor
@@ -76,8 +76,8 @@ func (s *winApplier) Apply(ctx context.Context, desc ocispecs.Descriptor, mounts
 		}
 
 		rc2, discard := filter(rc, func(hdr *tar.Header) bool {
-			if strings.HasPrefix(hdr.Name, "Files/") {
-				hdr.Name = strings.TrimPrefix(hdr.Name, "Files/")
+			if after, ok := strings.CutPrefix(hdr.Name, "Files/"); ok {
+				hdr.Name = after
 				hdr.Linkname = strings.TrimPrefix(hdr.Linkname, "Files/")
 				// TODO: could convert the windows PAX headers to xattr here to reuse
 				// the original ones in diff for parent directories and file modifications
@@ -148,12 +148,10 @@ func filter(in io.Reader, f func(*tar.Header) bool) (io.Reader, func(error)) {
 							return err
 						}
 					}
-				} else {
-					if h.Size > 0 {
-						//nolint:gosec // never read into memory
-						if _, err := io.Copy(io.Discard, tarReader); err != nil {
-							return err
-						}
+				} else if h.Size > 0 {
+					//nolint:gosec // never read into memory
+					if _, err := io.Copy(io.Discard, tarReader); err != nil {
+						return err
 					}
 				}
 			}

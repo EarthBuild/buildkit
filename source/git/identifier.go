@@ -1,19 +1,17 @@
 package git
 
 import (
-	"path"
-	"strings"
-
 	"github.com/moby/buildkit/solver/llbsolver/provenance"
+	provenancetypes "github.com/moby/buildkit/solver/llbsolver/provenance/types"
 	"github.com/moby/buildkit/source"
 	srctypes "github.com/moby/buildkit/source/types"
 	"github.com/moby/buildkit/util/gitutil"
-	"github.com/moby/buildkit/util/sshutil"
 )
 
 type GitIdentifier struct {
 	Remote           string
 	Ref              string
+	Checksum         string
 	Subdir           string
 	KeepGitDir       bool
 	AuthTokenSecret  string
@@ -23,10 +21,21 @@ type GitIdentifier struct {
 	SSHCommand       string              // earthly-specific
 	LFSInclude       string              // earthly-specific
 	LogLevel         gitutil.GitLogLevel // earthly-specific
+	SkipSubmodules   bool
+	MTime            string // "checkout" (default) or "commit"
+
+	VerifySignature *GitSignatureVerifyOptions
+}
+
+type GitSignatureVerifyOptions struct {
+	PubKey            []byte
+	RejectExpiredKeys bool
+	RequireSignedTag  bool // signed tag must be present
+	IgnoreSignedTag   bool // even if signed tag is present, verify signature on commit object
 }
 
 func NewGitIdentifier(remoteURL string) (*GitIdentifier, error) {
-	if !isGitTransport(remoteURL) {
+	if !gitutil.IsGitTransport(remoteURL) {
 		remoteURL = "https://" + remoteURL
 	}
 	u, err := gitutil.ParseURL(remoteURL)
@@ -35,12 +44,9 @@ func NewGitIdentifier(remoteURL string) (*GitIdentifier, error) {
 	}
 
 	repo := GitIdentifier{Remote: u.Remote}
-	if u.Fragment != nil {
-		repo.Ref = u.Fragment.Ref
-		repo.Subdir = u.Fragment.Subdir
-	}
-	if sd := path.Clean(repo.Subdir); sd == "/" || sd == "." {
-		repo.Subdir = ""
+	if u.Opts != nil {
+		repo.Ref = u.Opts.Ref
+		repo.Subdir = u.Opts.Subdir
 	}
 	return &repo, nil
 }
@@ -56,33 +62,27 @@ func (id *GitIdentifier) Capture(c *provenance.Capture, pin string) error {
 	if id.Ref != "" {
 		url += "#" + id.Ref
 	}
-	c.AddGit(provenance.GitSource{
+	c.AddGit(provenancetypes.GitSource{
 		URL:    url,
 		Commit: pin,
 	})
 	if id.AuthTokenSecret != "" {
-		c.AddSecret(provenance.Secret{
+		c.AddSecret(provenancetypes.Secret{
 			ID:       id.AuthTokenSecret,
 			Optional: true,
 		})
 	}
 	if id.AuthHeaderSecret != "" {
-		c.AddSecret(provenance.Secret{
+		c.AddSecret(provenancetypes.Secret{
 			ID:       id.AuthHeaderSecret,
 			Optional: true,
 		})
 	}
 	if id.MountSSHSock != "" {
-		c.AddSSH(provenance.SSH{
+		c.AddSSH(provenancetypes.SSH{
 			ID:       id.MountSSHSock,
 			Optional: true,
 		})
 	}
 	return nil
-}
-
-// isGitTransport returns true if the provided str is a git transport by inspecting
-// the prefix of the string for known protocols used in git.
-func isGitTransport(str string) bool {
-	return strings.HasPrefix(str, "http://") || strings.HasPrefix(str, "https://") || strings.HasPrefix(str, "git://") || strings.HasPrefix(str, "ssh://") || sshutil.IsImplicitSSHTransport(str)
 }

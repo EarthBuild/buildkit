@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"time"
 )
@@ -12,11 +13,11 @@ import (
 type TestServer struct {
 	*httptest.Server
 	mu     sync.Mutex
-	routes map[string]Response
+	routes map[string]*Response
 	stats  map[string]*Stat
 }
 
-func NewTestServer(routes map[string]Response) *TestServer {
+func NewTestServer(routes map[string]*Response) *TestServer {
 	ts := &TestServer{
 		routes: routes,
 		stats:  map[string]*Stat{},
@@ -25,7 +26,7 @@ func NewTestServer(routes map[string]Response) *TestServer {
 	return ts
 }
 
-func (s *TestServer) SetRoute(name string, resp Response) {
+func (s *TestServer) SetRoute(name string, resp *Response) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.routes[name] = resp
@@ -55,6 +56,10 @@ func (s *TestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Encoding", resp.ContentEncoding)
 	}
 
+	if resp.ContentDisposition != "" {
+		w.Header().Set("Content-Disposition", resp.ContentDisposition)
+	}
+
 	if resp.Etag != "" {
 		w.Header().Set("ETag", resp.Etag)
 		if match := r.Header.Get("If-None-Match"); match == resp.Etag {
@@ -79,10 +84,11 @@ func (s *TestServer) Stats(name string) (st Stat) {
 }
 
 type Response struct {
-	Content         []byte
-	Etag            string
-	LastModified    *time.Time
-	ContentEncoding string
+	Content            []byte
+	Etag               string
+	LastModified       *time.Time
+	ContentEncoding    string
+	ContentDisposition string
 }
 
 type Stat struct {
@@ -98,7 +104,7 @@ type Request struct {
 func newRequest(r *http.Request) Request {
 	headers := http.Header{}
 	for k, v := range r.Header {
-		headers[k] = append([]string{}, v...)
+		headers[k] = slices.Clone(v)
 	}
 	return Request{
 		Method: r.Method,

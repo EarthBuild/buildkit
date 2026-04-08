@@ -6,9 +6,9 @@ import (
 	"io"
 	"testing"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	cerrdefs "github.com/containerd/errdefs"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -38,11 +38,11 @@ func TestReadWrite(t *testing.T) {
 
 	dt, err := content.ReadBlob(ctx, b, ocispecs.Descriptor{Digest: digest.FromBytes([]byte("foo1"))})
 	require.NoError(t, err)
-	require.Equal(t, string(dt), "foo1")
+	require.Equal(t, "foo1", string(dt))
 
 	_, err = content.ReadBlob(ctx, b, ocispecs.Descriptor{Digest: digest.FromBytes([]byte("foo3"))})
 	require.Error(t, err)
-	require.Equal(t, true, errors.Is(err, errdefs.ErrNotFound))
+	require.Equal(t, true, errors.Is(err, cerrdefs.ErrNotFound))
 }
 
 func TestReaderAt(t *testing.T) {

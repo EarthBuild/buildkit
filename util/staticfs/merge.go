@@ -49,7 +49,7 @@ func (mfs *MergeFS) Walk(ctx context.Context, target string, fn fs.WalkDirFunc) 
 			case ch1 <- &record{path: path, entry: entry, err: err}:
 			case <-ctx.Done():
 			}
-			return ctx.Err()
+			return context.Cause(ctx)
 		})
 	})
 	eg.Go(func() error {
@@ -59,7 +59,7 @@ func (mfs *MergeFS) Walk(ctx context.Context, target string, fn fs.WalkDirFunc) 
 			case ch2 <- &record{path: path, entry: entry, err: err}:
 			case <-ctx.Done():
 			}
-			return ctx.Err()
+			return context.Cause(ctx)
 		})
 	})
 
@@ -69,10 +69,7 @@ func (mfs *MergeFS) Walk(ctx context.Context, target string, fn fs.WalkDirFunc) 
 		next2, ok2 := <-ch2
 		key2 := next2.key()
 
-		for {
-			if !ok1 && !ok2 {
-				break
-			}
+		for ok1 || ok2 {
 			if !ok2 || ok1 && key1 < key2 {
 				if err := fn(next1.path, next1.entry, next1.err); err != nil {
 					return err

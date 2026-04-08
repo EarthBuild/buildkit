@@ -16,6 +16,7 @@ import (
 	"github.com/moby/buildkit/util/testutil/workers"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
+	"github.com/tonistiigi/fsutil"
 )
 
 var targetsTests = integration.TestFuncs(
@@ -30,15 +31,19 @@ func testTargetsList(t *testing.T, sb integration.Sandbox) {
 		t.Skip("only test with client frontend")
 	}
 
+	// Use platform-appropriate base images
+	baseImage1 := integration.UnixOrWindows("alpine", "nanoserver:latest")
+	baseImage2 := integration.UnixOrWindows("busybox", "nanoserver:latest")
+
 	dockerfile := []byte(`
 # build defines stage for compiling the binary
-FROM alpine AS build
+FROM ` + baseImage1 + ` AS build
 RUN true
 
-FROM busybox as second
+FROM ` + baseImage2 + ` as second
 RUN false
 
-FROM alpine
+FROM ` + baseImage1 + `
 RUN false
 
 # binary returns the compiled binary
@@ -47,7 +52,7 @@ FROM second AS binary
 
 	dir := integration.Tmpdir(
 		t,
-		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
 
 	c, err := client.New(sb.Context(), sb.Address())
@@ -79,7 +84,7 @@ FROM second AS binary
 
 		target := list.Targets[0]
 		require.Equal(t, "build", target.Name)
-		require.Equal(t, "alpine", target.Base)
+		require.Equal(t, baseImage1, target.Base)
 		require.Equal(t, "defines stage for compiling the binary", target.Description)
 		require.Equal(t, false, target.Default)
 		require.Equal(t, int32(0), target.Location.SourceIndex)
@@ -88,7 +93,7 @@ FROM second AS binary
 		target = list.Targets[1]
 		require.Equal(t, "second", target.Name)
 		require.Equal(t, "", target.Description)
-		require.Equal(t, "busybox", target.Base)
+		require.Equal(t, baseImage2, target.Base)
 		require.Equal(t, false, target.Default)
 		require.Equal(t, int32(0), target.Location.SourceIndex)
 		require.Equal(t, int32(6), target.Location.Ranges[0].Start.Line)
@@ -96,7 +101,7 @@ FROM second AS binary
 		target = list.Targets[2]
 		require.Equal(t, "", target.Name)
 		require.Equal(t, "", target.Description)
-		require.Equal(t, "alpine", target.Base)
+		require.Equal(t, baseImage1, target.Base)
 		require.Equal(t, false, target.Default)
 		require.Equal(t, int32(0), target.Location.SourceIndex)
 		require.Equal(t, int32(9), target.Location.Ranges[0].Start.Line)
@@ -113,7 +118,7 @@ FROM second AS binary
 	}
 
 	_, err = c.Build(sb.Context(), client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 		},
 	}, "", frontend, nil)
@@ -133,10 +138,16 @@ func testTargetsDescribeDefinition(t *testing.T, sb integration.Sandbox) {
 	require.NoError(t, err)
 	defer c.Close()
 
-	dockerfile := []byte(`
+	dockerfile := []byte(integration.UnixOrWindows(
+		`
 FROM scratch
 COPY Dockerfile Dockerfile
-`)
+`,
+		`
+FROM nanoserver
+COPY Dockerfile Dockerfile
+`,
+	))
 
 	dir := integration.Tmpdir(
 		t,
@@ -149,7 +160,7 @@ COPY Dockerfile Dockerfile
 		reqs, err := subrequests.Describe(ctx, c)
 		require.NoError(t, err)
 
-		require.True(t, len(reqs) > 0)
+		require.Greater(t, len(reqs), 0)
 
 		hasTargets := false
 
@@ -159,7 +170,7 @@ COPY Dockerfile Dockerfile
 			}
 			hasTargets = true
 			require.Equal(t, subrequests.RequestType("rpc"), req.Type)
-			require.NotEqual(t, req.Version, "")
+			require.NotEqual(t, "", req.Version)
 		}
 		require.True(t, hasTargets)
 
@@ -168,7 +179,7 @@ COPY Dockerfile Dockerfile
 	}
 
 	_, err = c.Build(sb.Context(), client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 		},
 	}, "", frontend, nil)

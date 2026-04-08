@@ -6,6 +6,7 @@ import (
 	"syscall"
 
 	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/solver/result"
 	spb "github.com/moby/buildkit/sourcepolicy/pb"
@@ -26,9 +27,10 @@ func NewResult() *Result {
 }
 
 type Client interface {
+	sourceresolver.MetaResolver
 	Solve(ctx context.Context, req SolveRequest) (*Result, error)
 	Export(ctx context.Context, req ExportRequest) error // earthly-specific
-	ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt) (string, digest.Digest, []byte, error)
+	ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (string, digest.Digest, []byte, error)
 	BuildOpts() BuildOpts
 	Inputs(ctx context.Context) (map[string]llb.State, error)
 	NewContainer(ctx context.Context, req NewContainerRequest) (Container, error)
@@ -65,6 +67,9 @@ type Mount struct {
 type Container interface {
 	Start(context.Context, StartRequest) (ContainerProcess, error)
 	Release(context.Context) error
+	ReadFile(ctx context.Context, req ReadContainerRequest) ([]byte, error)
+	StatFile(ctx context.Context, req StatContainerRequest) (*fstypes.Stat, error)
+	ReadDir(ctx context.Context, req ReadDirContainerRequest) ([]*fstypes.Stat, error)
 }
 
 // StartRequest encapsulates the arguments to define a process within a
@@ -110,6 +115,11 @@ type ReadRequest struct {
 	Range    *FileRange
 }
 
+type ReadContainerRequest struct {
+	ReadRequest
+	MountIndex int
+}
+
 type FileRange struct {
 	Offset int
 	Length int
@@ -120,8 +130,18 @@ type ReadDirRequest struct {
 	IncludePattern string
 }
 
+type ReadDirContainerRequest struct {
+	ReadDirRequest
+	MountIndex int
+}
+
 type StatRequest struct {
 	Path string
+}
+
+type StatContainerRequest struct {
+	StatRequest
+	MountIndex int
 }
 
 // SolveRequest is same as frontend.SolveRequest but avoiding dependency

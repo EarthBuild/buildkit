@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package overlay
 
@@ -11,15 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
-	"time"
 
-	"github.com/containerd/containerd/archive"
-	"github.com/containerd/containerd/mount"
+	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/containerd/v2/pkg/archive"
 	"github.com/containerd/continuity/devices"
 	"github.com/containerd/continuity/fs"
 	"github.com/containerd/continuity/sysx"
+	"github.com/moby/buildkit/util/pools"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
@@ -67,7 +65,7 @@ func GetUpperdir(lower, upper []mount.Mount) (string, error) {
 		if len(upperlayers) != len(lowerlayers)+1 {
 			return "", errors.Errorf("cannot determine diff of more than one upper directories")
 		}
-		for i := 0; i < len(lowerlayers); i++ {
+		for i := range lowerlayers {
 			if upperlayers[i] != lowerlayers[i] {
 				return "", errors.Errorf("layer %d must be common between upper and lower snapshots", i)
 			}
@@ -88,10 +86,10 @@ func GetOverlayLayers(m mount.Mount) ([]string, error) {
 	var uFound bool
 	var l []string // l[0] = bottommost
 	for _, o := range m.Options {
-		if strings.HasPrefix(o, "upperdir=") {
-			u, uFound = strings.TrimPrefix(o, "upperdir="), true
-		} else if strings.HasPrefix(o, "lowerdir=") {
-			l = strings.Split(strings.TrimPrefix(o, "lowerdir="), ":")
+		if after, ok := strings.CutPrefix(o, "upperdir="); ok {
+			u, uFound = after, true
+		} else if after, ok := strings.CutPrefix(o, "lowerdir="); ok {
+			l = strings.Split(after, ":")
 			for i, j := 0, len(l)-1; i < j; i, j = i+1, j-1 {
 				l[i], l[j] = l[j], l[i] // make l[0] = bottommost
 			}
@@ -127,8 +125,7 @@ func WriteUpperdir(ctx context.Context, w io.Writer, upperdir string, lower []mo
 	}
 	return mount.WithTempMount(ctx, lower, func(lowerRoot string) error {
 		return mount.WithTempMount(ctx, upperView, func(upperViewRoot string) error {
-			// WithWhiteoutTime(0) will no longer need to be specified when https://github.com/containerd/containerd/pull/8764 gets merged
-			cw := archive.NewChangeWriter(&cancellableWriter{ctx, w}, upperViewRoot, archive.WithWhiteoutTime(time.Unix(0, 0).UTC()))
+			cw := archive.NewChangeWriter(&cancellableWriter{ctx, w}, upperViewRoot)
 			if err := Changes(ctx, cw.HandleChange, upperdir, upperViewRoot, lowerRoot); err != nil {
 				if err2 := cw.Close(); err2 != nil {
 					return errors.Wrapf(err, "failed to record upperdir changes (close error: %v)", err2)
@@ -161,8 +158,10 @@ func Changes(ctx context.Context, changeFn fs.ChangeFunc, upperdir, upperdirView
 		if err != nil {
 			return err
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		default:
 		}
 
 		// Rebase path
@@ -187,7 +186,7 @@ func Changes(ctx context.Context, changeFn fs.ChangeFunc, upperdir, upperdirView
 		}
 
 		// Check if this is a deleted entry
-		isDelete, skip, err := checkDelete(upperdir, path, base, f)
+		isDelete, skip, err := checkDelete(path, base, f)
 		if err != nil {
 			return err
 		} else if skip {
@@ -214,7 +213,7 @@ func Changes(ctx context.Context, changeFn fs.ChangeFunc, upperdir, upperdirView
 		} else if os.IsNotExist(err) || errors.Is(err, unix.ENOTDIR) {
 			// File doesn't exist in the base layer. Thus this is added.
 			kind = fs.ChangeKindAdd
-		} else if err != nil {
+		} else {
 			return errors.Wrap(err, "failed to stat base file during overlay diff")
 		}
 
@@ -245,7 +244,7 @@ func Changes(ctx context.Context, changeFn fs.ChangeFunc, upperdir, upperdirView
 }
 
 // checkDelete checks if the specified file is a whiteout
-func checkDelete(upperdir string, path string, base string, f os.FileInfo) (delete, skip bool, _ error) {
+func checkDelete(path string, base string, f os.FileInfo) (delete, skip bool, _ error) {
 	if f.Mode()&os.ModeCharDevice != 0 {
 		if _, ok := f.Sys().(*syscall.Stat_t); ok {
 			maj, min, err := devices.DeviceInfo(f)
@@ -269,12 +268,12 @@ func checkDelete(upperdir string, path string, base string, f os.FileInfo) (dele
 	return false, false, nil
 }
 
-// checkDelete checks if the specified file is an opaque directory
+// checkOpaque checks if the specified file is an opaque directory
 func checkOpaque(upperdir string, path string, base string, f os.FileInfo) (isOpaque bool, _ error) {
 	if f.IsDir() {
 		for _, oKey := range []string{"trusted.overlay.opaque", "user.overlay.opaque"} {
 			opaque, err := sysx.LGetxattr(filepath.Join(upperdir, path), oKey)
-			if err != nil && err != unix.ENODATA {
+			if err != nil && !errors.Is(err, unix.ENODATA) {
 				return false, errors.Wrapf(err, "failed to retrieve %s attr", oKey)
 			} else if len(opaque) == 1 && opaque[0] == 'y' {
 				// This is an opaque whiteout directory.
@@ -297,7 +296,7 @@ func checkRedirect(upperdir string, path string, f os.FileInfo) (bool, error) {
 	if f.IsDir() {
 		rKey := "trusted.overlay.redirect"
 		redirect, err := sysx.LGetxattr(filepath.Join(upperdir, path), rKey)
-		if err != nil && err != unix.ENODATA {
+		if err != nil && !errors.Is(err, unix.ENODATA) {
 			return false, errors.Wrapf(err, "failed to retrieve %s attr", rKey)
 		}
 		return len(redirect) > 0, nil
@@ -362,7 +361,7 @@ func sameDirent(f1, f2 os.FileInfo, f1fullPath, f2fullPath string) (bool, error)
 // Ported from continuity project
 // https://github.com/containerd/continuity/blob/v0.1.0/fs/diff_unix.go#L43-L54
 // Copyright The containerd Authors.
-func compareSysStat(s1, s2 interface{}) (bool, error) {
+func compareSysStat(s1, s2 any) (bool, error) {
 	ls1, ok := s1.(*syscall.Stat_t)
 	if !ok {
 		return false, nil
@@ -380,11 +379,11 @@ func compareSysStat(s1, s2 interface{}) (bool, error) {
 // Copyright The containerd Authors.
 func compareCapabilities(p1, p2 string) (bool, error) {
 	c1, err := sysx.LGetxattr(p1, "security.capability")
-	if err != nil && err != sysx.ENODATA {
+	if err != nil && !errors.Is(err, sysx.ENODATA) {
 		return false, errors.Wrapf(err, "failed to get xattr for %s", p1)
 	}
 	c2, err := sysx.LGetxattr(p2, "security.capability")
-	if err != nil && err != sysx.ENODATA {
+	if err != nil && !errors.Is(err, sysx.ENODATA) {
 		return false, errors.Wrapf(err, "failed to get xattr for %s", p2)
 	}
 	return bytes.Equal(c1, c2), nil
@@ -405,12 +404,10 @@ func compareSymlinkTarget(p1, p2 string) (bool, error) {
 	return t1 == t2, nil
 }
 
-var bufPool = sync.Pool{
-	New: func() interface{} {
-		b := make([]byte, 32*1024)
-		return &b
-	},
-}
+var bufPool = pools.New(func() *[]byte {
+	b := make([]byte, 32*1024)
+	return &b
+})
 
 // Ported from continuity project
 // https://github.com/containerd/continuity/blob/bce1c3f9669b6f3e7f6656ee715b0b4d75fa64a6/fs/path.go#L151
@@ -438,13 +435,13 @@ func compareFileContent(p1, p2 string) (bool, error) {
 		return false, errors.Errorf("%s is not a regular file", p2)
 	}
 
-	b1 := bufPool.Get().(*[]byte)
+	b1 := bufPool.Get()
 	defer bufPool.Put(b1)
-	b2 := bufPool.Get().(*[]byte)
+	b2 := bufPool.Get()
 	defer bufPool.Put(b2)
 	for {
 		n1, err1 := io.ReadFull(f1, *b1)
-		if err1 == io.ErrUnexpectedEOF {
+		if errors.Is(err1, io.ErrUnexpectedEOF) {
 			// it's expected to get EOF when file size isn't a multiple of chunk size, consolidate these error types
 			err1 = io.EOF
 		}
@@ -452,7 +449,7 @@ func compareFileContent(p1, p2 string) (bool, error) {
 			return false, err1
 		}
 		n2, err2 := io.ReadFull(f2, *b2)
-		if err2 == io.ErrUnexpectedEOF {
+		if errors.Is(err2, io.ErrUnexpectedEOF) {
 			err2 = io.EOF
 		}
 		if err2 != nil && err2 != io.EOF {

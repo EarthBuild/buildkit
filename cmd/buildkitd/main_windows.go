@@ -1,11 +1,11 @@
 //go:build windows
-// +build windows
 
 package main
 
 import (
 	"crypto/tls"
 	"net"
+	"strings"
 
 	"github.com/Microsoft/go-winio"
 	_ "github.com/moby/buildkit/solver/llbsolver/ops"
@@ -13,18 +13,24 @@ import (
 	"github.com/pkg/errors"
 )
 
-func listenFD(addr string, tlsConfig *tls.Config) (net.Listener, error) {
+const socketScheme = "npipe://"
+
+func listenFD(_ string, _ *tls.Config) (net.Listener, error) {
 	return nil, errors.New("listening server on fd not supported on windows")
 }
 
-func getLocalListener(listenerPath string) (net.Listener, error) {
-	pc := &winio.PipeConfig{
+func getLocalListener(listenerPath, secDescriptor string) (net.Listener, error) {
+	if secDescriptor == "" {
 		// Allow generic read and generic write access to authenticated users
 		// and system users. On Linux, this pipe seems to be given rw access to
 		// user, group and others (666).
 		// TODO(gabriel-samfira): should we restrict access to this pipe to just
 		// authenticated users? Or Administrators group?
-		SecurityDescriptor: "D:P(A;;GRGW;;;AU)(A;;GRGW;;;SY)",
+		secDescriptor = "D:P(A;;GRGW;;;AU)(A;;GRGW;;;SY)"
+	}
+
+	pc := &winio.PipeConfig{
+		SecurityDescriptor: secDescriptor,
 	}
 
 	listener, err := winio.ListenPipe(listenerPath, pc)
@@ -32,4 +38,23 @@ func getLocalListener(listenerPath string) (net.Listener, error) {
 		return nil, errors.Wrap(err, "creating listener")
 	}
 	return listener, nil
+}
+
+func groupToSecurityDescriptor(group string) (string, error) {
+	sddl := "D:P(A;;GA;;;BA)(A;;GA;;;SY)"
+	if group != "" {
+		var b strings.Builder
+		b.WriteString(sddl)
+		for g := range strings.SplitSeq(group, ",") {
+			sid, err := winio.LookupSidByName(g)
+			if err != nil {
+				return "", errors.Wrapf(err, "failed to lookup sid for group %s", g)
+			}
+			b.WriteString("(A;;GRGW;;;")
+			b.WriteString(sid)
+			b.WriteByte(')')
+		}
+		sddl = b.String()
+	}
+	return sddl, nil
 }

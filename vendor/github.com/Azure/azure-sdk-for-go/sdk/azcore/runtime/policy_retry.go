@@ -19,6 +19,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/internal/shared"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/internal/errorinfo"
+	"github.com/Azure/azure-sdk-for-go/sdk/internal/exported"
 )
 
 const (
@@ -31,18 +32,21 @@ func setDefaults(o *policy.RetryOptions) {
 	} else if o.MaxRetries < 0 {
 		o.MaxRetries = 0
 	}
+
+	// SDK guidelines specify the default MaxRetryDelay is 60 seconds
 	if o.MaxRetryDelay == 0 {
-		o.MaxRetryDelay = 120 * time.Second
+		o.MaxRetryDelay = 60 * time.Second
 	} else if o.MaxRetryDelay < 0 {
 		// not really an unlimited cap, but sufficiently large enough to be considered as such
 		o.MaxRetryDelay = math.MaxInt64
 	}
 	if o.RetryDelay == 0 {
-		o.RetryDelay = 4 * time.Second
+		o.RetryDelay = 800 * time.Millisecond
 	} else if o.RetryDelay < 0 {
 		o.RetryDelay = 0
 	}
 	if o.StatusCodes == nil {
+		// NOTE: if you change this list, you MUST update the docs in policy/policy.go
 		o.StatusCodes = []int{
 			http.StatusRequestTimeout,      // 408
 			http.StatusTooManyRequests,     // 429
@@ -55,21 +59,33 @@ func setDefaults(o *policy.RetryOptions) {
 }
 
 func calcDelay(o policy.RetryOptions, try int32) time.Duration { // try is >=1; never 0
-	pow := func(number int64, exponent int32) int64 { // pow is nested helper function
-		var result int64 = 1
-		for n := int32(0); n < exponent; n++ {
-			result *= number
-		}
-		return result
+	// avoid overflow when shifting left
+	factor := time.Duration(math.MaxInt64)
+	if try < 63 {
+		factor = time.Duration(int64(1<<try) - 1)
 	}
 
-	delay := time.Duration(pow(2, try)-1) * o.RetryDelay
+	delay := factor * o.RetryDelay
+	if delay < factor {
+		// overflow has happened so set to max value
+		delay = time.Duration(math.MaxInt64)
+	}
 
-	// Introduce some jitter:  [0.0, 1.0) / 2 = [0.0, 0.5) + 0.8 = [0.8, 1.3)
-	delay = time.Duration(delay.Seconds() * (rand.Float64()/2 + 0.8) * float64(time.Second)) // NOTE: We want math/rand; not crypto/rand
-	if delay > o.MaxRetryDelay {
+	// Introduce jitter:  [0.0, 1.0) / 2 = [0.0, 0.5) + 0.8 = [0.8, 1.3)
+	jitterMultiplier := rand.Float64()/2 + 0.8 // NOTE: We want math/rand; not crypto/rand
+
+	delayFloat := float64(delay) * jitterMultiplier
+	if delayFloat > float64(math.MaxInt64) {
+		// the jitter pushed us over MaxInt64, so just use MaxInt64
+		delay = time.Duration(math.MaxInt64)
+	} else {
+		delay = time.Duration(delayFloat)
+	}
+
+	if delay > o.MaxRetryDelay { // MaxRetryDelay is backfilled with non-negative value
 		delay = o.MaxRetryDelay
 	}
+
 	return delay
 }
 
@@ -106,7 +122,8 @@ func (p *retryPolicy) Do(req *policy.Request) (resp *http.Response, err error) {
 	try := int32(1)
 	for {
 		resp = nil // reset
-		log.Writef(log.EventRetryPolicy, "\n=====> Try=%d %s %s", try, req.Raw().Method, req.Raw().URL.String())
+		// unfortunately we don't have access to the custom allow-list of query params, so we'll redact everything but the default allowed QPs
+		log.Writef(log.EventRetryPolicy, "=====> Try=%d for %s %s", try, req.Raw().Method, getSanitizedURL(*req.Raw().URL, getAllowedQueryParams(nil)))
 
 		// For each try, seek to the beginning of the Body stream. We do this even for the 1st try because
 		// the stream may not be at offset 0 when we first get it and we want the same behavior for the
@@ -121,7 +138,8 @@ func (p *retryPolicy) Do(req *policy.Request) (resp *http.Response, err error) {
 		}
 
 		if options.TryTimeout == 0 {
-			resp, err = req.Next()
+			clone := req.Clone(req.Raw().Context())
+			resp, err = clone.Next()
 		} else {
 			// Set the per-try time for this particular retry operation and then Do the operation.
 			tryCtx, tryCancel := context.WithTimeout(req.Raw().Context(), options.TryTimeout)
@@ -130,7 +148,7 @@ func (p *retryPolicy) Do(req *policy.Request) (resp *http.Response, err error) {
 			// if the body was already downloaded or there was an error it's safe to cancel the context now
 			if err != nil {
 				tryCancel()
-			} else if _, ok := resp.Body.(*shared.NopClosingBytesReader); ok {
+			} else if exported.PayloadDownloaded(resp) {
 				tryCancel()
 			} else {
 				// must cancel the context after the body has been read and closed
@@ -143,10 +161,7 @@ func (p *retryPolicy) Do(req *policy.Request) (resp *http.Response, err error) {
 			log.Writef(log.EventRetryPolicy, "error %v", err)
 		}
 
-		if err == nil && !HasStatusCode(resp, options.StatusCodes...) {
-			// if there is no error and the response code isn't in the list of retry codes then we're done.
-			return
-		} else if ctxErr := req.Raw().Context().Err(); ctxErr != nil {
+		if ctxErr := req.Raw().Context().Err(); ctxErr != nil {
 			// don't retry if the parent context has been cancelled or its deadline exceeded
 			err = ctxErr
 			log.Writef(log.EventRetryPolicy, "abort due to %v", err)
@@ -161,20 +176,38 @@ func (p *retryPolicy) Do(req *policy.Request) (resp *http.Response, err error) {
 			return
 		}
 
+		if options.ShouldRetry != nil {
+			// a non-nil ShouldRetry overrides our HTTP status code check
+			if !options.ShouldRetry(resp, err) {
+				// predicate says we shouldn't retry
+				log.Write(log.EventRetryPolicy, "exit due to ShouldRetry")
+				return
+			}
+		} else if err == nil && !HasStatusCode(resp, options.StatusCodes...) {
+			// if there is no error and the response code isn't in the list of retry codes then we're done.
+			log.Write(log.EventRetryPolicy, "exit due to non-retriable status code")
+			return
+		}
+
 		if try == options.MaxRetries+1 {
 			// max number of tries has been reached, don't sleep again
 			log.Writef(log.EventRetryPolicy, "MaxRetries %d exceeded", options.MaxRetries)
 			return
 		}
 
-		// drain before retrying so nothing is leaked
-		Drain(resp)
-
 		// use the delay from retry-after if available
 		delay := shared.RetryAfter(resp)
 		if delay <= 0 {
 			delay = calcDelay(options, try)
+		} else if delay > options.MaxRetryDelay {
+			// the retry-after delay exceeds the the cap so don't retry
+			log.Writef(log.EventRetryPolicy, "Retry-After delay %s exceeds MaxRetryDelay of %s", delay, options.MaxRetryDelay)
+			return
 		}
+
+		// drain before retrying so nothing is leaked
+		Drain(resp)
+
 		log.Writef(log.EventRetryPolicy, "End Try #%d, Delay=%v", try, delay)
 		select {
 		case <-time.After(delay):
@@ -189,8 +222,9 @@ func (p *retryPolicy) Do(req *policy.Request) (resp *http.Response, err error) {
 
 // WithRetryOptions adds the specified RetryOptions to the parent context.
 // Use this to specify custom RetryOptions at the API-call level.
+// Deprecated: use [policy.WithRetryOptions] instead.
 func WithRetryOptions(parent context.Context, options policy.RetryOptions) context.Context {
-	return context.WithValue(parent, shared.CtxWithRetryOptionsKey{}, options)
+	return policy.WithRetryOptions(parent, options)
 }
 
 // ********** The following type/methods implement the retryableRequestBody (a ReadSeekCloser)

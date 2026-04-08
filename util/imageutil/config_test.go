@@ -8,10 +8,10 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/remotes"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/remotes"
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/containerd/platforms"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/require"
@@ -39,7 +39,7 @@ func TestConfigMultiplatform(t *testing.T) {
 	pArm64 := platforms.MustParse("linux/arm64")
 	cfgDescArm64 := cc.Add(t, ocispecs.Image{Platform: pArm64}, ocispecs.MediaTypeImageConfig, nil)
 	mfstArm64 := ocispecs.Manifest{MediaType: ocispecs.MediaTypeImageManifest, Config: cfgDescArm64}
-	_, descArm64 := makeDesc(t, mfst386, mfstArm64.MediaType, &pArm64)
+	_, descArm64 := makeDesc(t, mfstArm64, mfstArm64.MediaType, &pArm64)
 
 	idx := ocispecs.Index{
 		MediaType: ocispecs.MediaTypeImageIndex,
@@ -57,7 +57,7 @@ func TestConfigMultiplatform(t *testing.T) {
 		// Now we should be able to get the amd64 config without fetching anything from the remote
 		// If it tries to fetch from the remote this will error out.
 		const ref = "example.com/test:latest"
-		_, _, dt, err := Config(ctx, ref, r, cc, nil, &pAmd64, nil)
+		_, dt, err := Config(ctx, ref, r, cc, nil, &pAmd64)
 		require.NoError(t, err)
 
 		var cfg ocispecs.Image
@@ -67,8 +67,8 @@ func TestConfigMultiplatform(t *testing.T) {
 
 		// Make sure it doesn't select a non-matching platform
 		pArmv7 := platforms.MustParse("linux/arm/v7")
-		_, _, _, err = Config(ctx, ref, r, cc, nil, &pArmv7, nil)
-		require.ErrorIs(t, err, errdefs.ErrNotFound)
+		_, _, err = Config(ctx, ref, r, cc, nil, &pArmv7)
+		require.ErrorIs(t, err, cerrdefs.ErrNotFound)
 	}
 
 	check(t)
@@ -159,7 +159,7 @@ func (*sectionNopCloser) Close() error {
 func (c *testCache) ReaderAt(ctx context.Context, desc ocispecs.Descriptor) (content.ReaderAt, error) {
 	ra, ok := c.content[desc.Digest]
 	if !ok {
-		return nil, errdefs.ErrNotFound
+		return nil, cerrdefs.ErrNotFound
 	}
 	return ra, nil
 }
@@ -193,7 +193,7 @@ type raReader struct {
 }
 
 func (r *raReader) Read(p []byte) (int, error) {
-	n, err := r.ReaderAt.ReadAt(p, int64(r.pos))
+	n, err := r.ReadAt(p, int64(r.pos))
 	r.pos += n
 	return n, err
 }

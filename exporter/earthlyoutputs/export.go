@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	archiveexporter "github.com/containerd/containerd/images/archive"
-	"github.com/containerd/containerd/leases"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/remotes/docker"
-	remoteserrors "github.com/containerd/containerd/remotes/errors"
+	archiveexporter "github.com/containerd/containerd/v2/core/images/archive"
+	"github.com/containerd/containerd/v2/core/leases"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	remoteserrors "github.com/containerd/containerd/v2/core/remotes/errors"
+	"github.com/containerd/platforms"
 	"github.com/docker/distribution/reference"
-	"github.com/docker/docker/pkg/idtools"
+	"github.com/moby/sys/user"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/exporter"
@@ -59,6 +59,10 @@ const (
 	// as well as lacking some blobs in the content store. Some integration tests for lazyref behaviour depends on this option.
 	// Ignored when store=false.
 	keyUnsafeInternalStoreAllowIncomplete = "unsafe-internal-store-allow-incomplete"
+
+	// earthlyInlineCacheKey is the metadata key for inline cache entries.
+	// This was previously exptypes.ExporterInlineCache in upstream but was removed.
+	earthlyInlineCacheKey = "containerimage.inlinecache"
 )
 
 type Opt struct {
@@ -78,9 +82,11 @@ func New(opt Opt) (exporter.Exporter, error) {
 	return im, nil
 }
 
-func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exporter.ExporterInstance, error) {
+func (e *imageExporter) Resolve(ctx context.Context, id int, opt map[string]string) (exporter.ExporterInstance, error) {
 	i := &imageExporterInstance{
 		imageExporter: e,
+		id:            id,
+		attrs:         opt,
 		opts: containerimage.ImageCommitOpts{
 			RefCfg: cacheconfig.RefConfig{
 				Compression: compression.New(compression.Default),
@@ -181,6 +187,8 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 
 type imageExporterInstance struct {
 	*imageExporter
+	id                   int
+	attrs                map[string]string
 	opts                 containerimage.ImageCommitOpts
 	push                 bool
 	pushByDigest         bool
@@ -193,8 +201,20 @@ type imageExporterInstance struct {
 	meta                 map[string][]byte
 }
 
+func (e *imageExporterInstance) ID() int {
+	return e.id
+}
+
 func (e *imageExporterInstance) Name() string {
 	return "[output] exporting outputs"
+}
+
+func (e *imageExporterInstance) Type() string {
+	return "earthlyoutputs"
+}
+
+func (e *imageExporterInstance) Attrs() map[string]string {
+	return e.attrs
 }
 
 type imgData struct {
@@ -234,17 +254,18 @@ type imgData struct {
 	opts containerimage.ImageCommitOpts
 }
 
-func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, sessionID string) (map[string]string, exporter.DescriptorReference, error) {
+func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, buildInfo exporter.ExportBuildInfo) (map[string]string, exporter.FinalizeFunc, exporter.DescriptorReference, error) {
+	sessionID := buildInfo.SessionID
 	if src.Ref != nil {
-		return nil, nil, errors.Errorf("export with src.Ref not supported")
+		return nil, nil, nil, errors.Errorf("export with src.Ref not supported")
 	}
 
 	if len(src.Refs) == 0 {
 		// nothing to do
-		return map[string]string{}, nil, nil
+		return map[string]string{}, nil, nil, nil
 	}
 	if src.Metadata == nil {
-		return nil, nil, errors.Errorf("metadata is missing")
+		return nil, nil, nil, errors.Errorf("metadata is missing")
 	}
 
 	for k, v := range e.meta {
@@ -262,16 +283,16 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				simpleMd[strings.TrimPrefix(mdK, mdPrefix)] = mdV
 			}
 		}
-		inlineCacheK := fmt.Sprintf("%s/%s", exptypes.ExporterInlineCache, k)
+		inlineCacheK := fmt.Sprintf("%s/%s", earthlyInlineCacheKey, k)
 		inlineCache, ok := src.Metadata[inlineCacheK]
 		if ok {
-			simpleMd[exptypes.ExporterInlineCache] = inlineCache
+			simpleMd[earthlyInlineCacheKey] = inlineCache
 		}
 
 		opts := e.opts
 		as, _, err := containerimage.ParseAnnotations(simpleMd)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		opts.Annotations = as.Merge(opts.Annotations)
 
@@ -311,14 +332,14 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				name = string(n)
 			}
 			if name == "" {
-				return nil, nil, errors.Errorf("exporting image with no name")
+				return nil, nil, nil, errors.Errorf("exporting image with no name")
 			}
 			imgNames, err := normalizedNames(name)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			if len(imgNames) == 0 {
-				return nil, nil, errors.Errorf("exporting image with no name")
+				return nil, nil, nil, errors.Errorf("exporting image with no name")
 			}
 			delete(simpleMd, "image.name")
 			platStr := string(simpleMd["platform"])
@@ -354,7 +375,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 
 					p, err := platforms.Parse(platStr)
 					if err != nil {
-						return nil, nil, errors.Wrap(err, "parse platform")
+						return nil, nil, nil, errors.Wrap(err, "parse platform")
 					}
 					plat := exptypes.Platform{
 						ID:       platStr,
@@ -364,13 +385,13 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				} else {
 					ps, err := exptypes.ParsePlatforms(img.expSrc.Metadata)
 					if err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 					img.expSrc.SetRef(ref)
 
 					dt, err := json.Marshal(ps)
 					if err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 					img.expSrc.AddMeta(exptypes.ExporterPlatformsKey, dt)
 				}
@@ -390,7 +411,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			expPlats := &exptypes.Platforms{Platforms: img.platforms}
 			dt, err := json.Marshal(expPlats)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			img.expSrc.AddMeta(exptypes.ExporterPlatformsKey, dt)
 		}
@@ -398,15 +419,15 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 
 	ctx, done, err := leaseutil.WithLease(ctx, e.opt.LeaseManager, leaseutil.MakeTemporary)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer done(context.TODO())
 
 	resp := make(map[string]string)
 	for imgName, img := range images {
-		desc, err := e.opt.ImageWriter.Commit(ctx, img.expSrc, sessionID, &img.opts)
+		desc, err := e.opt.ImageWriter.Commit(ctx, img.expSrc, sessionID, buildInfo.InlineCache, &img.opts)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		img.mfstDesc = desc
 		defer func() {
@@ -424,7 +445,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		}
 		dtDesc, err := json.Marshal(desc)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		descKey := fmt.Sprintf("%s|%s", imgName, exptypes.ExporterImageDescriptorKey)
 		resp[descKey] = base64.StdEncoding.EncodeToString(dtDesc)
@@ -434,7 +455,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	defer cancel()
 	caller, err := e.opt.SessionManager.Get(timeoutCtx, sessionID, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	for _, img := range images {
@@ -445,9 +466,9 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		for mdK, mdV := range img.expSrc.Metadata {
 			md[safeGrpcMetaKey(mdK)] = string(mdV)
 		}
-		img.tarWriter, err = filesync.CopyFileWriter(ctx, md, caller)
+		img.tarWriter, err = filesync.CopyFileWriter(ctx, md, e.id, caller)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	dirEG, egCtx := errgroup.WithContext(ctx)
@@ -457,7 +478,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			md[safeGrpcMetaKey(mdK)] = string(mdV)
 		}
 		if expSrc.Ref == nil {
-			return nil, nil, errors.New("dirExpSrcs got nil ref")
+			return nil, nil, nil, errors.New("dirExpSrcs got nil ref")
 		}
 		dirEG.Go(exportDirFunc(egCtx, md, caller, expSrc.Ref, sessionID))
 	}
@@ -473,7 +494,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 
 			err := mmp.AddImg(ctx, img.localRegExport, e.opt.ImageWriter.ContentStore(), img.mfstDesc.Digest)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 		if img.localExport || img.shouldPush {
@@ -483,21 +504,21 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		for _, r := range img.expSrc.Refs {
 			remotes, err := r.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			remote := remotes[0]
 			// unlazy before export as some consumers do not handle
 			// layer blobs in parallel (whereas unlazy does)
 			if unlazier, ok := remote.Provider.(cache.Unlazier); ok {
 				if err := unlazier.Unlazy(ctx); err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 			}
 			for _, desc := range remote.Descriptors {
 				if img.localRegExport != "" {
 					err := mmp.AddImgSub(img.localRegExport, desc.Digest, remote.Provider)
 					if err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 				}
 				if img.localExport || img.shouldPush {
@@ -508,7 +529,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		}
 		if img.expSrc.Ref != nil { // This is a copy and paste of the above code
 			if len(img.platforms) != 0 {
-				return nil, nil, errors.New("img.platforms should not be set when a single ref is used")
+				return nil, nil, nil, errors.New("img.platforms should not be set when a single ref is used")
 			}
 
 			var ref cache.ImmutableRef
@@ -518,7 +539,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				if r, ok := img.expSrc.FindRef(p.ID); ok {
 					ref = r
 				} else {
-					return nil, nil, errors.Errorf("img.expSrc.FindRef failed on %s", p.ID)
+					return nil, nil, nil, errors.Errorf("img.expSrc.FindRef failed on %s", p.ID)
 				}
 			} else {
 				ref = img.expSrc.Ref
@@ -526,21 +547,21 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 
 			remotes, err := ref.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			remote := remotes[0]
 			// unlazy before export as some consumers do not handle
 			// layer blobs in parallel (whereas unlazy does)
 			if unlazier, ok := remote.Provider.(cache.Unlazier); ok {
 				if err := unlazier.Unlazy(ctx); err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 			}
 			for _, desc := range remote.Descriptors {
 				if img.localRegExport != "" {
 					err := mmp.AddImgSub(img.localRegExport, desc.Digest, remote.Provider)
 					if err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 				}
 				if img.localExport || img.shouldPush {
@@ -559,9 +580,9 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				var errStatus remoteserrors.ErrUnexpectedStatus
 				if errors.As(err, &errStatus) {
 					// TODO body might be json, e.g. `{"errors":[{"code":"DENIED","message":"The repository with name 'my-cool-image' in registry with id '123456789' already has the maximum allowed number of images which is '10000'"}]}`, we should attempt to parse this
-					return nil, nil, errors.Wrapf(err, "failed to push %s: body=%s", imgName, errStatus.Body)
+					return nil, nil, nil, errors.Wrapf(err, "failed to push %s: body=%s", imgName, errStatus.Body)
 				}
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 	}
@@ -580,10 +601,10 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		select {
 		case err := <-pullPingChan:
 			if err != nil {
-				return nil, nil, errors.Wrap(err, "pull ping error")
+				return nil, nil, nil, errors.Wrap(err, "pull ping error")
 			}
 		case <-caller.Context().Done():
-			return nil, nil, errors.Wrap(caller.Context().Err(), "caller context done")
+			return nil, nil, nil, errors.Wrap(caller.Context().Err(), "caller context done")
 		}
 		for _, img := range images {
 			if img.localRegExport != "" {
@@ -609,7 +630,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 					//                     we continue to try to send data.
 					continue
 				}
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			err = img.tarWriter.Close()
 			if grpcerrors.Code(err) == codes.AlreadyExists {
@@ -622,7 +643,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				continue
 			}
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			img.localExportReport()
 		}
@@ -635,10 +656,10 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	}
 
 	if err := dirEG.Wait(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return resp, nil, nil
+	return resp, nil, nil, nil
 }
 
 func (e *imageExporterInstance) Config() *exporter.Config {
@@ -708,7 +729,7 @@ func exportDirFunc(ctx context.Context, md map[string]string, caller session.Cal
 	return func() error {
 		var src string
 		var err error
-		var idmap *idtools.IdentityMapping
+		var idmap *user.IdentityMapping
 		if ref == nil {
 			src, err = os.MkdirTemp("", "buildkit")
 			if err != nil {
@@ -743,10 +764,7 @@ func exportDirFunc(ctx context.Context, md map[string]string, caller session.Cal
 		var idMapFunc func(p string, st *fstypes.Stat) fsutil.MapResult
 		if idmap != nil {
 			idMapFunc = func(p string, st *fstypes.Stat) fsutil.MapResult {
-				uid, gid, err := idmap.ToContainer(idtools.Identity{
-					UID: int(st.Uid),
-					GID: int(st.Gid),
-				})
+				uid, gid, err := idmap.ToContainer(int(st.Uid), int(st.Gid))
 				if err != nil {
 					return fsutil.MapResultExclude
 				}

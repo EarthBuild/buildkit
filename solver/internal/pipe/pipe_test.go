@@ -11,10 +11,10 @@ func TestPipe(t *testing.T) {
 	t.Parallel()
 
 	runCh := make(chan struct{})
-	f := func(ctx context.Context) (interface{}, error) {
+	f := func(ctx context.Context) (string, error) {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return "", context.Cause(ctx)
 		case <-runCh:
 			return "res0", nil
 		}
@@ -27,36 +27,36 @@ func TestPipe(t *testing.T) {
 		waitSignal <- struct{}{}
 	}
 
-	p, start := NewWithFunction(f)
+	p, start := NewWithFunction[any](f)
 	p.OnSendCompletion = signal
 	go start()
 	require.Equal(t, false, p.Receiver.Receive())
 
 	st := p.Receiver.Status()
-	require.Equal(t, st.Completed, false)
-	require.Equal(t, st.Canceled, false)
-	require.Nil(t, st.Value)
-	require.Equal(t, signalled, 0)
+	require.Equal(t, false, st.Completed)
+	require.Equal(t, false, st.Canceled)
+	require.Zero(t, st.Value)
+	require.Equal(t, 0, signalled)
 
 	close(runCh)
 	<-waitSignal
 
 	p.Receiver.Receive()
 	st = p.Receiver.Status()
-	require.Equal(t, st.Completed, true)
-	require.Equal(t, st.Canceled, false)
+	require.Equal(t, true, st.Completed)
+	require.Equal(t, false, st.Canceled)
 	require.NoError(t, st.Err)
-	require.Equal(t, st.Value.(string), "res0")
+	require.Equal(t, "res0", st.Value)
 }
 
 func TestPipeCancel(t *testing.T) {
 	t.Parallel()
 
 	runCh := make(chan struct{})
-	f := func(ctx context.Context) (interface{}, error) {
+	f := func(ctx context.Context) (string, error) {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return "", context.Cause(ctx)
 		case <-runCh:
 			return "res0", nil
 		}
@@ -69,24 +69,24 @@ func TestPipeCancel(t *testing.T) {
 		waitSignal <- struct{}{}
 	}
 
-	p, start := NewWithFunction(f)
+	p, start := NewWithFunction[any](f)
 	p.OnSendCompletion = signal
 	go start()
 	p.Receiver.Receive()
 
 	st := p.Receiver.Status()
-	require.Equal(t, st.Completed, false)
-	require.Equal(t, st.Canceled, false)
-	require.Nil(t, st.Value)
-	require.Equal(t, signalled, 0)
+	require.Equal(t, false, st.Completed)
+	require.Equal(t, false, st.Canceled)
+	require.Zero(t, st.Value)
+	require.Equal(t, 0, signalled)
 
 	p.Receiver.Cancel()
 	<-waitSignal
 
 	p.Receiver.Receive()
 	st = p.Receiver.Status()
-	require.Equal(t, st.Completed, true)
-	require.Equal(t, st.Canceled, true)
+	require.Equal(t, true, st.Completed)
+	require.Equal(t, true, st.Canceled)
 	require.Error(t, st.Err)
-	require.Equal(t, st.Err, context.Canceled)
+	require.ErrorIs(t, st.Err, context.Canceled)
 }

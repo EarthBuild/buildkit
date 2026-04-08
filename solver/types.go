@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/v2/core/content"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/compression"
@@ -21,7 +21,7 @@ type Vertex interface {
 
 	// Sys returns an object used to resolve the executor for this vertex.
 	// In LLB solver, this value would be of type `llb.Op`.
-	Sys() interface{}
+	Sys() any
 
 	// Options return metadata associated with the vertex that doesn't change the
 	// definition or equality check of it.
@@ -62,7 +62,7 @@ type VertexOptions struct {
 type Result interface {
 	ID() string
 	Release(context.Context) error
-	Sys() interface{}
+	Sys() any
 	Clone() Result
 }
 
@@ -82,7 +82,7 @@ type ResultProxy interface {
 	Result(context.Context) (CachedResult, error)
 	Release(context.Context) error
 	Definition() *pb.Definition
-	Provenance() interface{}
+	Provenance() any
 }
 
 // CacheExportMode is the type for setting cache exporting modes
@@ -112,6 +112,9 @@ type CacheExportOpt struct {
 	CompressionOpt *compression.Config
 	// ExportRoots defines if records for root vertexes should be exported.
 	ExportRoots bool
+	// IgnoreBacklinks defines if other cache chains for same result that did not
+	// participate in the current build should be exported.
+	IgnoreBacklinks bool
 }
 
 // CacheExporter can export the artifacts of the build chain
@@ -121,15 +124,29 @@ type CacheExporter interface {
 
 // CacheExporterTarget defines object capable of receiving exports
 type CacheExporterTarget interface {
-	Add(dgst digest.Digest) CacheExporterRecord
-	Visit(interface{})
-	Visited(interface{}) bool
+	Add(dgst digest.Digest, deps [][]CacheLink, results []CacheExportResult) (CacheExporterRecord, bool, error)
 }
 
-// CacheExporterRecord is a single object being exported
+// opaque interface
 type CacheExporterRecord interface {
-	AddResult(vtx digest.Digest, index int, createdAt time.Time, result *Remote)
-	LinkFrom(src CacheExporterRecord, index int, selector string)
+	isCacheExporterRecord()
+}
+
+type CacheExporterRecordBase struct {
+}
+
+func (c *CacheExporterRecordBase) isCacheExporterRecord() {}
+
+type CacheLink struct {
+	Src      CacheExporterRecord
+	Selector string
+}
+
+type CacheExportResult struct {
+	CreatedAt  time.Time
+	Result     *Remote
+	EdgeVertex digest.Digest
+	EdgeIndex  Index
 }
 
 // Remote is a descriptor or a list of stacked descriptors that can be pulled
@@ -137,16 +154,7 @@ type CacheExporterRecord interface {
 // TODO: add closer to keep referenced data from getting deleted
 type Remote struct {
 	Descriptors []ocispecs.Descriptor
-	Provider    content.Provider
-}
-
-// CacheLink is a link between two cache records
-type CacheLink struct {
-	Source   digest.Digest `json:",omitempty"`
-	Input    Index         `json:",omitempty"`
-	Output   Index         `json:",omitempty"`
-	Base     digest.Digest `json:",omitempty"`
-	Selector digest.Digest `json:",omitempty"`
+	Provider    content.InfoReaderProvider
 }
 
 type ReleaseFunc func()
@@ -158,13 +166,32 @@ type ReleaseFunc func()
 type Op interface {
 	// CacheMap returns structure describing how the operation is cached.
 	// Currently only roots are allowed to return multiple cache maps per op.
-	CacheMap(context.Context, session.Group, int) (*CacheMap, bool, error)
+	CacheMap(context.Context, JobContext, int) (*CacheMap, bool, error)
 
 	// Exec runs an operation given results from previous operations.
-	Exec(ctx context.Context, g session.Group, inputs []Result) (outputs []Result, err error)
+	Exec(ctx context.Context, jobCtx JobContext, inputs []Result) (outputs []Result, err error)
 
 	// Acquire acquires the necessary resources to execute the `Op`.
 	Acquire(ctx context.Context) (release ReleaseFunc, err error)
+}
+
+type JobContext interface {
+	// Session returns the session group associated with the clients building current step.
+	Session() session.Group
+	// Cleanup adds a function that is called when the job is done. This can be used to associate
+	// resources with the job and keep them from being released until the job is done.
+	Cleanup(func() error) error
+	// ResolverCache returns object for memorizing/synchronizing remote resolving decisions during the job.
+	// Steps from same build job will share the same resolver cache.
+	ResolverCache() ResolverCache
+}
+
+type ResolverCache interface {
+	// Lock locks a key until the returned release function is called.
+	// Release function can return value that will be returned to next callers.
+	// Lock can return multiple values because two steps can be merged once
+	// both have independently completed their resolution.
+	Lock(key any) (values []any, release func(any) error, err error)
 }
 
 type ProvenanceProvider interface {
@@ -259,4 +286,6 @@ type CacheManager interface {
 
 	// Save saves a result based on a cache key
 	Save(key *CacheKey, s Result, createdAt time.Time) (*ExportableCacheKey, error)
+
+	ReleaseUnreferenced(context.Context) error
 }

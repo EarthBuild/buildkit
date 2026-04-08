@@ -3,9 +3,10 @@
 package common
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/spdx/tools-golang/json/marshal"
 )
 
 // Creator is a wrapper around the Creator SPDX field. The SPDX field contains two values, which requires special
@@ -21,14 +22,14 @@ type Creator struct {
 func (c *Creator) UnmarshalJSON(data []byte) error {
 	str := string(data)
 	str = strings.Trim(str, "\"")
-	fields := strings.SplitN(str, ": ", 2)
+	fields := strings.SplitN(str, ":", 2)
 
 	if len(fields) != 2 {
 		return fmt.Errorf("failed to parse Creator '%s'", str)
 	}
 
-	c.CreatorType = fields[0]
-	c.Creator = fields[1]
+	c.CreatorType = strings.TrimSpace(fields[0])
+	c.Creator = strings.TrimSpace(fields[1])
 
 	return nil
 }
@@ -37,7 +38,7 @@ func (c *Creator) UnmarshalJSON(data []byte) error {
 // This function is also used with marshalling to YAML
 func (c Creator) MarshalJSON() ([]byte, error) {
 	if c.Creator != "" {
-		return json.Marshal(fmt.Sprintf("%s: %s", c.CreatorType, c.Creator))
+		return marshal.JSON(fmt.Sprintf("%s: %s", c.CreatorType, c.Creator))
 	}
 
 	return []byte{}, nil

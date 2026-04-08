@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/containerd/containerd/oci"
+	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/moby/buildkit/util/appcontext"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/assert"
@@ -153,7 +153,7 @@ func TestWithRemovedMounts(t *testing.T) {
 
 	oldLen := len(s.Mounts)
 	err := withRemovedMount("/run")(appcontext.Context(), nil, nil, &s)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, oldLen-1, len(s.Mounts))
 }
 

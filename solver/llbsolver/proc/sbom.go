@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/executor/resources"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/frontend"
@@ -11,24 +12,30 @@ import (
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/llbsolver"
 	"github.com/moby/buildkit/solver/result"
+	"github.com/moby/buildkit/util/tracing"
 	"github.com/pkg/errors"
 )
 
-func SBOMProcessor(scannerRef string, useCache bool, resolveMode string) llbsolver.Processor {
+func SBOMProcessor(scannerRef string, useCache bool, resolveMode string, params map[string]string) llbsolver.Processor {
 	return func(ctx context.Context, res *llbsolver.Result, s *llbsolver.Solver, j *solver.Job, usage *resources.SysSampler) (*llbsolver.Result, error) {
 		// skip sbom generation if we already have an sbom
 		if sbom.HasSBOM(res.Result) {
 			return res, nil
 		}
 
+		span, ctx := tracing.StartSpan(ctx, "create sbom attestation")
+		defer span.End()
+
 		ps, err := exptypes.ParsePlatforms(res.Metadata)
 		if err != nil {
 			return nil, err
 		}
 
-		scanner, err := sbom.CreateSBOMScanner(ctx, s.Bridge(j), scannerRef, llb.ResolveImageConfigOpt{
-			ResolveMode: resolveMode,
-		})
+		scanner, err := sbom.CreateSBOMScanner(ctx, s.Bridge(j), scannerRef, sourceresolver.Opt{
+			ImageOpt: &sourceresolver.ResolveImageOpt{
+				ResolveMode: resolveMode,
+			},
+		}, params)
 		if err != nil {
 			return nil, err
 		}

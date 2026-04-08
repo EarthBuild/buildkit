@@ -8,7 +8,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/moby/buildkit/cache"
-	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/llbsolver/ops/opsutils"
 	"github.com/moby/buildkit/solver/pb"
@@ -34,7 +33,7 @@ func NewDiffOp(v solver.Vertex, op *pb.Op_Diff, w worker.Worker) (solver.Op, err
 	}, nil
 }
 
-func (d *diffOp) CacheMap(ctx context.Context, group session.Group, index int) (*solver.CacheMap, bool, error) {
+func (d *diffOp) CacheMap(ctx context.Context, jobCtx solver.JobContext, index int) (*solver.CacheMap, bool, error) {
 	dt, err := json.Marshal(struct {
 		Type string
 		Diff *pb.DiffOp
@@ -47,10 +46,10 @@ func (d *diffOp) CacheMap(ctx context.Context, group session.Group, index int) (
 	}
 
 	var depCount int
-	if d.op.Lower.Input != pb.Empty {
+	if d.op.Lower.Input != int64(pb.Empty) {
 		depCount++
 	}
-	if d.op.Upper.Input != pb.Empty {
+	if d.op.Upper.Input != int64(pb.Empty) {
 		depCount++
 	}
 
@@ -66,11 +65,11 @@ func (d *diffOp) CacheMap(ctx context.Context, group session.Group, index int) (
 	return cm, true, nil
 }
 
-func (d *diffOp) Exec(ctx context.Context, g session.Group, inputs []solver.Result) ([]solver.Result, error) {
+func (d *diffOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []solver.Result) ([]solver.Result, error) {
 	var curInput int
 
 	var lowerRef cache.ImmutableRef
-	if d.op.Lower.Input != pb.Empty {
+	if d.op.Lower.Input != int64(pb.Empty) {
 		if lowerInp := inputs[curInput]; lowerInp != nil {
 			wref, ok := lowerInp.Sys().(*worker.WorkerRef)
 			if !ok {
@@ -84,7 +83,7 @@ func (d *diffOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 	}
 
 	var upperRef cache.ImmutableRef
-	if d.op.Upper.Input != pb.Empty {
+	if d.op.Upper.Input != int64(pb.Empty) {
 		if upperInp := inputs[curInput]; upperInp != nil {
 			wref, ok := upperInp.Sys().(*worker.WorkerRef)
 			if !ok {

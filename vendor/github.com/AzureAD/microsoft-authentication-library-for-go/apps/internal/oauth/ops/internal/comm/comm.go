@@ -11,7 +11,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -19,10 +18,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/errors"
 	customJSON "github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/json"
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/internal/version"
-	"github.com/google/uuid"
 )
 
 // HTTPClient represents an HTTP client.
@@ -71,15 +71,13 @@ func (c *Client) JSONCall(ctx context.Context, endpoint string, headers http.Hea
 		unmarshal = customJSON.Unmarshal
 	}
 
-	u, err := url.Parse(endpoint)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s?%s", endpoint, qv.Encode()), nil)
 	if err != nil {
-		return fmt.Errorf("could not parse path URL(%s): %w", endpoint, err)
+		return fmt.Errorf("could not create request: %w", err)
 	}
-	u.RawQuery = qv.Encode()
 
 	addStdHeaders(headers)
-
-	req := &http.Request{Method: http.MethodGet, URL: u, Header: headers}
+	req.Header = headers
 
 	if body != nil {
 		// Note: In case your wondering why we are not gzip encoding....
@@ -89,7 +87,7 @@ func (c *Client) JSONCall(ctx context.Context, endpoint string, headers http.Hea
 		if err != nil {
 			return fmt.Errorf("bug: conn.Call(): could not marshal the body object: %w", err)
 		}
-		req.Body = ioutil.NopCloser(bytes.NewBuffer(data))
+		req.Body = io.NopCloser(bytes.NewBuffer(data))
 		req.Method = http.MethodPost
 	}
 
@@ -100,7 +98,7 @@ func (c *Client) JSONCall(ctx context.Context, endpoint string, headers http.Hea
 
 	if resp != nil {
 		if err := unmarshal(data, resp); err != nil {
-			return fmt.Errorf("json decode error: %w\njson message bytes were: %s", err, string(data))
+			return errors.InvalidJsonErr{Err: fmt.Errorf("json decode error: %w\njson message bytes were: %s", err, string(data))}
 		}
 	}
 	return nil
@@ -163,7 +161,7 @@ func (c *Client) xmlCall(ctx context.Context, u *url.URL, headers http.Header, b
 
 	if len(body) > 0 {
 		req.Method = http.MethodPost
-		req.Body = ioutil.NopCloser(strings.NewReader(body))
+		req.Body = io.NopCloser(strings.NewReader(body))
 	}
 
 	data, err := c.do(ctx, req)
@@ -201,9 +199,9 @@ func (c *Client) URLFormCall(ctx context.Context, endpoint string, qv url.Values
 		URL:           u,
 		Header:        headers,
 		ContentLength: int64(len(enc)),
-		Body:          ioutil.NopCloser(strings.NewReader(enc)),
+		Body:          io.NopCloser(strings.NewReader(enc)),
 		GetBody: func() (io.ReadCloser, error) {
-			return ioutil.NopCloser(strings.NewReader(enc)), nil
+			return io.NopCloser(strings.NewReader(enc)), nil
 		},
 	}
 
@@ -223,7 +221,7 @@ func (c *Client) URLFormCall(ctx context.Context, endpoint string, qv url.Values
 	}
 	if resp != nil {
 		if err := unmarshal(data, resp); err != nil {
-			return fmt.Errorf("json decode error: %w\nraw message was: %s", err, string(data))
+			return errors.InvalidJsonErr{Err: fmt.Errorf("json decode error: %w\nraw message was: %s", err, string(data))}
 		}
 	}
 	return nil
@@ -248,7 +246,7 @@ func (c *Client) do(ctx context.Context, req *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not read the body of an HTTP Response: %w", err)
 	}
-	reply.Body = ioutil.NopCloser(bytes.NewBuffer(data))
+	reply.Body = io.NopCloser(bytes.NewBuffer(data))
 
 	// NOTE: This doesn't happen immediately after the call so that we can get an error message
 	// from the server and include it in our error.
@@ -297,7 +295,7 @@ func (c *Client) readBody(resp *http.Response) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("bug: comm.Client.JSONCall(): content was send with unsupported content-encoding %s", resp.Header.Get("Content-Encoding"))
 	}
-	return ioutil.ReadAll(reader)
+	return io.ReadAll(reader)
 }
 
 var testID string

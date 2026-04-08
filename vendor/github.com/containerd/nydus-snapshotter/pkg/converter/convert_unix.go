@@ -22,19 +22,21 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/containerd/containerd/archive"
-	"github.com/containerd/containerd/archive/compression"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/images/converter"
-	"github.com/containerd/containerd/labels"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/images/converter"
+	"github.com/containerd/containerd/v2/pkg/archive"
+	"github.com/containerd/containerd/v2/pkg/archive/compression"
+	"github.com/containerd/containerd/v2/pkg/labels"
+	"github.com/containerd/containerd/v2/plugins/content/local"
+	"github.com/containerd/errdefs"
 	"github.com/containerd/fifo"
 	"github.com/klauspost/compress/zstd"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/containerd/nydus-snapshotter/pkg/converter/tool"
@@ -108,12 +110,18 @@ func unpackOciTar(ctx context.Context, dst string, reader io.Reader) error {
 		ctx,
 		dst,
 		ds,
-		archive.WithConvertWhiteout(func(hdr *tar.Header, file string) (bool, error) {
+		archive.WithConvertWhiteout(func(_ *tar.Header, _ string) (bool, error) {
 			// Keep to extract all whiteout files.
 			return true, nil
 		}),
 	); err != nil {
 		return errors.Wrap(err, "apply with convert whiteout")
+	}
+
+	// Read any trailing data for some tar formats, in case the
+	// PipeWriter of opposite side gets stuck.
+	if _, err := io.Copy(io.Discard, ds); err != nil {
+		return errors.Wrap(err, "trailing data after applying archive")
 	}
 
 	return nil
@@ -408,6 +416,7 @@ func packFromDirectory(ctx context.Context, dest io.Writer, opt PackOption, buil
 				PrefetchPatterns: opt.PrefetchPatterns,
 				AlignedChunk:     opt.AlignedChunk,
 				ChunkSize:        opt.ChunkSize,
+				BatchSize:        opt.BatchSize,
 				Compressor:       opt.Compressor,
 				Timeout:          opt.Timeout,
 				Encrypt:          opt.Encrypt,
@@ -522,7 +531,7 @@ func packFromTar(ctx context.Context, dest io.Writer, opt PackOption) (io.WriteC
 		if err != nil {
 			// Without handling the returned error because we just only
 			// focus on the command exit status in `tool.Pack`.
-			wc.Close()
+			_ = wc.Close()
 		}
 		return errors.Wrapf(err, "call builder")
 	})
@@ -556,12 +565,33 @@ func Merge(ctx context.Context, layers []Layer, dest io.Writer, opt MergeOption)
 	}
 	defer os.RemoveAll(workDir)
 
-	getBootstrapPath := func(layerIdx int) string {
-		digestHex := layers[layerIdx].Digest.Hex()
-		if originalDigest := layers[layerIdx].OriginalDigest; originalDigest != nil {
-			return filepath.Join(workDir, originalDigest.Hex())
+	getLayerPath := func(layerIdx int, suffix string) string {
+		if layerIdx < 0 || layerIdx >= len(layers) {
+			return ""
 		}
-		return filepath.Join(workDir, digestHex)
+
+		digestHex := layers[layerIdx].Digest.Hex()
+		if suffix == "" && layers[layerIdx].OriginalDigest != nil {
+			digestHex = layers[layerIdx].OriginalDigest.Hex()
+		}
+		return filepath.Join(workDir, digestHex+suffix)
+	}
+
+	unpackLayerEntry := func(layerIdx int, entryName string, filePath string) error {
+		if layerIdx < 0 || layerIdx >= len(layers) {
+			return errors.Errorf("layer index %d out of bounds", layerIdx)
+		}
+
+		file, err := os.Create(filePath)
+		if err != nil {
+			return errors.Wrapf(err, "create %s file", entryName)
+		}
+		defer file.Close()
+
+		if _, err := UnpackEntry(layers[layerIdx].ReaderAt, entryName, file); err != nil {
+			return errors.Wrapf(err, "unpack %s", entryName)
+		}
+		return nil
 	}
 
 	eg, _ := errgroup.WithContext(ctx)
@@ -570,7 +600,7 @@ func Merge(ctx context.Context, layers []Layer, dest io.Writer, opt MergeOption)
 	rafsBlobSizes := []int64{}
 	rafsBlobTOCDigests := []string{}
 	for idx := range layers {
-		sourceBootstrapPaths = append(sourceBootstrapPaths, getBootstrapPath(idx))
+		sourceBootstrapPaths = append(sourceBootstrapPaths, getLayerPath(idx, ""))
 		if layers[idx].OriginalDigest != nil {
 			rafsBlobTOCDigest, err := calcBlobTOCDigest(layers[idx].ReaderAt)
 			if err != nil {
@@ -580,17 +610,22 @@ func Merge(ctx context.Context, layers []Layer, dest io.Writer, opt MergeOption)
 			rafsBlobDigests = append(rafsBlobDigests, layers[idx].Digest.Hex())
 			rafsBlobSizes = append(rafsBlobSizes, layers[idx].ReaderAt.Size())
 		}
+
 		eg.Go(func(idx int) func() error {
 			return func() error {
 				// Use the hex hash string of whole tar blob as the bootstrap name.
-				bootstrap, err := os.Create(getBootstrapPath(idx))
-				if err != nil {
-					return errors.Wrap(err, "create source bootstrap")
+				if err := unpackLayerEntry(idx, EntryBootstrap, getLayerPath(idx, "")); err != nil {
+					return err
 				}
-				defer bootstrap.Close()
 
-				if _, err := UnpackEntry(layers[idx].ReaderAt, EntryBootstrap, bootstrap); err != nil {
-					return errors.Wrap(err, "unpack nydus tar")
+				if opt.FsVersion == "6" {
+					if err := unpackLayerEntry(idx, EntryBlobMeta, getLayerPath(idx, ".blob.meta")); err != nil {
+						logrus.Warnf("Failed to extract blob.meta.header for layer %d: %v\n", idx, err)
+					}
+
+					if err := unpackLayerEntry(idx, EntryBlobMetaHeader, getLayerPath(idx, ".blob.meta.header")); err != nil {
+						logrus.Warnf("Failed to extract blob.meta.header for layer %d: %v\n", idx, err)
+					}
 				}
 
 				return nil
@@ -623,13 +658,102 @@ func Merge(ctx context.Context, layers []Layer, dest io.Writer, opt MergeOption)
 		return nil, errors.Wrap(err, "merge bootstrap")
 	}
 
+	bootstrapRa, err := local.OpenReader(targetBootstrapPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "open bootstrap reader")
+	}
+	defer bootstrapRa.Close()
+
+	files := []File{
+		{
+			Name:   EntryBootstrap,
+			Reader: content.NewReader(bootstrapRa),
+			Size:   bootstrapRa.Size(),
+		},
+	}
+
+	if opt.FsVersion == "6" {
+		metaRas := make([]io.Closer, 0, len(layers)*2)
+		defer func() {
+			for _, closer := range metaRas {
+				closer.Close()
+			}
+		}()
+
+		for idx := range layers {
+			digestHex := layers[idx].Digest.Hex()
+			blobMetaPath := getLayerPath(idx, ".blob.meta")
+			blobMetaHeaderPath := getLayerPath(idx, ".blob.meta.header")
+
+			metaContent, err := os.ReadFile(blobMetaPath)
+			if err != nil {
+				return nil, errors.Wrap(err, "read blob.meta")
+			}
+
+			headerContent, err := os.ReadFile(blobMetaHeaderPath)
+			if err != nil {
+				return nil, errors.Wrap(err, "read blob.meta.header")
+			}
+			uncompressedSize := len(metaContent)
+			alignedUncompressedSize := (uncompressedSize + 4095) &^ 4095
+			totalSize := alignedUncompressedSize + len(headerContent)
+
+			if totalSize == 0 {
+				logrus.Warnf("blob data for layer %s is empty, skipped\n", digestHex)
+				continue
+			}
+
+			assembledFileName := fmt.Sprintf("%s.blob.meta", digestHex)
+			assembledFilePath := filepath.Join(workDir, assembledFileName)
+
+			writeMetaFile := func() error {
+				f, err := os.Create(assembledFilePath)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+
+				if _, err := f.Write(metaContent); err != nil {
+					return err
+				}
+
+				if padding := alignedUncompressedSize - uncompressedSize; padding > 0 {
+					if _, err := f.Write(make([]byte, padding)); err != nil {
+						return err
+					}
+				}
+
+				if _, err := f.Write(headerContent); err != nil {
+					return err
+				}
+
+				return f.Sync()
+			}
+
+			if err := writeMetaFile(); err != nil {
+				return nil, errors.Wrap(err, "write blob meta file")
+			}
+
+			assembledRa, err := local.OpenReader(assembledFilePath)
+			if err != nil {
+				return nil, errors.Wrap(err, "open blob meta file")
+			}
+
+			metaRas = append(metaRas, assembledRa)
+
+			files = append(files, File{
+				Name:   assembledFileName,
+				Reader: content.NewReader(assembledRa),
+				Size:   int64(totalSize),
+			})
+		}
+	}
+
+	files = append(files, opt.AppendFiles...)
 	var rc io.ReadCloser
 
 	if opt.WithTar {
-		rc, err = packToTar(targetBootstrapPath, fmt.Sprintf("image/%s", EntryBootstrap), false)
-		if err != nil {
-			return nil, errors.Wrap(err, "pack bootstrap to tar")
-		}
+		rc = packToTar(files, false)
 	} else {
 		rc, err = os.Open(targetBootstrapPath)
 		if err != nil {
@@ -643,7 +767,6 @@ func Merge(ctx context.Context, layers []Layer, dest io.Writer, opt MergeOption)
 	if _, err = io.CopyBuffer(dest, rc, *buffer); err != nil {
 		return nil, errors.Wrap(err, "copy merged bootstrap")
 	}
-
 	return blobDigests, nil
 }
 
@@ -680,7 +803,7 @@ func Unpack(ctx context.Context, ra content.ReaderAt, dest io.Writer, opt Unpack
 		if err != nil {
 			return errors.Wrap(err, "new content store proxy")
 		}
-		defer proxy.close()
+		defer func() { _ = proxy.close() }()
 
 		// generate backend config file
 		backendConfigStr := fmt.Sprintf(`{"version":2,"backend":{"type":"http-proxy","http-proxy":{"addr":"%s"}}}`, proxy.socketPath)
@@ -758,10 +881,55 @@ func isNydusImage(manifest *ocispec.Manifest) bool {
 	return false
 }
 
+// makeBlobDesc returns a ocispec.Descriptor by the given information.
+func makeBlobDesc(ctx context.Context, cs content.Store, opt PackOption, sourceDigest, targetDigest digest.Digest) (*ocispec.Descriptor, error) {
+	targetInfo, err := cs.Info(ctx, targetDigest)
+	if err != nil {
+		return nil, errors.Wrapf(err, "get target blob info %s", targetDigest)
+	}
+	if targetInfo.Labels == nil {
+		targetInfo.Labels = map[string]string{}
+	}
+	// Write a diff id label of layer in content store for simplifying
+	// diff id calculation to speed up the conversion.
+	// See: https://github.com/containerd/containerd/blob/e4fefea5544d259177abb85b64e428702ac49c97/images/diffid.go#L49
+	targetInfo.Labels[labels.LabelUncompressed] = targetDigest.String()
+	_, err = cs.Update(ctx, targetInfo)
+	if err != nil {
+		return nil, errors.Wrap(err, "update layer label")
+	}
+
+	targetDesc := ocispec.Descriptor{
+		Digest:    targetDigest,
+		Size:      targetInfo.Size,
+		MediaType: MediaTypeNydusBlob,
+		Annotations: map[string]string{
+			// Use `containerd.io/uncompressed` to generate DiffID of
+			// layer defined in OCI spec.
+			LayerAnnotationUncompressed: targetDigest.String(),
+			LayerAnnotationNydusBlob:    "true",
+		},
+	}
+
+	if opt.OCIRef {
+		targetDesc.Annotations[label.NydusRefLayer] = sourceDigest.String()
+	}
+
+	if opt.Encrypt {
+		targetDesc.Annotations[LayerAnnotationNydusEncryptedBlob] = "true"
+	}
+
+	return &targetDesc, nil
+}
+
 // LayerConvertFunc returns a function which converts an OCI image layer to
 // a nydus blob layer, and set the media type to "application/vnd.oci.image.layer.nydus.blob.v1".
 func LayerConvertFunc(opt PackOption) converter.ConvertFunc {
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		if ctx.Err() != nil {
+			// The context is already cancelled, no need to proceed.
+			return nil, ctx.Err()
+		}
 		if !images.IsLayerType(desc.MediaType) {
 			return nil, nil
 		}
@@ -776,21 +944,8 @@ func LayerConvertFunc(opt PackOption) converter.ConvertFunc {
 		if err != nil {
 			return nil, errors.Wrapf(err, "get blob info %s", desc.Digest)
 		}
-		if info.Labels[LayerAnnotationNydusTargetDigest] != "" {
-			targetInfo, err := cs.Info(ctx, digest.Digest(info.Labels[LayerAnnotationNydusTargetDigest]))
-			if err != nil {
-				return nil, errors.Wrapf(err, "get blob info %s", desc.Digest)
-			}
-			targetDesc := ocispec.Descriptor{
-				Digest:    targetInfo.Digest,
-				Size:      targetInfo.Size,
-				MediaType: MediaTypeNydusBlob,
-				Annotations: map[string]string{
-					LayerAnnotationUncompressed: targetInfo.Digest.String(),
-					LayerAnnotationNydusBlob:    "true",
-				},
-			}
-			return &targetDesc, nil
+		if targetDigest := digest.Digest(info.Labels[LayerAnnotationNydusTargetDigest]); targetDigest.Validate() == nil {
+			return makeBlobDesc(ctx, cs, opt, desc.Digest, targetDigest)
 		}
 
 		ra, err := cs.ReaderAt(ctx, desc)
@@ -824,13 +979,28 @@ func LayerConvertFunc(opt PackOption) converter.ConvertFunc {
 			return nil, errors.Wrap(err, "pack tar to nydus")
 		}
 
+		copyBufferDone := make(chan error, 1)
 		go func() {
-			defer pw.Close()
 			buffer := bufPool.Get().(*[]byte)
 			defer bufPool.Put(buffer)
-			if _, err := io.CopyBuffer(tw, tr, *buffer); err != nil {
-				pw.CloseWithError(err)
+			_, err := io.CopyBuffer(tw, tr, *buffer)
+			copyBufferDone <- err
+		}()
+
+		go func() {
+			defer pw.Close()
+			select {
+			case <-ctx.Done():
+				// The context was cancelled!
+				// Close the pipe with the context's error to signal
+				// the reader to stop.
+				pw.CloseWithError(ctx.Err())
 				return
+			case err := <-copyBufferDone:
+				if err != nil {
+					pw.CloseWithError(err)
+					return
+				}
 			}
 			if err := tr.Close(); err != nil {
 				pw.CloseWithError(err)
@@ -847,49 +1017,18 @@ func LayerConvertFunc(opt PackOption) converter.ConvertFunc {
 		}
 
 		blobDigest := digester.Digest()
-		info, err = cs.Info(ctx, blobDigest)
+		newDesc, err := makeBlobDesc(ctx, cs, opt, desc.Digest, blobDigest)
 		if err != nil {
-			return nil, errors.Wrapf(err, "get blob info %s", blobDigest)
-		}
-		if info.Labels == nil {
-			info.Labels = map[string]string{}
-		}
-		// Write a diff id label of layer in content store for simplifying
-		// diff id calculation to speed up the conversion.
-		// See: https://github.com/containerd/containerd/blob/e4fefea5544d259177abb85b64e428702ac49c97/images/diffid.go#L49
-		info.Labels[labels.LabelUncompressed] = blobDigest.String()
-		_, err = cs.Update(ctx, info)
-		if err != nil {
-			return nil, errors.Wrap(err, "update layer label")
-		}
-
-		newDesc := ocispec.Descriptor{
-			Digest:    blobDigest,
-			Size:      info.Size,
-			MediaType: MediaTypeNydusBlob,
-			Annotations: map[string]string{
-				// Use `containerd.io/uncompressed` to generate DiffID of
-				// layer defined in OCI spec.
-				LayerAnnotationUncompressed: blobDigest.String(),
-				LayerAnnotationNydusBlob:    "true",
-			},
-		}
-
-		if opt.OCIRef {
-			newDesc.Annotations[label.NydusRefLayer] = desc.Digest.String()
-		}
-
-		if opt.Encrypt {
-			newDesc.Annotations[LayerAnnotationNydusEncryptedBlob] = "true"
+			return nil, err
 		}
 
 		if opt.Backend != nil {
-			if err := opt.Backend.Push(ctx, cs, newDesc); err != nil {
+			if err := opt.Backend.Push(ctx, cs, *newDesc); err != nil {
 				return nil, errors.Wrap(err, "push to storage backend")
 			}
 		}
 
-		return &newDesc, nil
+		return newDesc, nil
 	}
 }
 
@@ -904,7 +1043,7 @@ func ConvertHookFunc(opt MergeOption) converter.ConvertHookFunc {
 		}
 		switch {
 		case images.IsIndexType(newDesc.MediaType):
-			return convertIndex(ctx, cs, orgDesc, newDesc)
+			return convertIndex(ctx, cs, newDesc)
 		case images.IsManifestType(newDesc.MediaType):
 			return convertManifest(ctx, cs, orgDesc, newDesc, opt)
 		default:
@@ -913,35 +1052,12 @@ func ConvertHookFunc(opt MergeOption) converter.ConvertHookFunc {
 	}
 }
 
-// convertIndex modifies the original index by appending "nydus.remoteimage.v1"
-// to the Platform.OSFeatures of each modified manifest descriptors.
-func convertIndex(ctx context.Context, cs content.Store, orgDesc ocispec.Descriptor, newDesc *ocispec.Descriptor) (*ocispec.Descriptor, error) {
-	var orgIndex ocispec.Index
-	if _, err := readJSON(ctx, cs, &orgIndex, orgDesc); err != nil {
-		return nil, errors.Wrap(err, "read target image index json")
-	}
-	// isManifestModified is a function to check whether the manifest is modified.
-	isManifestModified := func(manifest ocispec.Descriptor) bool {
-		for _, oldManifest := range orgIndex.Manifests {
-			if manifest.Digest == oldManifest.Digest {
-				return false
-			}
-		}
-		return true
-	}
-
+// convertIndex modifies the original index converting it to manifest directly if it contains only one manifest.
+func convertIndex(ctx context.Context, cs content.Store, newDesc *ocispec.Descriptor) (*ocispec.Descriptor, error) {
 	var index ocispec.Index
-	indexLabels, err := readJSON(ctx, cs, &index, *newDesc)
+	_, err := readJSON(ctx, cs, &index, *newDesc)
 	if err != nil {
 		return nil, errors.Wrap(err, "read index json")
-	}
-	for i, manifest := range index.Manifests {
-		if !isManifestModified(manifest) {
-			// Skip the manifest which is not modified.
-			continue
-		}
-		manifest.Platform.OSFeatures = append(manifest.Platform.OSFeatures, ManifestOSFeatureNydus)
-		index.Manifests[i] = manifest
 	}
 
 	// If the converted manifest list contains only one manifest,
@@ -949,13 +1065,7 @@ func convertIndex(ctx context.Context, cs content.Store, orgDesc ocispec.Descrip
 	if len(index.Manifests) == 1 {
 		return &index.Manifests[0], nil
 	}
-
-	// Update image index in content store.
-	newIndexDesc, err := writeJSON(ctx, cs, index, *newDesc, indexLabels)
-	if err != nil {
-		return nil, errors.Wrap(err, "write index json")
-	}
-	return newIndexDesc, nil
+	return newDesc, nil
 }
 
 // convertManifest merges all the nydus blob layers into a
@@ -1036,6 +1146,12 @@ func convertManifest(ctx context.Context, cs content.Store, oldDesc ocispec.Desc
 	if err != nil {
 		return nil, errors.Wrap(err, "write image config")
 	}
+	// When manifests are merged, we need to put a special value for the config mediaType.
+	// This values must be one that containerd doesn't understand to ensure it doesn't try tu pull the nydus image
+	// but use the OCI one instead. And then if the nydus-snapshotter is used, it can pull the nydus image instead.
+	if opt.MergeManifest {
+		newConfigDesc.MediaType = ManifestConfigNydus
+	}
 	manifest.Config = *newConfigDesc
 	// Update the config gc label
 	manifestLabels[configGCLabelKey] = newConfigDesc.Digest.String()
@@ -1045,6 +1161,8 @@ func convertManifest(ctx context.Context, cs content.Store, oldDesc ocispec.Desc
 		// See the `subject` field description in
 		// https://github.com/opencontainers/image-spec/blob/main/manifest.md#image-manifest-property-descriptions
 		manifest.Subject = &oldDesc
+		// Remove the platform field as it is not supported by certain registries like ECR.
+		manifest.Subject.Platform = nil
 	}
 
 	// Update image manifest in content store.
@@ -1054,6 +1172,30 @@ func convertManifest(ctx context.Context, cs content.Store, oldDesc ocispec.Desc
 	}
 
 	return newManifestDesc, nil
+}
+
+// mergeManifestBlobDigests combines the per-layer nydus blob tar digests with any
+// additional blobs from the nydus-image merge output that are not already covered.
+//
+// nydusBlobDigests contains one entry per OCI source layer in layer order, including
+// metadata-only layers (e.g. symlink-only layers) whose blob tars have no chunk data.
+// originalBlobDigests comes from the nydus-image merge output blob table, which omits
+// metadata-only layers but may include chunk-dict blobs not present in nydusBlobDigests.
+//
+// The result preserves the OCI layer order from nydusBlobDigests and appends any
+// dict-only blobs from originalBlobDigests at the end.
+func mergeManifestBlobDigests(nydusBlobDigests, originalBlobDigests []digest.Digest) []digest.Digest {
+	nydusSet := make(map[digest.Digest]struct{}, len(nydusBlobDigests))
+	for _, d := range nydusBlobDigests {
+		nydusSet[d] = struct{}{}
+	}
+	result := append([]digest.Digest{}, nydusBlobDigests...)
+	for _, d := range originalBlobDigests {
+		if _, ok := nydusSet[d]; !ok {
+			result = append(result, d)
+		}
+	}
+	return result
 }
 
 // MergeLayers merges a list of nydus blob layer into a nydus bootstrap layer.
@@ -1147,7 +1289,7 @@ func MergeLayers(ctx context.Context, cs content.Store, descs []ocispec.Descript
 	if opt.OCIRef {
 		blobDigests = nydusBlobDigests
 	} else {
-		blobDigests = originalBlobDigests
+		blobDigests = mergeManifestBlobDigests(nydusBlobDigests, originalBlobDigests)
 	}
 
 	for idx, blobDigest := range blobDigests {

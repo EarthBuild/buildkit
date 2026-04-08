@@ -6,11 +6,11 @@ import (
 	"os"
 	"sync"
 
-	"github.com/containerd/containerd/containers"
-	"github.com/containerd/containerd/oci"
-	"github.com/containerd/containerd/pkg/cap"
-	"github.com/containerd/containerd/pkg/userns"
+	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/pkg/cap"
+	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/sys/userns"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
@@ -114,7 +114,7 @@ func getFreeLoopID() (int, error) {
 	}
 	defer fd.Close()
 
-	const _LOOP_CTL_GET_FREE = 0x4C82 //nolint:revive
+	const _LOOP_CTL_GET_FREE = 0x4C82 //nolint:staticcheck
 	r1, _, uerr := unix.Syscall(unix.SYS_IOCTL, fd.Fd(), _LOOP_CTL_GET_FREE, 0)
 	if uerr == 0 {
 		return int(r1), nil

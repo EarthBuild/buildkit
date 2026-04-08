@@ -9,14 +9,14 @@ import (
 	"io"
 	"time"
 
-	"github.com/containerd/containerd/archive"
-	"github.com/containerd/containerd/archive/compression"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/diff"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/labels"
-	"github.com/containerd/containerd/mount"
-	log "github.com/moby/buildkit/util/bklog"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/diff"
+	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/containerd/v2/pkg/archive"
+	"github.com/containerd/containerd/v2/pkg/archive/compression"
+	"github.com/containerd/containerd/v2/pkg/labels"
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/buildkit/util/bklog"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -66,7 +66,7 @@ func (s *winDiffer) Compare(ctx context.Context, lower, upper []mount.Mount, opt
 	case ocispecs.MediaTypeImageLayerGzip:
 		isCompressed = true
 	default:
-		return emptyDesc, errors.Wrapf(errdefs.ErrNotImplemented, "unsupported diff media type: %v", config.MediaType)
+		return emptyDesc, errors.Wrapf(cerrdefs.ErrNotImplemented, "unsupported diff media type: %v", config.MediaType)
 	}
 
 	var ocidesc ocispecs.Descriptor
@@ -91,7 +91,7 @@ func (s *winDiffer) Compare(ctx context.Context, lower, upper []mount.Mount, opt
 					cw.Close()
 					if newReference {
 						if err := s.store.Abort(ctx, config.Reference); err != nil {
-							log.G(ctx).WithField("ref", config.Reference).Warnf("failed to delete diff upload")
+							bklog.G(ctx).WithField("ref", config.Reference).Warnf("failed to delete diff upload")
 						}
 					}
 				}
@@ -258,7 +258,7 @@ func makeWindowsLayer(ctx context.Context, w io.Writer) (io.Writer, func(error),
 			return tarWriter.Close()
 		}()
 		if err != nil {
-			log.G(ctx).Errorf("makeWindowsLayer %+v", err)
+			bklog.G(ctx).Errorf("makeWindowsLayer %+v", err)
 		}
 		pw.CloseWithError(err)
 		done <- err

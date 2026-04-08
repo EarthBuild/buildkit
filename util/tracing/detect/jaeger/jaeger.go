@@ -8,12 +8,13 @@ import (
 	"sync"
 
 	"github.com/moby/buildkit/util/tracing/detect"
+	//nolint:staticcheck // Jaeger still supported for compatibility
 	"go.opentelemetry.io/otel/exporters/jaeger"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func init() {
-	detect.Register("jaeger", jaegerExporter, 11)
+	detect.Register("jaeger", detect.TraceExporterDetector(jaegerExporter), 11)
 }
 
 func jaegerExporter() (sdktrace.SpanExporter, error) {

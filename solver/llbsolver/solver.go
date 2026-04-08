@@ -2,61 +2,41 @@ package llbsolver
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
-	intoto "github.com/in-toto/in-toto-golang/in_toto"
-	slsa02 "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/v0.2"
-	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/cache"
-	cacheconfig "github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/client"
 	controlgateway "github.com/moby/buildkit/control/gateway"
 	"github.com/moby/buildkit/executor/resources"
-	resourcetypes "github.com/moby/buildkit/executor/resources/types"
+	resourcestypes "github.com/moby/buildkit/executor/resources/types"
 	"github.com/moby/buildkit/exporter"
-	"github.com/moby/buildkit/exporter/containerimage/exptypes"
+	"github.com/moby/buildkit/exporter/verifier"
 	"github.com/moby/buildkit/frontend"
 	"github.com/moby/buildkit/frontend/gateway"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
-	"github.com/moby/buildkit/solver/llbsolver/provenance"
+	"github.com/moby/buildkit/solver/llbsolver/history"
 	"github.com/moby/buildkit/solver/result"
 	spb "github.com/moby/buildkit/sourcepolicy/pb"
-	"github.com/moby/buildkit/util/bklog"
-	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/entitlements"
-	"github.com/moby/buildkit/util/grpcerrors"
+	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/progress"
-	"github.com/moby/buildkit/util/tracing/detect"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
-	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-)
-
-const (
-	keyEntitlements = "llb.entitlements"
-	keySourcePolicy = "llb.sourcepolicy"
 )
 
 const keyEarthlyExporterInstance = "earthly-hack-exporter-instance"
 
 type ExporterRequest struct {
-	Type           string
-	Attrs          map[string]string
-	Exporter       exporter.ExporterInstance
-	CacheExporters []RemoteCacheExporter
+	Exporters             []exporter.ExporterInstance
+	CacheExporters        []RemoteCacheExporter
+	EnableSessionExporter bool
 }
 
 type RemoteCacheExporter struct {
@@ -77,8 +57,9 @@ type Opt struct {
 	GatewayForwarder *controlgateway.GatewayForwarder
 	SessionManager   *session.Manager
 	WorkerController *worker.Controller
-	HistoryQueue     *HistoryQueue
+	HistoryQueue     *history.Queue
 	ResourceMonitor  *resources.Monitor
+	ProvenanceEnv    map[string]any
 }
 
 type Solver struct {
@@ -91,8 +72,9 @@ type Solver struct {
 	gatewayForwarder          *controlgateway.GatewayForwarder
 	sm                        *session.Manager
 	entitlements              []string
-	history                   *HistoryQueue
-	sysSampler                *resources.Sampler[*resourcetypes.SysSample]
+	history                   *history.Queue
+	sysSampler                *resources.Sampler[*resourcestypes.SysSample]
+	provenanceEnv             map[string]any
 }
 
 // Processor defines a processing function to be applied after solving, but
@@ -100,6 +82,18 @@ type Solver struct {
 type Processor func(ctx context.Context, result *Result, s *Solver, j *solver.Job, usage *resources.SysSampler) (*Result, error)
 
 func New(opt Opt) (*Solver, error) {
+	// buildConfig,builderPlatform,platform are not allowd
+	forbiddenKeys := map[string]struct{}{
+		"buildConfig":     {},
+		"builderPlatform": {},
+		"platform":        {},
+	}
+	for k := range opt.ProvenanceEnv {
+		if _, ok := forbiddenKeys[k]; ok {
+			return nil, errors.Errorf("key %q is builtin and not allowed to be modified in provenance config", k)
+		}
+	}
+
 	s := &Solver{
 		workerController:          opt.WorkerController,
 		resolveWorker:             defaultResolver(opt.WorkerController),
@@ -110,6 +104,7 @@ func New(opt Opt) (*Solver, error) {
 		sm:                        opt.SessionManager,
 		entitlements:              opt.Entitlements,
 		history:                   opt.HistoryQueue,
+		provenanceEnv:             opt.ProvenanceEnv,
 	}
 
 	sampler, err := resources.NewSysSampler()
@@ -123,6 +118,14 @@ func New(opt Opt) (*Solver, error) {
 		DefaultCache:  opt.CacheManager,
 	})
 	return s, nil
+}
+
+func (s *Solver) Close() error {
+	s.solver.Close()
+	if s.sysSampler != nil {
+		return s.sysSampler.Close()
+	}
+	return nil
 }
 
 func (s *Solver) resolver() solver.ResolveOpFunc {
@@ -151,266 +154,7 @@ func (s *Solver) Bridge(b solver.Builder) frontend.FrontendLLBBridge {
 	return s.bridge(b)
 }
 
-func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend.SolveRequest, exp ExporterRequest, j *solver.Job, usage *resources.SysSampler) (func(*Result, exporter.DescriptorReference, error) error, error) {
-	var stopTrace func() []tracetest.SpanStub
-
-	if s := trace.SpanFromContext(ctx); s.SpanContext().IsValid() {
-		if exp, err := detect.Exporter(); err == nil {
-			if rec, ok := exp.(*detect.TraceRecorder); ok {
-				stopTrace = rec.Record(s.SpanContext().TraceID())
-			}
-		}
-	}
-
-	st := time.Now()
-	rec := &controlapi.BuildHistoryRecord{
-		Ref:           id,
-		Frontend:      req.Frontend,
-		FrontendAttrs: req.FrontendOpt,
-		CreatedAt:     &st,
-	}
-
-	if exp.Type != "" {
-		rec.Exporters = []*controlapi.Exporter{{
-			Type:  exp.Type,
-			Attrs: exp.Attrs,
-		}}
-	}
-
-	if err := s.history.Update(ctx, &controlapi.BuildHistoryEvent{
-		Type:   controlapi.BuildHistoryEventType_STARTED,
-		Record: rec,
-	}); err != nil {
-		return nil, err
-	}
-
-	return func(res *Result, descref exporter.DescriptorReference, err error) error {
-		en := time.Now()
-		rec.CompletedAt = &en
-
-		j.CloseProgress()
-
-		if res != nil && len(res.Metadata) > 0 {
-			rec.ExporterResponse = map[string]string{}
-			for k, v := range res.Metadata {
-				rec.ExporterResponse[k] = string(v)
-			}
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-
-		var mu sync.Mutex
-		ch := make(chan *client.SolveStatus)
-		eg, ctx2 := errgroup.WithContext(ctx)
-		var releasers []func()
-
-		attrs := map[string]string{
-			"mode":          "min", // Earthly specific. We set this to "min" instead of "max" to prevent the slow cache export at the end of a build.
-			"capture-usage": "true",
-		}
-
-		makeProvenance := func(res solver.ResultProxy, cap *provenance.Capture) (*controlapi.Descriptor, func(), error) {
-			prc, err := NewProvenanceCreator(ctx2, cap, res, attrs, j, usage)
-			if err != nil {
-				return nil, nil, err
-			}
-			pr, err := prc.Predicate()
-			if err != nil {
-				return nil, nil, err
-			}
-			dt, err := json.MarshalIndent(pr, "", "  ")
-			if err != nil {
-				return nil, nil, err
-			}
-			w, err := s.history.OpenBlobWriter(ctx, intoto.PayloadType)
-			if err != nil {
-				return nil, nil, err
-			}
-			defer func() {
-				if w != nil {
-					w.Discard()
-				}
-			}()
-			if _, err := w.Write(dt); err != nil {
-				return nil, nil, err
-			}
-			desc, release, err := w.Commit(ctx2)
-			if err != nil {
-				return nil, nil, err
-			}
-			w = nil
-			return &controlapi.Descriptor{
-				Digest:    desc.Digest,
-				Size_:     desc.Size,
-				MediaType: desc.MediaType,
-				Annotations: map[string]string{
-					"in-toto.io/predicate-type": slsa02.PredicateSLSAProvenance,
-				},
-			}, release, nil
-		}
-
-		if res != nil {
-			if res.Ref != nil {
-				eg.Go(func() error {
-					desc, release, err := makeProvenance(res.Ref, res.Provenance.Ref)
-					if err != nil {
-						return err
-					}
-
-					mu.Lock()
-					releasers = append(releasers, release)
-					if rec.Result == nil {
-						rec.Result = &controlapi.BuildResultInfo{}
-					}
-					rec.Result.Attestations = append(rec.Result.Attestations, desc)
-					mu.Unlock()
-					return nil
-				})
-			}
-
-			for k, r := range res.Refs {
-				k, r := k, r
-				cp := res.Provenance.Refs[k]
-				eg.Go(func() error {
-					desc, release, err := makeProvenance(r, cp)
-					if err != nil {
-						return err
-					}
-
-					mu.Lock()
-					releasers = append(releasers, release)
-					if rec.Results == nil {
-						rec.Results = make(map[string]*controlapi.BuildResultInfo)
-					}
-					if rec.Results[k] == nil {
-						rec.Results[k] = &controlapi.BuildResultInfo{}
-					}
-					rec.Results[k].Attestations = append(rec.Results[k].Attestations, desc)
-					mu.Unlock()
-					return nil
-				})
-			}
-		}
-
-		eg.Go(func() error {
-			st, releaseStatus, err := s.history.ImportStatus(ctx2, ch)
-			if err != nil {
-				return err
-			}
-			mu.Lock()
-			releasers = append(releasers, releaseStatus)
-			rec.Logs = &controlapi.Descriptor{
-				Digest:    st.Descriptor.Digest,
-				Size_:     st.Descriptor.Size,
-				MediaType: st.Descriptor.MediaType,
-			}
-			rec.NumCachedSteps = int32(st.NumCachedSteps)
-			rec.NumCompletedSteps = int32(st.NumCompletedSteps)
-			rec.NumTotalSteps = int32(st.NumTotalSteps)
-			mu.Unlock()
-			return nil
-		})
-		eg.Go(func() error {
-			return j.Status(ctx2, false, ch)
-		})
-
-		if descref != nil {
-			eg.Go(func() error {
-				mu.Lock()
-				if rec.Result == nil {
-					rec.Result = &controlapi.BuildResultInfo{}
-				}
-				desc := descref.Descriptor()
-				rec.Result.Result = &controlapi.Descriptor{
-					Digest:      desc.Digest,
-					Size_:       desc.Size,
-					MediaType:   desc.MediaType,
-					Annotations: desc.Annotations,
-				}
-				mu.Unlock()
-				return nil
-			})
-		}
-
-		if err1 := eg.Wait(); err == nil {
-			err = err1
-		}
-
-		defer func() {
-			for _, f := range releasers {
-				f()
-			}
-		}()
-
-		if err != nil {
-			st, ok := grpcerrors.AsGRPCStatus(grpcerrors.ToGRPC(ctx, err))
-			if !ok {
-				st = status.New(codes.Unknown, err.Error())
-			}
-			rec.Error = grpcerrors.ToRPCStatus(st.Proto())
-		}
-		if err1 := s.history.Update(ctx, &controlapi.BuildHistoryEvent{
-			Type:   controlapi.BuildHistoryEventType_COMPLETE,
-			Record: rec,
-		}); err1 != nil {
-			if err == nil {
-				err = err1
-			}
-		}
-
-		if stopTrace == nil {
-			bklog.G(ctx).Warn("no trace recorder found, skipping")
-			return err
-		}
-		go func() {
-			time.Sleep(3 * time.Second)
-			spans := stopTrace()
-
-			if len(spans) == 0 {
-				return
-			}
-
-			if err := func() error {
-				w, err := s.history.OpenBlobWriter(context.TODO(), "application/vnd.buildkit.otlp.json.v0")
-				if err != nil {
-					return err
-				}
-				enc := json.NewEncoder(w)
-				enc.SetIndent("", "  ")
-				for _, sp := range spans {
-					if err := enc.Encode(sp); err != nil {
-						return err
-					}
-				}
-
-				desc, release, err := w.Commit(context.TODO())
-				if err != nil {
-					return err
-				}
-				defer release()
-
-				if err := s.history.UpdateRef(context.TODO(), id, func(rec *controlapi.BuildHistoryRecord) error {
-					rec.Trace = &controlapi.Descriptor{
-						Digest:    desc.Digest,
-						MediaType: desc.MediaType,
-						Size_:     desc.Size,
-					}
-					return nil
-				}); err != nil {
-					return err
-				}
-				return nil
-			}(); err != nil {
-				bklog.G(ctx).Errorf("failed to save trace for %s: %+v", id, err)
-			}
-		}()
-
-		return err
-	}, nil
-}
-
-func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req frontend.SolveRequest, exp ExporterRequest, ent []entitlements.Entitlement, post []Processor, internal bool, srcPol *spb.Policy) (_ *client.SolveResponse, err error) {
+func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req frontend.SolveRequest, exp ExporterRequest, ent []entitlements.Entitlement, post []Processor, internal bool, srcPol *spb.Policy, policySession string) (_ *client.SolveResponse, err error) {
 	j, err := s.solver.NewJob(id)
 	if err != nil {
 		return nil, err
@@ -418,7 +162,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 
 	defer j.Discard()
 
-	var usage *resources.Sub[*resourcetypes.SysSample]
+	var usage *resources.Sub[*resourcestypes.SysSample]
 	if s.sysSampler != nil {
 		usage = s.sysSampler.Record()
 		defer usage.Close(false)
@@ -426,15 +170,17 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 
 	var res *frontend.Result
 	var resProv *Result
-	var descref exporter.DescriptorReference
+	var descrefs []exporter.DescriptorReference
 
 	var releasers []func()
 	defer func() {
 		for _, f := range releasers {
 			f()
 		}
-		if descref != nil {
-			descref.Release()
+		for _, descref := range descrefs {
+			if descref != nil {
+				descref.Release()
+			}
 		}
 	}()
 
@@ -450,7 +196,13 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	j.SetValue(keyEarthlyExporterInstance, &exp)
 
 	if srcPol != nil {
-		j.SetValue(keySourcePolicy, *srcPol)
+		if err := validateSourcePolicy(srcPol); err != nil {
+			return nil, err
+		}
+		j.SetValue(keySourcePolicy, srcPol)
+	}
+	if policySession != "" {
+		j.SetValue(keySourcePolicySession, policySession)
 	}
 
 	j.SessionID = sessionID
@@ -458,7 +210,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	br := s.bridge(j)
 	var fwd gateway.LLBBridgeForwarder
 	if s.gatewayForwarder != nil && req.Definition == nil && req.Frontend == "" {
-		fwd = gateway.NewBridgeForwarder(ctx, br, s.workerController, req.FrontendInputs, sessionID, s.sm)
+		fwd = gateway.NewBridgeForwarder(ctx, br, br, s.workerController.Infos(), req.FrontendInputs, sessionID, s.sm)
 		defer fwd.Discard()
 		// Register build before calling s.recordBuildHistory, because
 		// s.recordBuildHistory can block for several seconds on
@@ -467,7 +219,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		if err := s.gatewayForwarder.RegisterBuild(ctx, id, fwd); err != nil {
 			return nil, err
 		}
-		defer s.gatewayForwarder.UnregisterBuild(ctx, id)
+		defer s.gatewayForwarder.UnregisterBuild(context.WithoutCancel(ctx), id)
 	}
 
 	if !internal {
@@ -477,7 +229,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 			return nil, err1
 		}
 		defer func() {
-			err = rec(resProv, descref, err)
+			err = rec(context.WithoutCancel(ctx), resProv, descrefs, err)
 		}()
 	}
 
@@ -487,7 +239,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		case <-fwd.Done():
 			res, err = fwd.Result()
 		case <-ctx.Done():
-			err = ctx.Err()
+			err = context.Cause(ctx)
 		}
 		if err != nil {
 			return nil, err
@@ -501,6 +253,10 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 
 	if res == nil {
 		res = &frontend.Result{}
+	}
+
+	if err := verifier.CaptureFrontendOpts(req.FrontendOpt, res); err != nil {
+		return nil, err
 	}
 
 	releasers = append(releasers, func() {
@@ -553,28 +309,64 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		return nil, err
 	}
 
+	// Functions that create new objects in containerd (eg. content blobs) need to have a lease to ensure
+	// that the object is not garbage collected immediately. This is protected by the individual components,
+	// but because creating a lease is not cheap and requires a disk write, we create a single lease here
+	// early and let all the exporters, cache export, provenance creation, and finalize callbacks use the
+	// same one. The lease must span both artifact creation and the finalize phase (registry push) to
+	// prevent GC from collecting blobs before they are pushed.
+	lm, err := s.leaseManager()
+	if err != nil {
+		return nil, err
+	}
+	ctx, done, err := leaseutil.WithLease(ctx, lm, leaseutil.MakeTemporary)
+	if err != nil {
+		return nil, err
+	}
+	releasers = append(releasers, func() {
+		done(context.WithoutCancel(ctx))
+	})
+
 	cacheExporters, inlineCacheExporter := splitCacheExporters(exp.CacheExporters)
 
-	var exporterResponse map[string]string
-	if e := exp.Exporter; e != nil {
-		meta, err := runInlineCacheExporter(ctx, e, inlineCacheExporter, j, cached)
+	if exp.EnableSessionExporter {
+		exporters, err := s.getSessionExporters(ctx, j.SessionID, len(exp.Exporters), inp)
 		if err != nil {
 			return nil, err
 		}
-		for k, v := range meta {
-			inp.AddMeta(k, v)
-		}
-
-		if err := inBuilderContext(ctx, j, e.Name(), j.SessionID+"-export", func(ctx context.Context, _ session.Group) error {
-			exporterResponse, descref, err = e.Export(ctx, inp, j.SessionID)
-			return err
-		}); err != nil {
-			return nil, err
-		}
+		exp.Exporters = append(exp.Exporters, exporters...)
 	}
 
-	cacheExporterResponse, err := runCacheExporters(ctx, cacheExporters, j, cached, inp)
+	var exporterResponse map[string]string
+	var finalizers []exporter.FinalizeFunc
+	exporterResponse, finalizers, descrefs, err = s.runExporters(ctx, id, exp.Exporters, inlineCacheExporter, j, cached, inp)
 	if err != nil {
+		return nil, err
+	}
+
+	// Run image finalize and cache export in parallel.
+	// Image Export has already created layers in the content store,
+	// so cache exporters can see and reuse them.
+	eg, egCtx := errgroup.WithContext(ctx)
+	for i, finalize := range finalizers {
+		if finalize == nil {
+			continue
+		}
+		name := exp.Exporters[i].Name()
+		id := exporterVertexID(j.SessionID, i)
+		eg.Go(func() error {
+			return inBuilderContext(egCtx, j, name, id, func(ctx context.Context, _ solver.JobContext) error {
+				return finalize(ctx)
+			})
+		})
+	}
+	var cacheExporterResponse map[string]string
+	eg.Go(func() error {
+		var err error
+		cacheExporterResponse, err = runCacheExporters(egCtx, cacheExporters, j, cached, inp)
+		return err
+	})
+	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
 
@@ -598,285 +390,12 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	}, nil
 }
 
-func runCacheExporters(ctx context.Context, exporters []RemoteCacheExporter, j *solver.Job, cached *result.Result[solver.CachedResult], inp *result.Result[cache.ImmutableRef]) (map[string]string, error) {
-	eg, ctx := errgroup.WithContext(ctx)
-	g := session.NewGroup(j.SessionID)
-	var cacheExporterResponse map[string]string
-	resps := make([]map[string]string, len(exporters))
-	for i, exp := range exporters {
-		func(exp RemoteCacheExporter, i int) {
-			eg.Go(func() (err error) {
-				id := fmt.Sprint(j.SessionID, "-cache-", i)
-				err = inBuilderContext(ctx, j, exp.Exporter.Name(), id, func(ctx context.Context, _ session.Group) error {
-					prepareDone := progress.OneOff(ctx, "preparing build cache for export")
-					if err := result.EachRef(cached, inp, func(res solver.CachedResult, ref cache.ImmutableRef) error {
-						ctx = withDescHandlerCacheOpts(ctx, ref)
-
-						// Configure compression
-						compressionConfig := exp.Config().Compression
-
-						// all keys have same export chain so exporting others is not needed
-						_, err = res.CacheKeys()[0].Exporter.ExportTo(ctx, exp, solver.CacheExportOpt{
-							ResolveRemotes: workerRefResolver(cacheconfig.RefConfig{Compression: compressionConfig}, false, g),
-							Mode:           exp.CacheExportMode,
-							Session:        g,
-							CompressionOpt: &compressionConfig,
-						})
-						return err
-					}); err != nil {
-						return prepareDone(err)
-					}
-					resps[i], err = exp.Finalize(ctx)
-					return prepareDone(err)
-				})
-				if exp.IgnoreError {
-					err = nil
-				}
-				return err
-			})
-		}(exp, i)
-	}
-	if err := eg.Wait(); err != nil {
-		return nil, err
-	}
-	for _, resp := range resps {
-		for k, v := range resp {
-			if cacheExporterResponse == nil {
-				cacheExporterResponse = make(map[string]string)
-			}
-			cacheExporterResponse[k] = v
-		}
-	}
-	return cacheExporterResponse, nil
-}
-
-func runInlineCacheExporter(ctx context.Context, e exporter.ExporterInstance, inlineExporter *RemoteCacheExporter, j *solver.Job, cached *result.Result[solver.CachedResult]) (map[string][]byte, error) {
-	meta := map[string][]byte{}
-	if inlineExporter == nil {
-		return nil, nil
-	}
-	if err := inBuilderContext(ctx, j, "preparing layers for inline cache", j.SessionID+"-cache-inline", func(ctx context.Context, _ session.Group) error {
-		if res := cached.Ref; res != nil {
-			dtic, err := inlineCache(ctx, inlineExporter.Exporter, res, e.Config().Compression(), session.NewGroup(j.SessionID))
-			if err != nil {
-				return err
-			}
-			if dtic != nil {
-				meta[exptypes.ExporterInlineCache] = dtic
-			}
-		}
-		for k, res := range cached.Refs {
-			dtic, err := inlineCache(ctx, inlineExporter.Exporter, res, e.Config().Compression(), session.NewGroup(j.SessionID))
-			if err != nil {
-				return err
-			}
-			if dtic != nil {
-				meta[fmt.Sprintf("%s/%s", exptypes.ExporterInlineCache, k)] = dtic
-			}
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return meta, nil
-}
-
-func splitCacheExporters(exporters []RemoteCacheExporter) (rest []RemoteCacheExporter, inline *RemoteCacheExporter) {
-	rest = make([]RemoteCacheExporter, 0, len(exporters))
-	for i, exp := range exporters {
-		if _, ok := asInlineCache(exp.Exporter); ok {
-			inline = &exporters[i]
-			continue
-		}
-		rest = append(rest, exp)
-	}
-	return rest, inline
-}
-
-func addProvenanceToResult(res *frontend.Result, br *provenanceBridge) (*Result, error) {
-	if res == nil {
-		return nil, nil
-	}
-	reqs, err := br.requests(res)
+func (s *Solver) leaseManager() (*leaseutil.Manager, error) {
+	w, err := defaultResolver(s.workerController)()
 	if err != nil {
 		return nil, err
 	}
-	out := &Result{
-		Result:     res,
-		Provenance: &provenance.Result{},
-	}
-
-	if res.Ref != nil {
-		cp, err := getProvenance(res.Ref, reqs.ref.bridge, "", reqs)
-		if err != nil {
-			return nil, err
-		}
-		out.Provenance.Ref = cp
-		if res.Metadata == nil {
-			res.Metadata = map[string][]byte{}
-		}
-	}
-
-	if len(res.Refs) != 0 {
-		out.Provenance.Refs = make(map[string]*provenance.Capture, len(res.Refs))
-	}
-	for k, ref := range res.Refs {
-		cp, err := getProvenance(ref, reqs.refs[k].bridge, k, reqs)
-		if err != nil {
-			return nil, err
-		}
-		out.Provenance.Refs[k] = cp
-		if res.Metadata == nil {
-			res.Metadata = map[string][]byte{}
-		}
-	}
-
-	if len(res.Attestations) != 0 {
-		out.Provenance.Attestations = make(map[string][]result.Attestation[*provenance.Capture], len(res.Attestations))
-	}
-	for k, as := range res.Attestations {
-		for i, a := range as {
-			a2, err := result.ConvertAttestation(&a, func(r solver.ResultProxy) (*provenance.Capture, error) {
-				return getProvenance(r, reqs.atts[k][i].bridge, k, reqs)
-			})
-			if err != nil {
-				return nil, err
-			}
-			out.Provenance.Attestations[k] = append(out.Provenance.Attestations[k], *a2)
-		}
-	}
-
-	return out, nil
-}
-
-func getRefProvenance(ref solver.ResultProxy, br *provenanceBridge) (*provenance.Capture, error) {
-	if ref == nil {
-		return nil, nil
-	}
-	p := ref.Provenance()
-	if p == nil {
-		return nil, nil
-	}
-
-	pr, ok := p.(*provenance.Capture)
-	if !ok {
-		return nil, errors.Errorf("invalid provenance type %T", p)
-	}
-
-	if br.req != nil {
-		if pr == nil {
-			return nil, errors.Errorf("missing provenance for %s", ref.ID())
-		}
-
-		pr.Frontend = br.req.Frontend
-		pr.Args = provenance.FilterArgs(br.req.FrontendOpt)
-		// TODO: should also save some output options like compression
-
-		if len(br.req.FrontendInputs) > 0 {
-			pr.IncompleteMaterials = true // not implemented
-		}
-	}
-
-	return pr, nil
-}
-
-func getProvenance(ref solver.ResultProxy, br *provenanceBridge, id string, reqs *resultRequests) (*provenance.Capture, error) {
-	pr, err := getRefProvenance(ref, br)
-	if err != nil {
-		return nil, err
-	}
-	if pr == nil {
-		return nil, nil
-	}
-
-	visited := reqs.allRes()
-	visited[ref.ID()] = struct{}{}
-	// provenance for all the refs not directly in the result needs to be captured as well
-	if err := br.eachRef(func(r solver.ResultProxy) error {
-		if _, ok := visited[r.ID()]; ok {
-			return nil
-		}
-		visited[r.ID()] = struct{}{}
-		pr2, err := getRefProvenance(r, br)
-		if err != nil {
-			return err
-		}
-		return pr.Merge(pr2)
-	}); err != nil {
-		return nil, err
-	}
-
-	imgs := br.allImages()
-	if id != "" {
-		imgs = reqs.filterImagePlatforms(id, imgs)
-	}
-	for _, img := range imgs {
-		pr.AddImage(img)
-	}
-
-	if err := pr.OptimizeImageSources(); err != nil {
-		return nil, err
-	}
-	pr.Sort()
-
-	return pr, nil
-}
-
-type inlineCacheExporter interface {
-	ExportForLayers(context.Context, []digest.Digest) ([]byte, error)
-}
-
-func asInlineCache(e remotecache.Exporter) (inlineCacheExporter, bool) {
-	ie, ok := e.(inlineCacheExporter)
-	return ie, ok
-}
-
-func inlineCache(ctx context.Context, e remotecache.Exporter, res solver.CachedResult, compressionopt compression.Config, g session.Group) ([]byte, error) {
-	ie, ok := asInlineCache(e)
-	if !ok {
-		return nil, nil
-	}
-	workerRef, ok := res.Sys().(*worker.WorkerRef)
-	if !ok {
-		return nil, errors.Errorf("invalid reference: %T", res.Sys())
-	}
-
-	remotes, err := workerRef.GetRemotes(ctx, true, cacheconfig.RefConfig{Compression: compressionopt}, false, g)
-	if err != nil || len(remotes) == 0 {
-		return nil, nil
-	}
-	remote := remotes[0]
-
-	digests := make([]digest.Digest, 0, len(remote.Descriptors))
-	for _, desc := range remote.Descriptors {
-		digests = append(digests, desc.Digest)
-	}
-
-	ctx = withDescHandlerCacheOpts(ctx, workerRef.ImmutableRef)
-	refCfg := cacheconfig.RefConfig{Compression: compressionopt}
-	if _, err := res.CacheKeys()[0].Exporter.ExportTo(ctx, e, solver.CacheExportOpt{
-		ResolveRemotes: workerRefResolver(refCfg, true, g), // load as many compression blobs as possible
-		Mode:           solver.CacheExportModeMin,
-		Session:        g,
-		CompressionOpt: &compressionopt, // cache possible compression variants
-	}); err != nil {
-		return nil, err
-	}
-	return ie.ExportForLayers(ctx, digests)
-}
-
-func withDescHandlerCacheOpts(ctx context.Context, ref cache.ImmutableRef) context.Context {
-	return solver.WithCacheOptGetter(ctx, func(includeAncestors bool, keys ...interface{}) map[interface{}]interface{} {
-		vals := make(map[interface{}]interface{})
-		for _, k := range keys {
-			if key, ok := k.(cache.DescHandlerKey); ok {
-				if handler := ref.DescHandler(digest.Digest(key)); handler != nil {
-					vals[k] = handler
-				}
-			}
-		}
-		return vals
-	})
+	return w.LeaseManager(), nil
 }
 
 func (s *Solver) Status(ctx context.Context, id string, statsStream bool, statusChan chan *client.SolveStatus) error {
@@ -918,7 +437,7 @@ func allWorkers(wc *worker.Controller) func(func(w worker.Worker) error) error {
 	}
 }
 
-func inBuilderContext(ctx context.Context, b solver.Builder, name, id string, f func(ctx context.Context, g session.Group) error) error {
+func inBuilderContext(ctx context.Context, b solver.Builder, name, id string, f func(ctx context.Context, jobCtx solver.JobContext) error) error {
 	if id == "" {
 		id = name
 	}
@@ -926,11 +445,11 @@ func inBuilderContext(ctx context.Context, b solver.Builder, name, id string, f 
 		Digest: digest.FromBytes([]byte(id)),
 		Name:   name,
 	}
-	return b.InContext(ctx, func(ctx context.Context, g session.Group) error {
+	return b.InContext(ctx, func(ctx context.Context, jobCtx solver.JobContext) error {
 		pw, _, ctx := progress.NewFromContext(ctx, progress.WithMetadata("vertex", v.Digest))
 		notifyCompleted := notifyStarted(ctx, &v)
 		defer pw.Close()
-		err := f(ctx, g)
+		err := f(ctx, jobCtx)
 		notifyCompleted(err)
 		return err
 	})
@@ -953,55 +472,4 @@ func notifyStarted(ctx context.Context, v *client.Vertex) func(err error) {
 		}
 		pw.Write(id, *v)
 	}
-}
-
-func supportedEntitlements(ents []string) []entitlements.Entitlement {
-	out := []entitlements.Entitlement{} // nil means no filter
-	for _, e := range ents {
-		if e == string(entitlements.EntitlementNetworkHost) {
-			out = append(out, entitlements.EntitlementNetworkHost)
-		}
-		if e == string(entitlements.EntitlementSecurityInsecure) {
-			out = append(out, entitlements.EntitlementSecurityInsecure)
-		}
-	}
-	return out
-}
-
-func loadEntitlements(b solver.Builder) (entitlements.Set, error) {
-	var ent entitlements.Set = map[entitlements.Entitlement]struct{}{}
-	err := b.EachValue(context.TODO(), keyEntitlements, func(v interface{}) error {
-		set, ok := v.(entitlements.Set)
-		if !ok {
-			return errors.Errorf("invalid entitlements %T", v)
-		}
-		for k := range set {
-			ent[k] = struct{}{}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return ent, nil
-}
-
-func loadSourcePolicy(b solver.Builder) (*spb.Policy, error) {
-	var srcPol spb.Policy
-	err := b.EachValue(context.TODO(), keySourcePolicy, func(v interface{}) error {
-		x, ok := v.(spb.Policy)
-		if !ok {
-			return errors.Errorf("invalid source policy %T", v)
-		}
-		for _, f := range x.Rules {
-			r := *f
-			srcPol.Rules = append(srcPol.Rules, &r)
-		}
-		srcPol.Version = x.Version
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &srcPol, nil
 }

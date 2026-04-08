@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/namespaces"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/continuity/fs/fstest"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/util/testutil/integration"
 	"github.com/moby/buildkit/util/testutil/workers"
@@ -425,6 +425,33 @@ func diffOpTestCases() (tests []integration.Test) {
 					// https://github.com/containerd/containerd/pull/2095
 					fstest.CreateDir("/extradir", 0755),
 				),
+			),
+		})
+
+		// Check that deleting together a file from the base and another one from a merge
+		// does not result in a crash.
+		deleteFileAfterMergeCmds := []string{
+			"rm /unmodifiedDir/deleteFile1 /unmodifiedDir/deleteFile2",
+		}
+
+		extraContent := llb.Scratch().
+			File(llb.Mkdir("/unmodifiedDir", 0755)).
+			File(llb.Mkfile("/unmodifiedDir/deleteFile2", 0644, []byte("foo")))
+
+		tests = append(tests, verifyContents{
+			name: "TestDiffDeleteFilesAfterMerge",
+			state: llb.Diff(
+				base(),
+				runShell(llb.Merge([]llb.State{
+					base(),
+					extraContent,
+				}),
+					joinCmds(
+						deleteFileAfterMergeCmds,
+					)...)),
+			contents: mergeContents(
+				apply(
+					fstest.CreateDir("/unmodifiedDir", 0755)),
 			),
 		})
 
@@ -1294,7 +1321,7 @@ func (tc verifyContents) Run(t *testing.T, sb integration.Sandbox) {
 					if err == nil {
 						unexpectedLayers = append(unexpectedLayers, desc)
 					} else {
-						require.True(t, errdefs.IsNotFound(err))
+						require.True(t, cerrdefs.IsNotFound(err))
 					}
 				}
 				return images.Children(ctx, client.ContentStore(), desc)

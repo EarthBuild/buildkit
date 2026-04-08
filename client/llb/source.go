@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/distribution/reference"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/apicaps"
 	"github.com/moby/buildkit/util/gitutil"
@@ -20,7 +22,7 @@ import (
 )
 
 type SourceOp struct {
-	MarshalCache
+	cache       MarshalCache
 	id          string
 	attrs       map[string]string
 	output      Output
@@ -49,9 +51,13 @@ func (s *SourceOp) Validate(ctx context.Context, c *Constraints) error {
 }
 
 func (s *SourceOp) Marshal(ctx context.Context, constraints *Constraints) (digest.Digest, []byte, *pb.OpMetadata, []*SourceLocation, error) {
-	if s.Cached(constraints) {
-		return s.Load()
+	cache := s.cache.Acquire()
+	defer cache.Release()
+
+	if dgst, dt, md, srcs, err := cache.Load(constraints); err == nil {
+		return dgst, dt, md, srcs, nil
 	}
+
 	if err := s.Validate(ctx, constraints); err != nil {
 		return "", nil, nil, nil, err
 	}
@@ -76,13 +82,12 @@ func (s *SourceOp) Marshal(ctx context.Context, constraints *Constraints) (diges
 		proto.Platform = nil
 	}
 
-	dt, err := proto.Marshal()
+	dt, err := deterministicMarshal(proto)
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
 
-	s.Store(dt, md, s.constraints.SourceLocations, constraints)
-	return s.Load()
+	return cache.Store(dt, md, s.constraints.SourceLocations, constraints)
 }
 
 func (s *SourceOp) Output() Output {
@@ -91,6 +96,123 @@ func (s *SourceOp) Output() Output {
 
 func (s *SourceOp) Inputs() []Output {
 	return nil
+}
+
+type ImageBlobInfo struct {
+	constraintsWrapper
+	fileinfoWrapper
+	sessionID string
+	storeID   string
+}
+
+type ImageBlobOption interface {
+	SetImageBlobOption(*ImageBlobInfo)
+}
+
+type FileInfoOption interface {
+	HTTPOption
+	ImageBlobOption
+}
+
+func ImageBlob(ref string, opts ...ImageBlobOption) State {
+	bi := &ImageBlobInfo{}
+	for _, o := range opts {
+		o.SetImageBlobOption(bi)
+	}
+	attrs := map[string]string{}
+
+	if bi.Filename != "" {
+		attrs[pb.AttrHTTPFilename] = bi.Filename
+	}
+	if bi.Perm != 0 {
+		attrs[pb.AttrHTTPPerm] = "0" + strconv.FormatInt(int64(bi.Perm), 8)
+	}
+	if bi.UID != 0 {
+		attrs[pb.AttrHTTPUID] = strconv.Itoa(bi.UID)
+	}
+	if bi.GID != 0 {
+		attrs[pb.AttrHTTPGID] = strconv.Itoa(bi.GID)
+	}
+
+	addCap(&bi.Constraints, pb.CapSourceImageBlob)
+
+	var digested reference.Digested
+
+	r, err := reference.ParseNormalizedNamed(ref)
+	if err == nil {
+		if _, tagged := r.(reference.Tagged); tagged {
+			err = errors.Errorf("tagged image reference not allowed for blob reference")
+		} else if ref, ok := r.(reference.Digested); !ok {
+			err = errors.Errorf("checksum required in blob reference")
+		} else {
+			digested = ref
+		}
+	}
+
+	repoName := "invalid"
+	if digested != nil {
+		repoName = digested.String()
+	}
+
+	source := NewSource("docker-image+blob://"+repoName, attrs, bi.Constraints)
+	if err != nil {
+		source.err = err
+	}
+	return NewState(source.Output())
+}
+
+// OCILayoutBlob returns a state that represents a single digest-addressed blob from an OCI layout store.
+func OCILayoutBlob(ref string, opts ...ImageBlobOption) State {
+	bi := &ImageBlobInfo{}
+	for _, o := range opts {
+		o.SetImageBlobOption(bi)
+	}
+	attrs := map[string]string{}
+
+	if bi.Filename != "" {
+		attrs[pb.AttrHTTPFilename] = bi.Filename
+	}
+	if bi.Perm != 0 {
+		attrs[pb.AttrHTTPPerm] = "0" + strconv.FormatInt(int64(bi.Perm), 8)
+	}
+	if bi.UID != 0 {
+		attrs[pb.AttrHTTPUID] = strconv.Itoa(bi.UID)
+	}
+	if bi.GID != 0 {
+		attrs[pb.AttrHTTPGID] = strconv.Itoa(bi.GID)
+	}
+	if bi.sessionID != "" {
+		attrs[pb.AttrOCILayoutSessionID] = bi.sessionID
+	}
+	if bi.storeID != "" {
+		attrs[pb.AttrOCILayoutStoreID] = bi.storeID
+	}
+
+	addCap(&bi.Constraints, pb.CapSourceImageBlob)
+
+	var digested reference.Digested
+
+	r, err := reference.ParseNormalizedNamed(ref)
+	if err == nil {
+		if _, tagged := r.(reference.Tagged); tagged {
+			err = errors.Errorf("tagged image reference not allowed for blob reference")
+		} else if ref, ok := r.(reference.Digested); !ok {
+			err = errors.Errorf("checksum required in blob reference")
+		} else {
+			digested = ref
+		}
+	}
+
+	repoName := "invalid"
+	if digested != nil {
+		repoName = digested.String()
+	}
+
+	source := NewSource("oci-layout+blob://"+repoName, attrs, bi.Constraints)
+	if err != nil {
+		source.err = err
+	}
+	return NewState(source.Output())
 }
 
 // Image returns a state that represents a docker image in a registry.
@@ -127,20 +249,26 @@ func Image(ref string, opts ...ImageOption) State {
 		addCap(&info.Constraints, pb.CapSourceImageLayerLimit)
 	}
 
+	if info.checksum != "" {
+		attrs[pb.AttrImageChecksum] = info.checksum.String()
+		addCap(&info.Constraints, pb.CapSourceImageChecksum)
+	}
+
 	src := NewSource("docker-image://"+ref, attrs, info.Constraints) // controversial
 	if err != nil {
 		src.err = err
 	} else if info.metaResolver != nil {
 		if _, ok := r.(reference.Digested); ok || !info.resolveDigest {
 			return NewState(src.Output()).Async(func(ctx context.Context, st State, c *Constraints) (State, error) {
-				p := info.Constraints.Platform
+				p := info.Platform
 				if p == nil {
 					p = c.Platform
 				}
-				_, _, dt, err := info.metaResolver.ResolveImageConfig(ctx, ref, ResolveImageConfigOpt{
-					Platform:     p,
-					ResolveMode:  info.resolveMode.String(),
-					ResolverType: ResolverTypeRegistry,
+				_, _, dt, err := info.metaResolver.ResolveImageConfig(ctx, ref, sourceresolver.Opt{
+					ImageOpt: &sourceresolver.ResolveImageOpt{
+						Platform:    p,
+						ResolveMode: info.resolveMode.String(),
+					},
 				})
 				if err != nil {
 					return State{}, err
@@ -149,14 +277,15 @@ func Image(ref string, opts ...ImageOption) State {
 			})
 		}
 		return Scratch().Async(func(ctx context.Context, _ State, c *Constraints) (State, error) {
-			p := info.Constraints.Platform
+			p := info.Platform
 			if p == nil {
 				p = c.Platform
 			}
-			ref, dgst, dt, err := info.metaResolver.ResolveImageConfig(context.TODO(), ref, ResolveImageConfigOpt{
-				Platform:     p,
-				ResolveMode:  info.resolveMode.String(),
-				ResolverType: ResolverTypeRegistry,
+			ref, dgst, dt, err := info.metaResolver.ResolveImageConfig(context.TODO(), ref, sourceresolver.Opt{
+				ImageOpt: &sourceresolver.ResolveImageOpt{
+					Platform:    p,
+					ResolveMode: info.resolveMode.String(),
+				},
 			})
 			if err != nil {
 				return State{}, err
@@ -185,6 +314,12 @@ type imageOptionFunc func(*ImageInfo)
 
 func (fn imageOptionFunc) SetImageOption(ii *ImageInfo) {
 	fn(ii)
+}
+
+type imageBlobOptionFunc func(*ImageBlobInfo)
+
+func (fn imageBlobOptionFunc) SetImageBlobOption(ib *ImageBlobInfo) {
+	fn(ib)
 }
 
 var MarkImageInternal = imageOptionFunc(func(ii *ImageInfo) {
@@ -222,8 +357,14 @@ type ImageInfo struct {
 	resolveDigest bool
 	resolveMode   ResolveMode
 	layerLimit    *int
+	checksum      digest.Digest
 	RecordType    string
 }
+
+const (
+	GitAuthHeaderKey = "GIT_AUTH_HEADER"
+	GitAuthTokenKey  = "GIT_AUTH_TOKEN"
+)
 
 // Git returns a state that represents a git repository.
 // Example:
@@ -237,9 +378,13 @@ type ImageInfo struct {
 // Formats that utilize SSH may need to supply credentials as a [GitOption].
 // You may need to check the source code for a full list of supported formats.
 //
+// Fragment can be used to pass ref:subdir format that can set in (old-style)
+// Docker Git URL format after # . This is provided for backwards compatibility.
+// It is recommended to leave it empty and call GitRef(), GitSubdir() options instead.
+//
 // By default the git repository is cloned with `--depth=1` to reduce the amount of data downloaded.
 // Additionally the ".git" directory is removed after the clone, you can keep ith with the [KeepGitDir] [GitOption].
-func Git(url, ref string, opts ...GitOption) State {
+func Git(url, fragment string, opts ...GitOption) State {
 	remote, err := gitutil.ParseURL(url)
 	if errors.Is(err, gitutil.ErrUnknownProtocol) {
 		url = "https://" + url
@@ -249,6 +394,22 @@ func Git(url, ref string, opts ...GitOption) State {
 		url = remote.Remote
 	}
 
+	gi := &GitInfo{
+		AuthHeaderSecret: GitAuthHeaderKey,
+		AuthTokenSecret:  GitAuthTokenKey,
+	}
+	ref, subdir, ok := strings.Cut(fragment, ":")
+	subdir = path.Join("/", subdir)
+	subdir = strings.TrimPrefix(subdir, "/")
+	if ref != "" {
+		GitRef(ref).SetGitOption(gi)
+	}
+	if ok && subdir != "" {
+		GitSubDir(subdir).SetGitOption(gi)
+	}
+	for _, o := range opts {
+		o.SetGitOption(gi)
+	}
 	var id string
 	if err != nil {
 		// If we can't parse the URL, just use the full URL as the ID. The git
@@ -259,17 +420,12 @@ func Git(url, ref string, opts ...GitOption) State {
 		// for different protocols (e.g. https and ssh) that have the same
 		// host/path/fragment combination.
 		id = remote.Host + path.Join("/", remote.Path)
-		if ref != "" {
-			id += "#" + ref
+		if gi.Ref != "" || gi.SubDir != "" {
+			id += "#" + gi.Ref
+			if gi.SubDir != "" {
+				id += ":" + gi.SubDir
+			}
 		}
-	}
-
-	gi := &GitInfo{
-		AuthHeaderSecret: "GIT_AUTH_HEADER",
-		AuthTokenSecret:  "GIT_AUTH_TOKEN",
-	}
-	for _, o := range opts {
-		o.SetGitOption(gi)
 	}
 	attrs := map[string]string{}
 	if gi.KeepGitDir {
@@ -328,6 +484,22 @@ func Git(url, ref string, opts ...GitOption) State {
 		addCap(&gi.Constraints, pb.CapSourceGitMountSSHSock)
 	}
 
+	checksum := gi.Checksum
+	if checksum != "" {
+		attrs[pb.AttrGitChecksum] = checksum
+		addCap(&gi.Constraints, pb.CapSourceGitChecksum)
+	}
+
+	if gi.SkipSubmodules {
+		attrs[pb.AttrGitSkipSubmodules] = "true"
+		addCap(&gi.Constraints, pb.CapSourceGitSkipSubmodules)
+	}
+
+	if gi.MTime != "" {
+		attrs[pb.AttrGitMTime] = gi.MTime
+		addCap(&gi.Constraints, pb.CapSourceGitMTime)
+	}
+
 	addCap(&gi.Constraints, pb.CapSourceGit)
 
 	source := NewSource("git://"+id, attrs, gi.Constraints)
@@ -354,6 +526,43 @@ type GitInfo struct {
 	SSHCommand       string              // earthly-specific
 	LFSInclude       string              // earthly-specific
 	LogLevel         gitutil.GitLogLevel // earthly-specific
+	Checksum         string
+	Ref              string
+	SubDir           string
+	SkipSubmodules   bool
+	MTime            string
+}
+
+func GitRef(v string) GitOption {
+	return gitOptionFunc(func(gi *GitInfo) {
+		gi.Ref = v
+	})
+}
+
+func GitSubDir(v string) GitOption {
+	return gitOptionFunc(func(gi *GitInfo) {
+		gi.SubDir = v
+	})
+}
+
+func GitSkipSubmodules() GitOption {
+	return gitOptionFunc(func(gi *GitInfo) {
+		gi.SkipSubmodules = true
+	})
+}
+
+// GitMTimeCommit sets file modification times to the commit timestamp
+// of the resolved commit, rather than the checkout time.
+func GitMTimeCommit() GitOption {
+	return GitMTime("commit")
+}
+
+// GitMTime sets the file modification time policy for git sources.
+// Valid values are "checkout" (default) and "commit".
+func GitMTime(v string) GitOption {
+	return gitOptionFunc(func(gi *GitInfo) {
+		gi.MTime = v
+	})
 }
 
 func KeepGitDir() GitOption {
@@ -383,13 +592,6 @@ func AuthTokenSecret(v string) GitOption {
 	})
 }
 
-func AuthHeaderSecret(v string) GitOption {
-	return gitOptionFunc(func(gi *GitInfo) {
-		gi.AuthHeaderSecret = v
-		gi.addAuthCap = true
-	})
-}
-
 func KnownSSHHosts(key string) GitOption {
 	key = strings.TrimSuffix(key, "\n")
 	return gitOptionFunc(func(gi *GitInfo) {
@@ -407,6 +609,35 @@ func SSHCommand(sshCommand string) GitOption {
 	return gitOptionFunc(func(gi *GitInfo) {
 		gi.SSHCommand = sshCommand
 	})
+}
+
+func GitChecksum(v string) GitOption {
+	return gitOptionFunc(func(gi *GitInfo) {
+		gi.Checksum = v
+	})
+}
+
+// AuthOption can be used with either HTTP or Git sources.
+type AuthOption interface {
+	GitOption
+	HTTPOption
+}
+
+// AuthHeaderSecret returns an AuthOption that defines the name of a
+// secret to use for HTTP based authentication.
+func AuthHeaderSecret(secretName string) AuthOption {
+	return struct {
+		GitOption
+		HTTPOption
+	}{
+		GitOption: gitOptionFunc(func(gi *GitInfo) {
+			gi.AuthHeaderSecret = secretName
+			gi.addAuthCap = true
+		}),
+		HTTPOption: httpOptionFunc(func(hi *HTTPInfo) {
+			hi.AuthHeaderSecret = secretName
+		}),
+	}
 }
 
 // Scratch returns a state that represents an empty filesystem.
@@ -447,6 +678,13 @@ func Local(name string, opts ...LocalOption) State {
 		if gi.Differ.Required {
 			addCap(&gi.Constraints, pb.CapSourceLocalDiffer)
 		}
+	}
+	if gi.MetadataOnlyCollector {
+		attrs[pb.AttrMetadataTransfer] = "true"
+		if gi.MetadataOnlyExceptions != "" {
+			attrs[pb.AttrMetadataTransferExclude] = gi.MetadataOnlyExceptions
+		}
+		addCap(&gi.Constraints, pb.CapSourceMetadataTransfer)
 	}
 
 	addCap(&gi.Constraints, pb.CapSourceLocal)
@@ -519,6 +757,18 @@ func Differ(t DiffType, required bool) LocalOption {
 	})
 }
 
+func MetadataOnlyTransfer(exceptions []string) LocalOption {
+	return localOptionFunc(func(li *LocalInfo) {
+		li.MetadataOnlyCollector = true
+		if len(exceptions) == 0 {
+			li.MetadataOnlyExceptions = ""
+		} else {
+			dt, _ := json.Marshal(exceptions) // empty on error
+			li.MetadataOnlyExceptions = string(dt)
+		}
+	})
+}
+
 func OCILayout(ref string, opts ...OCILayoutOption) State {
 	gi := &OCILayoutInfo{}
 
@@ -559,9 +809,23 @@ func OCIStore(sessionID string, storeID string) OCILayoutOption {
 	})
 }
 
+// ImageBlobOCIStore returns an [ImageBlobOption] that configures the OCI layout session/store used by [OCILayoutBlob].
+func ImageBlobOCIStore(sessionID string, storeID string) ImageBlobOption {
+	return imageBlobOptionFunc(func(ib *ImageBlobInfo) {
+		ib.sessionID = sessionID
+		ib.storeID = storeID
+	})
+}
+
 func OCILayerLimit(limit int) OCILayoutOption {
 	return ociLayoutOptionFunc(func(oi *OCILayoutInfo) {
 		oi.layerLimit = &limit
+	})
+}
+
+func OCIChecksum(dgst digest.Digest) OCILayoutOption {
+	return ociLayoutOptionFunc(func(oi *OCILayoutInfo) {
+		oi.checksum = dgst
 	})
 }
 
@@ -570,6 +834,7 @@ type OCILayoutInfo struct {
 	sessionID  string
 	storeID    string
 	layerLimit *int
+	checksum   digest.Digest
 }
 
 type DiffType string
@@ -591,12 +856,14 @@ type DifferInfo struct {
 
 type LocalInfo struct {
 	constraintsWrapper
-	SessionID       string
-	IncludePatterns string
-	ExcludePatterns string
-	FollowPaths     string
-	SharedKeyHint   string
-	Differ          DifferInfo
+	SessionID              string
+	IncludePatterns        string
+	ExcludePatterns        string
+	FollowPaths            string
+	SharedKeyHint          string
+	Differ                 DifferInfo
+	MetadataOnlyCollector  bool
+	MetadataOnlyExceptions string
 }
 
 func HTTP(url string, opts ...HTTPOption) State {
@@ -624,19 +891,66 @@ func HTTP(url string, opts ...HTTPOption) State {
 		attrs[pb.AttrHTTPGID] = strconv.Itoa(hi.GID)
 		addCap(&hi.Constraints, pb.CapSourceHTTPUIDGID)
 	}
+	if hi.AuthHeaderSecret != "" {
+		attrs[pb.AttrHTTPAuthHeaderSecret] = hi.AuthHeaderSecret
+		addCap(&hi.Constraints, pb.CapSourceHTTPAuth)
+	}
+	if hi.Header != nil {
+		hi.Header.setAttrs(attrs)
+		addCap(&hi.Constraints, pb.CapSourceHTTPHeader)
+	}
+	if hi.Signature != nil {
+		if len(hi.Signature.PubKey) > 0 {
+			attrs[pb.AttrHTTPSignatureVerifyPubKey] = string(hi.Signature.PubKey)
+		}
+		if len(hi.Signature.Signature) > 0 {
+			attrs[pb.AttrHTTPSignatureVerify] = string(hi.Signature.Signature)
+		}
+		addCap(&hi.Constraints, pb.CapSourceHTTPSignatureVerify)
+	}
 
 	addCap(&hi.Constraints, pb.CapSourceHTTP)
 	source := NewSource(url, attrs, hi.Constraints)
 	return NewState(source.Output())
 }
 
-type HTTPInfo struct {
-	constraintsWrapper
-	Checksum digest.Digest
+type fileInfo struct {
 	Filename string
 	Perm     int
 	UID      int
 	GID      int
+}
+
+type fileinfoWrapper struct {
+	fileInfo
+}
+
+type fileInfoOptFunc func(f *fileInfo)
+
+func (fn fileInfoOptFunc) SetHTTPOption(hi *HTTPInfo) {
+	fn(&hi.fileInfo)
+}
+
+func (fn fileInfoOptFunc) SetImageBlobOption(ib *ImageBlobInfo) {
+	fn(&ib.fileInfo)
+}
+
+// HTTPSignatureInfo configures detached-signature verification for HTTP
+// sources. The current implementation uses inline armored signatures.
+type HTTPSignatureInfo struct {
+	PubKey []byte
+
+	// Signature is an inline detached armored OpenPGP signature.
+	Signature []byte
+}
+
+type HTTPInfo struct {
+	constraintsWrapper
+	fileinfoWrapper
+	Checksum         digest.Digest
+	AuthHeaderSecret string
+	Header           *HTTPHeader
+	Signature        *HTTPSignatureInfo
 }
 
 type HTTPOption interface {
@@ -655,23 +969,61 @@ func Checksum(dgst digest.Digest) HTTPOption {
 	})
 }
 
-func Chmod(perm os.FileMode) HTTPOption {
-	return httpOptionFunc(func(hi *HTTPInfo) {
-		hi.Perm = int(perm) & 0777
+func Chmod(perm os.FileMode) FileInfoOption {
+	return fileInfoOptFunc(func(fi *fileInfo) {
+		fi.Perm = int(perm) & 0777
 	})
 }
 
-func Filename(name string) HTTPOption {
-	return httpOptionFunc(func(hi *HTTPInfo) {
-		hi.Filename = name
+func Filename(name string) FileInfoOption {
+	return fileInfoOptFunc(func(fi *fileInfo) {
+		fi.Filename = name
 	})
 }
 
-func Chown(uid, gid int) HTTPOption {
-	return httpOptionFunc(func(hi *HTTPInfo) {
-		hi.UID = uid
-		hi.GID = gid
+func Chown(uid, gid int) FileInfoOption {
+	return fileInfoOptFunc(func(fi *fileInfo) {
+		fi.UID = uid
+		fi.GID = gid
 	})
+}
+
+// VerifyPGPSignature returns an [HTTPOption] for detached OpenPGP signature
+// verification of the downloaded HTTP payload.
+func VerifyPGPSignature(info HTTPSignatureInfo) HTTPOption {
+	return httpOptionFunc(func(hi *HTTPInfo) {
+		hi.Signature = &HTTPSignatureInfo{
+			PubKey:    slices.Clone(info.PubKey),
+			Signature: slices.Clone(info.Signature),
+		}
+	})
+}
+
+// Header returns an [HTTPOption] that ensures additional request headers will
+// be sent when retrieving the HTTP source.
+func Header(header HTTPHeader) HTTPOption {
+	return httpOptionFunc(func(hi *HTTPInfo) {
+		hi.Header = &header
+	})
+}
+
+type HTTPHeader struct {
+	Accept    string
+	UserAgent string
+}
+
+func (hh *HTTPHeader) setAttrs(attrs map[string]string) {
+	if hh.Accept != "" {
+		attrs[hh.attr("accept")] = hh.Accept
+	}
+
+	if hh.UserAgent != "" {
+		attrs[hh.attr("user-agent")] = hh.UserAgent
+	}
+}
+
+func (hh *HTTPHeader) attr(name string) string {
+	return pb.AttrHTTPHeaderPrefix + name
 }
 
 func platformSpecificSource(id string) bool {

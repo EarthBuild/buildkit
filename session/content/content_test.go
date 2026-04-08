@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/content/local"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/plugins/content/local"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/testutil"
 	digest "github.com/opencontainers/go-digest"
@@ -41,7 +41,7 @@ func TestContentAttachable(t *testing.T) {
 		}
 	}
 
-	s, err := session.NewSession(ctx, "foo", "bar")
+	s, err := session.NewSession(ctx, "bar")
 	require.NoError(t, err)
 
 	m, err := session.NewManager(&session.ManagerOpt{

@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/remotes"
-	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/containerd/v2/core/remotes"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/imageutil"
+	"github.com/moby/buildkit/util/tracing"
 	"github.com/moby/buildkit/version"
 	"github.com/moby/locker"
 	digest "github.com/opencontainers/go-digest"
@@ -70,38 +72,42 @@ type imageMetaResolver struct {
 }
 
 type resolveResult struct {
-	ref    string
 	config []byte
 	dgst   digest.Digest
 }
 
-func (imr *imageMetaResolver) ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt) (string, digest.Digest, []byte, error) {
+func (imr *imageMetaResolver) ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (resolvedRef string, digest digest.Digest, config []byte, retErr error) {
+	span, ctx := tracing.StartSpan(ctx, "resolving "+ref)
+	defer func() {
+		tracing.FinishWithError(span, retErr)
+	}()
+
 	imr.locker.Lock(ref)
 	defer imr.locker.Unlock(ref)
 
-	platform := opt.Platform
-	if platform == nil {
-		platform = imr.platform
+	platform := imr.platform
+	if imgOpt := opt.ImageOpt; imgOpt != nil && imgOpt.Platform != nil {
+		platform = imgOpt.Platform
 	}
 
 	k := imr.key(ref, platform)
 
 	if res, ok := imr.cache[k]; ok {
-		return res.ref, res.dgst, res.config, nil
+		return ref, res.dgst, res.config, nil
 	}
 
-	ref, dgst, config, err := imageutil.Config(ctx, ref, imr.resolver, imr.buffer, nil, platform, opt.SourcePolicies)
+	dgst, config, err := imageutil.Config(ctx, ref, imr.resolver, imr.buffer, nil, platform)
 	if err != nil {
 		return "", "", nil, err
 	}
 
-	imr.cache[k] = resolveResult{dgst: dgst, config: config, ref: ref}
+	imr.cache[k] = resolveResult{dgst: dgst, config: config}
 	return ref, dgst, config, nil
 }
 
 func (imr *imageMetaResolver) key(ref string, platform *ocispecs.Platform) string {
 	if platform != nil {
-		ref += platforms.Format(*platform)
+		ref += platforms.FormatAll(*platform)
 	}
 	return ref
 }

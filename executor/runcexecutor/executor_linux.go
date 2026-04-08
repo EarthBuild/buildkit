@@ -1,15 +1,20 @@
 package runcexecutor
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/containerd/console"
 	runc "github.com/containerd/go-runc"
 	"github.com/moby/buildkit/executor"
+	gatewayapi "github.com/moby/buildkit/frontend/gateway/pb"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/sys/signal"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -24,7 +29,7 @@ func updateRuncFieldsForHostOS(runtime *runc.Runc) {
 
 func (w *runcExecutor) run(ctx context.Context, id, bundle string, process executor.ProcessInfo, started func(), keep bool) error {
 	killer := newRunProcKiller(w.runc, id)
-	return w.callWithIO(ctx, id, bundle, process, started, killer, func(ctx context.Context, started chan<- int, io runc.IO, pidfile string) error {
+	return w.callWithIO(ctx, process, started, killer, func(ctx context.Context, started chan<- int, io runc.IO, pidfile string) error {
 		// earthly-specific; without this runc processes sometimes exit with -1; the +test target in the root earthly repo reproduces it
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
@@ -43,14 +48,14 @@ func (w *runcExecutor) run(ctx context.Context, id, bundle string, process execu
 	})
 }
 
-func (w *runcExecutor) exec(ctx context.Context, id, bundle string, specsProcess *specs.Process, process executor.ProcessInfo, started func()) error {
+func (w *runcExecutor) exec(ctx context.Context, id string, specsProcess *specs.Process, process executor.ProcessInfo, started func()) error {
 	killer, err := newExecProcKiller(w.runc, id)
 	if err != nil {
 		return errors.Wrap(err, "failed to initialize process killer")
 	}
 	defer killer.Cleanup()
 
-	return w.callWithIO(ctx, id, bundle, process, started, killer, func(ctx context.Context, started chan<- int, io runc.IO, pidfile string) error {
+	return w.callWithIO(ctx, process, started, killer, func(ctx context.Context, started chan<- int, io runc.IO, pidfile string) error {
 		return w.runc.Exec(ctx, id, *specsProcess, &runc.ExecOpts{
 			Started: started,
 			IO:      io,
@@ -61,7 +66,7 @@ func (w *runcExecutor) exec(ctx context.Context, id, bundle string, specsProcess
 
 type runcCall func(ctx context.Context, started chan<- int, io runc.IO, pidfile string) error
 
-func (w *runcExecutor) callWithIO(ctx context.Context, id, bundle string, process executor.ProcessInfo, started func(), killer procKiller, call runcCall) error {
+func (w *runcExecutor) callWithIO(ctx context.Context, process executor.ProcessInfo, started func(), killer procKiller, call runcCall) error {
 	runcProcess, ctx := runcProcessHandle(ctx, killer)
 	defer runcProcess.Release()
 
@@ -129,7 +134,7 @@ func (w *runcExecutor) callWithIO(ctx context.Context, id, bundle string, proces
 			if errors.As(err, &ptmClosedError) {
 				if ptmClosedError.Op == "read" &&
 					ptmClosedError.Path == "/dev/ptmx" &&
-					ptmClosedError.Err == syscall.EIO {
+					errors.Is(ptmClosedError.Err, syscall.EIO) {
 					return nil
 				}
 			}
@@ -176,4 +181,45 @@ func (w *runcExecutor) callWithIO(ctx context.Context, id, bundle string, proces
 	}
 
 	return call(ctx, startedCh, runcIO, killer.pidfile)
+}
+
+func detectOOM(ctx context.Context, ns string, gwErr *gatewayapi.ExitError) {
+	const defaultCgroupMountpoint = "/sys/fs/cgroup"
+
+	if ns == "" {
+		return
+	}
+
+	count, err := readMemoryEvent(filepath.Join(defaultCgroupMountpoint, ns), "oom_kill")
+	if err != nil {
+		bklog.G(ctx).WithError(err).Warn("failed to read oom_kill event")
+		return
+	}
+	if count > 0 {
+		gwErr.Err = syscall.ENOMEM
+	}
+}
+
+func readMemoryEvent(fp string, event string) (uint64, error) {
+	f, err := os.Open(filepath.Join(fp, "memory.events"))
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		parts := strings.Fields(s.Text())
+		if len(parts) != 2 {
+			continue
+		}
+		if parts[0] != event {
+			continue
+		}
+		v, err := strconv.ParseUint(parts[1], 10, 64)
+		if err == nil {
+			return v, nil
+		}
+	}
+	return 0, s.Err()
 }

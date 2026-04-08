@@ -19,7 +19,7 @@ import (
 type buildOpt struct {
 	target                 string
 	partialImageConfigFile string
-	partialMetadataFile    string
+	baseImageConfigFile    string
 }
 
 func main() {
@@ -32,7 +32,7 @@ func xmain() error {
 	var opt buildOpt
 	flag.StringVar(&opt.target, "target", "", "target stage")
 	flag.StringVar(&opt.partialImageConfigFile, "partial-image-config-file", "", "Output partial image config as a JSON file")
-	flag.StringVar(&opt.partialMetadataFile, "partial-metadata-file", "", "Output partial metadata sa a JSON file")
+	flag.StringVar(&opt.baseImageConfigFile, "base-image-config-file", "", "Output base image config as a JSON file")
 	flag.Parse()
 
 	df, err := io.ReadAll(os.Stdin)
@@ -42,7 +42,7 @@ func xmain() error {
 
 	caps := pb.Caps.CapSet(pb.Caps.All())
 
-	state, img, _, err := dockerfile2llb.Dockerfile2LLB(appcontext.Context(), df, dockerfile2llb.ConvertOpt{
+	res, err := dockerfile2llb.Dockerfile2LLB(appcontext.Context(), df, dockerfile2llb.ConvertOpt{
 		MetaResolver: imagemetaresolver.Default(),
 		LLBCaps:      &caps,
 		Config: dockerui.Config{
@@ -53,7 +53,7 @@ func xmain() error {
 		return err
 	}
 
-	dt, err := state.Marshal(context.TODO())
+	dt, err := res.State.Marshal(context.TODO())
 	if err != nil {
 		return err
 	}
@@ -61,14 +61,20 @@ func xmain() error {
 		return err
 	}
 	if opt.partialImageConfigFile != "" {
-		if err := writeJSON(opt.partialImageConfigFile, img); err != nil {
+		if err := writeJSON(opt.partialImageConfigFile, res.Image); err != nil {
 			return err
 		}
 	}
+	if opt.baseImageConfigFile != "" {
+		if err := writeJSON(opt.baseImageConfigFile, res.BaseImage); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func writeJSON(f string, x interface{}) error {
+func writeJSON(f string, x any) error {
 	b, err := json.Marshal(x)
 	if err != nil {
 		return err

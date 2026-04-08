@@ -2,10 +2,12 @@ package snapshot
 
 import (
 	"os"
+	"strings"
+	"time"
 
 	"github.com/Microsoft/go-winio/pkg/bindfilter"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/mount"
+	"github.com/containerd/containerd/v2/core/mount"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 )
@@ -13,6 +15,10 @@ import (
 func (lm *localMounter) Mount() (string, error) {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
+
+	if lm.target != "" {
+		return lm.target, nil
+	}
 
 	if lm.mounts == nil && lm.mountable != nil {
 		mounts, release, err := lm.mountable.Mount()
@@ -26,7 +32,7 @@ func (lm *localMounter) Mount() (string, error) {
 	// Windows can only mount a single mount at a given location.
 	// Parent layers are carried in Options, opaquely to localMounter.
 	if len(lm.mounts) != 1 {
-		return "", errors.Wrapf(errdefs.ErrNotImplemented, "request to mount %d layers, only 1 is supported", len(lm.mounts))
+		return "", errors.Wrapf(cerrdefs.ErrNotImplemented, "request to mount %d layers, only 1 is supported", len(lm.mounts))
 	}
 
 	m := lm.mounts[0]
@@ -46,16 +52,41 @@ func (lm *localMounter) Mount() (string, error) {
 		// The Windows snapshotter does not have any notion of bind mounts. We emulate
 		// bind mounts here using the bind filter.
 		if err := bindfilter.ApplyFileBinding(dir, m.Source, m.ReadOnly()); err != nil {
-			return "", errors.Wrapf(err, "failed to mount %v: %+v", m, err)
+			return "", errors.Wrapf(err, "failed to mount %v", m)
 		}
 	} else {
-		if err := m.Mount(dir); err != nil {
-			return "", errors.Wrapf(err, "failed to mount %v: %+v", m, err)
+		// see https://github.com/moby/buildkit/issues/5807
+		// if it's a race condition issue, do max 2 retries with some backoff
+		// should adjust the retries if this persists but 1 retry
+		// seems to be enough.
+		if err := mountWithRetries(m, dir, 2); err != nil {
+			return "", errors.Wrapf(err, "failed to mount %v", m)
 		}
 	}
 
 	lm.target = dir
 	return lm.target, nil
+}
+
+func mountWithRetries(m mount.Mount, dir string, retries int) error {
+	errStr := "cannot access the file because it is being used by another process"
+	backoff := 30 * time.Millisecond
+	var err error
+
+	for i := range retries + 1 {
+		// i = 0 is first call and not a retry
+		err = m.Mount(dir)
+		if err == nil || i == retries {
+			return err
+		}
+		if strings.Contains(err.Error(), errStr) {
+			time.Sleep(time.Duration(i+1) * backoff)
+		} else {
+			return err
+		}
+	}
+
+	return err
 }
 
 func (lm *localMounter) Unmount() error {
@@ -66,7 +97,7 @@ func (lm *localMounter) Unmount() error {
 	// Calling Mount() would fail on an instance of the localMounter where mounts contains
 	// anything other than 1 mount.
 	if len(lm.mounts) != 1 {
-		return errors.Wrapf(errdefs.ErrNotImplemented, "request to mount %d layers, only 1 is supported", len(lm.mounts))
+		return errors.Wrapf(cerrdefs.ErrNotImplemented, "request to mount %d layers, only 1 is supported", len(lm.mounts))
 	}
 	m := lm.mounts[0]
 

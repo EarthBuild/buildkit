@@ -1,31 +1,34 @@
+//go:build linux
+
 package runc
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
-	"github.com/containerd/containerd/content/local"
-	"github.com/containerd/containerd/diff/apply"
-	"github.com/containerd/containerd/diff/walking"
-	ctdmetadata "github.com/containerd/containerd/metadata"
-	"github.com/containerd/containerd/platforms"
-	ctdsnapshot "github.com/containerd/containerd/snapshots"
-	"github.com/docker/docker/pkg/idtools"
-	"github.com/moby/buildkit/cache"
+	"github.com/containerd/containerd/v2/core/diff/apply"
+	ctdmetadata "github.com/containerd/containerd/v2/core/metadata"
+	ctdsnapshot "github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/plugins/content/local"
+	"github.com/containerd/containerd/v2/plugins/diff/walking"
+	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/executor/resources"
 	"github.com/moby/buildkit/executor/runcexecutor"
 	containerdsnapshot "github.com/moby/buildkit/snapshot/containerd"
+	"github.com/moby/buildkit/solver/llbsolver/cdidevices"
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/network/netproviders"
 	"github.com/moby/buildkit/util/semutil"
 	"github.com/moby/buildkit/util/winlayers"
 	"github.com/moby/buildkit/worker/base"
 	wlabel "github.com/moby/buildkit/worker/label"
+	"github.com/moby/sys/user"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	bolt "go.etcd.io/bbolt"
 )
@@ -37,7 +40,7 @@ type SnapshotterFactory struct {
 }
 
 // NewWorkerOpt creates a WorkerOpt.
-func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, processMode oci.ProcessMode, labels map[string]string, idmap *idtools.IdentityMapping, nopt netproviders.Opt, dns *oci.DNSConfig, binary, apparmorProfile string, selinux bool, parallelismSem *semutil.Weighted, traceSocket, defaultCgroupParent string, hooks []oci.OciHook, sampleFrequency time.Duration) (base.WorkerOpt, error) {
+func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, processMode oci.ProcessMode, labels map[string]string, idmap *user.IdentityMapping, nopt netproviders.Opt, dns *oci.DNSConfig, binary, apparmorProfile string, selinux bool, parallelismSem *semutil.Weighted, traceSocket, defaultCgroupParent string, hooks []oci.OciHook, sampleFrequency time.Duration, cdiManager *cdidevices.Manager) (base.WorkerOpt, error) {
 	var opt base.WorkerOpt
 	name := "runc-" + snFactory.Name
 	root = filepath.Join(root, name)
@@ -79,6 +82,7 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 		Hooks:               hooks, //earthly-specific
 		ResourceMonitor:     rm,
 		SampleFrequency:     sampleFrequency, // earthly-specific
+		CDIManager:          cdiManager,
 	}, np)
 	if err != nil {
 		return opt, err
@@ -127,21 +131,7 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 		xlabels[wlabel.ApparmorProfile] = apparmorProfile
 	}
 
-	for k, v := range labels {
-		xlabels[k] = v
-	}
-	lm := leaseutil.WithNamespace(ctdmetadata.NewLeaseManager(mdb), "buildkit")
-	snap := containerdsnapshot.NewSnapshotter(snFactory.Name, mdb.Snapshotter(snFactory.Name), "buildkit", idmap)
-	if err := cache.MigrateV2(
-		context.TODO(),
-		filepath.Join(root, "metadata.db"),
-		filepath.Join(root, "metadata_v2.db"),
-		c,
-		snap,
-		lm,
-	); err != nil {
-		return opt, err
-	}
+	maps.Copy(xlabels, labels)
 
 	md, err := metadata.NewStore(filepath.Join(root, "metadata_v2.db"))
 	if err != nil {
@@ -150,22 +140,24 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 
 	opt = base.WorkerOpt{
 		ID:               id,
+		Root:             root,
 		Labels:           xlabels,
 		MetadataStore:    md,
 		NetworkProviders: np,
 		Executor:         exe,
-		Snapshotter:      snap,
+		Snapshotter:      containerdsnapshot.NewSnapshotter(snFactory.Name, mdb.Snapshotter(snFactory.Name), "buildkit", idmap),
 		ContentStore:     c,
 		Applier:          winlayers.NewFileSystemApplierWithWindows(c, apply.NewFileSystemApplier(c)),
 		Differ:           winlayers.NewWalkingDiffWithWindows(c, walking.NewWalkingDiff(c)),
 		ImageStore:       nil, // explicitly
 		Platforms:        []ocispecs.Platform{platforms.Normalize(platforms.DefaultSpec())},
 		IdentityMapping:  idmap,
-		LeaseManager:     lm,
+		LeaseManager:     leaseutil.WithNamespace(ctdmetadata.NewLeaseManager(mdb), "buildkit"),
 		GarbageCollect:   mdb.GarbageCollect,
 		ParallelismSem:   parallelismSem,
 		MountPoolRoot:    filepath.Join(root, "cachemounts"),
 		ResourceMonitor:  rm,
+		CDIManager:       cdiManager,
 	}
 	return opt, nil
 }

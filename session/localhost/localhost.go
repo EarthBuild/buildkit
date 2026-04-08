@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/docker/docker/pkg/idtools"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/sys/user"
 	"github.com/pkg/errors"
 	"github.com/tonistiigi/fsutil"
 	"github.com/tonistiigi/fsutil/types"
@@ -29,7 +29,7 @@ const SendFileMagicStr = "98325231-d2e6-931c-b12a-84273bca21db"
 // Mountable is from buildkit/snapshot; however the snapshot package wont build on darwin
 // so we must pull this in here to avoid pulling in linux-specific packages.
 type Mountable interface {
-	IdentityMapping() *idtools.IdentityMapping
+	IdentityMapping() *user.IdentityMapping
 }
 
 // LocalhostExec is called by buildkitd; it connects to the user's client to request the client execute a command localy.
@@ -185,15 +185,12 @@ func receiveDir(stream Localhost_GetClient, dest string, mount Mountable) error 
 	return errors.WithStack(fsutil.Receive(ctx, stream, dest, fsutil.ReceiveOpt{
 		Filter: func(p string, stat *types.Stat) bool {
 			if idmap := mount.IdentityMapping(); idmap != nil {
-				identity, err := idmap.ToHost(idtools.Identity{
-					UID: int(stat.Uid),
-					GID: int(stat.Gid),
-				})
+				uid, gid, err := idmap.ToHost(int(stat.Uid), int(stat.Gid))
 				if err != nil {
 					return false
 				}
-				stat.Uid = uint32(identity.UID)
-				stat.Gid = uint32(identity.GID)
+				stat.Uid = uint32(uid)
+				stat.Gid = uint32(gid)
 			}
 			// whatever permissions the user has, give them to group and others as well
 			// this matches behavior of gitsource, given that umask is 0

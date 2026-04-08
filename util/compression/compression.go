@@ -5,9 +5,9 @@ import (
 	"context"
 	"io"
 
-	cdcompression "github.com/containerd/containerd/archive/compression"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	cdcompression "github.com/containerd/containerd/v2/pkg/archive/compression"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/iohelper"
@@ -28,7 +28,6 @@ type Type interface {
 	NeedsConversion(ctx context.Context, cs content.Store, desc ocispecs.Descriptor) (bool, error)
 	NeedsComputeDiffBySelf(comp Config) bool
 	OnlySupportOCITypes() bool
-	NeedsForceCompression() bool
 	MediaType() string
 	String() string
 }
@@ -252,5 +251,5 @@ func decompress(ctx context.Context, cs content.Store, desc ocispecs.Descriptor)
 			return nil, err
 		}
 	}
-	return &iohelper.ReadCloser{ReadCloser: r, CloseFunc: ra.Close}, nil
+	return iohelper.WithCloser(r, ra.Close), nil
 }

@@ -1,11 +1,9 @@
-//go:build linux
-// +build linux
+//go:build !windows
 
 package containerd
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/moby/buildkit/util/network/netproviders"
@@ -15,6 +13,11 @@ import (
 	"github.com/moby/buildkit/worker/tests"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	defer tests.RunMirror()()
+	m.Run()
+}
 
 func init() {
 	workers.InitContainerdWorker()
@@ -32,15 +35,25 @@ func TestContainerdWorkerIntegration(t *testing.T) {
 func newWorkerOpt(t *testing.T, addr string) base.WorkerOpt {
 	tmpdir := t.TempDir()
 	rootless := false
-	workerOpt, err := NewWorkerOpt(tmpdir, addr, "overlayfs", "buildkit-test", rootless, nil, nil, netproviders.Opt{Mode: "host"}, "", false, nil, "", nil)
+	options := WorkerOptions{
+		Root:            tmpdir,
+		Address:         addr,
+		SnapshotterName: "overlayfs",
+		Namespace:       "buildkit-test",
+		CgroupParent:    "",
+		Rootless:        rootless,
+		Labels:          nil,
+		DNS:             nil,
+		NetworkOpt:      netproviders.Opt{Mode: "host"},
+		ApparmorProfile: "",
+		Selinux:         false,
+		ParallelismSem:  nil,
+		TraceSocket:     "",
+		Runtime:         nil,
+	}
+	workerOpt, err := NewWorkerOpt(options)
 	require.NoError(t, err)
 	return workerOpt
-}
-
-func checkRequirement(t *testing.T) {
-	if os.Getuid() != 0 {
-		t.Skip("requires root")
-	}
 }
 
 func testContainerdWorkerExec(t *testing.T, sb integration.Sandbox) {

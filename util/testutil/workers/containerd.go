@@ -25,8 +25,8 @@ func InitContainerdWorker() {
 	// defined in Dockerfile
 	// e.g. `containerd-1.1=/opt/containerd-1.1/bin,containerd-42.0=/opt/containerd-42.0/bin`
 	if s := os.Getenv("BUILDKIT_INTEGRATION_CONTAINERD_EXTRA"); s != "" {
-		entries := strings.Split(s, ",")
-		for _, entry := range entries {
+		entries := strings.SplitSeq(s, ",")
+		for entry := range entries {
 			pair := strings.Split(strings.TrimSpace(entry), "=")
 			if len(pair) != 2 {
 				panic(errors.Errorf("unexpected BUILDKIT_INTEGRATION_CONTAINERD_EXTRA: %q", s))
@@ -55,6 +55,8 @@ func InitContainerdWorker() {
 				GID:         gid,
 				Snapshotter: "native", // TODO: test with fuse-overlayfs as well, or automatically determine snapshotter
 			})
+
+			// TODO: add RootlessKitDetachNetNS after updating containerd-rootless.sh to include https://github.com/containerd/nerdctl/pull/2723
 		}
 	}
 
@@ -84,13 +86,19 @@ func (c *Containerd) Rootless() bool {
 	return c.UID != 0
 }
 
+func (c *Containerd) NetNSDetached() bool {
+	return false
+}
+
 func (c *Containerd) New(ctx context.Context, cfg *integration.BackendConfig) (b integration.Backend, cl func() error, err error) {
 	if err := integration.LookupBinary(c.Containerd); err != nil {
 		return nil, nil, err
 	}
+
 	if err := integration.LookupBinary("buildkitd"); err != nil {
 		return nil, nil, err
 	}
+
 	if err := requireRoot(); err != nil {
 		return nil, nil, err
 	}
@@ -117,6 +125,7 @@ func (c *Containerd) New(ctx context.Context, cfg *integration.BackendConfig) (b
 	if err != nil {
 		return nil, nil, err
 	}
+
 	if rootless {
 		if err := os.Chown(tmpdir, c.UID, c.GID); err != nil {
 			return nil, nil, err
@@ -125,20 +134,24 @@ func (c *Containerd) New(ctx context.Context, cfg *integration.BackendConfig) (b
 
 	deferF.Append(func() error { return os.RemoveAll(tmpdir) })
 
-	address := filepath.Join(tmpdir, "containerd.sock")
-	config := fmt.Sprintf(`root = %q
+	address := getContainerdSock(tmpdir)
+	config := fmt.Sprintf(`version = 2
+root = %q
 state = %q
 # CRI plugins listens on 10010/tcp for stream server.
 # We disable CRI plugin so that multiple instance can run simultaneously.
-disabled_plugins = ["cri"]
+disabled_plugins = ["io.containerd.grpc.v1.cri"]
 
 [grpc]
   address = %q
 
 [debug]
   level = "debug"
-  address = %q
-`, filepath.Join(tmpdir, "root"), filepath.Join(tmpdir, "state"), address, filepath.Join(tmpdir, "debug.sock"))
+  address = %q`,
+		filepath.Join(tmpdir, "root"),
+		filepath.Join(tmpdir, "state"),
+		address, getContainerdDebugSock(tmpdir),
+	)
 
 	var snBuildkitdArgs []string
 	if c.Snapshotter != "" {
@@ -178,26 +191,30 @@ disabled_plugins = ["cri"]
 		}, c.ExtraEnv...), "containerd-rootless.sh", "-c", configFile)
 	}
 
-	cmd := exec.Command(containerdArgs[0], containerdArgs[1:]...) //nolint:gosec // test utility
+	cmd := exec.CommandContext(context.TODO(), containerdArgs[0], containerdArgs[1:]...) //nolint:gosec // test utility
 	cmd.Env = append(os.Environ(), c.ExtraEnv...)
 
 	ctdStop, err := integration.StartCmd(cmd, cfg.Logs)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := integration.WaitUnix(address, 10*time.Second, cmd); err != nil {
+	if err := integration.WaitSocket(address, 10*time.Second, cmd); err != nil {
 		ctdStop()
 		return nil, nil, errors.Wrapf(err, "containerd did not start up: %s", integration.FormatLogs(cfg.Logs))
 	}
 	deferF.Append(ctdStop)
 
-	buildkitdArgs := append([]string{"buildkitd",
-		"--oci-worker=false",
+	// handles only windows case, no effect on unix
+	address = normalizeAddress(address)
+	buildkitdArgs := []string{
+		"buildkitd",
 		"--containerd-worker-gc=false",
 		"--containerd-worker=true",
 		"--containerd-worker-addr", address,
 		"--containerd-worker-labels=org.mobyproject.buildkit.worker.sandbox=true", // Include use of --containerd-worker-labels to trigger https://github.com/moby/buildkit/pull/603
-	}, snBuildkitdArgs...)
+	}
+	buildkitdArgs = applyBuildkitdPlatformFlags(buildkitdArgs)
+	buildkitdArgs = append(buildkitdArgs, snBuildkitdArgs...)
 
 	if runtime.GOOS != "windows" && c.Snapshotter != "native" {
 		c.ExtraEnv = append(c.ExtraEnv, "BUILDKIT_DEBUG_FORCE_OVERLAY_DIFF=true")
@@ -215,7 +232,7 @@ disabled_plugins = ["cri"]
 			"nsenter", "-U", "--preserve-credentials", "-m", "-t", fmt.Sprintf("%d", pid)},
 			append(buildkitdArgs, "--containerd-worker-snapshotter=native")...)
 	}
-	buildkitdSock, stop, err := runBuildkitd(ctx, cfg, buildkitdArgs, cfg.Logs, c.UID, c.GID, c.ExtraEnv)
+	buildkitdSock, debugSock, stop, err := runBuildkitd(cfg, buildkitdArgs, cfg.Logs, c.UID, c.GID, c.ExtraEnv)
 	if err != nil {
 		integration.PrintLogs(cfg.Logs, log.Println)
 		return nil, nil, err
@@ -225,8 +242,11 @@ disabled_plugins = ["cri"]
 	return backend{
 		address:           buildkitdSock,
 		containerdAddress: address,
+		debugAddress:      debugSock,
 		rootless:          rootless,
+		netnsDetached:     false,
 		snapshotter:       c.Snapshotter,
+		extraEnv:          c.ExtraEnv,
 	}, cl, nil
 }
 
@@ -258,7 +278,7 @@ func runStargzSnapshotter(cfg *integration.BackendConfig) (address string, cl fu
 
 	address = filepath.Join(tmpStargzDir, "containerd-stargz-grpc.sock")
 	stargzRootDir := filepath.Join(tmpStargzDir, "root")
-	cmd := exec.Command(binary,
+	cmd := exec.CommandContext(context.TODO(), binary,
 		"--log-level", "debug",
 		"--address", address,
 		"--root", stargzRootDir)
@@ -266,7 +286,7 @@ func runStargzSnapshotter(cfg *integration.BackendConfig) (address string, cl fu
 	if err != nil {
 		return "", nil, err
 	}
-	if err = integration.WaitUnix(address, 10*time.Second, cmd); err != nil {
+	if err = integration.WaitSocket(address, 10*time.Second, cmd); err != nil {
 		snStop()
 		return "", nil, errors.Wrapf(err, "containerd-stargz-grpc did not start up: %s", integration.FormatLogs(cfg.Logs))
 	}

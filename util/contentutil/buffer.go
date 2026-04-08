@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/v2/core/content"
+	cerrdefs "github.com/containerd/errdefs"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -19,6 +19,7 @@ import (
 type Buffer interface {
 	content.Provider
 	content.Ingester
+	content.IngestManager
 	content.Manager
 }
 
@@ -43,7 +44,7 @@ func (b *buffer) Info(ctx context.Context, dgst digest.Digest) (content.Info, er
 	v, ok := b.infos[dgst]
 	b.mu.Unlock()
 	if !ok {
-		return content.Info{}, errdefs.ErrNotFound
+		return content.Info{}, cerrdefs.ErrNotFound
 	}
 	return v, nil
 }
@@ -54,7 +55,7 @@ func (b *buffer) Update(ctx context.Context, new content.Info, fieldpaths ...str
 
 	updated, ok := b.infos[new.Digest]
 	if !ok {
-		return content.Info{}, errdefs.ErrNotFound
+		return content.Info{}, cerrdefs.ErrNotFound
 	}
 
 	if len(fieldpaths) == 0 {
@@ -95,8 +96,15 @@ func (b *buffer) Writer(ctx context.Context, opts ...content.WriterOpt) (content
 		}
 	}
 	b.mu.Lock()
+	if wOpts.Desc.Digest != "" {
+		if _, ok := b.buffers[wOpts.Desc.Digest]; ok {
+			b.mu.Unlock()
+			return nil, errors.Wrapf(cerrdefs.ErrAlreadyExists, "content %v already exists", wOpts.Desc.Digest)
+		}
+	}
 	if _, ok := b.refs[wOpts.Ref]; ok {
-		return nil, errors.Wrapf(errdefs.ErrUnavailable, "ref %s locked", wOpts.Ref)
+		b.mu.Unlock()
+		return nil, errors.Wrapf(cerrdefs.ErrUnavailable, "ref %s locked", wOpts.Ref)
 	}
 	b.mu.Unlock()
 	return &bufferedWriter{
@@ -112,15 +120,30 @@ func (b *buffer) Writer(ctx context.Context, opts ...content.WriterOpt) (content
 	}, nil
 }
 
+func (b *buffer) Status(ctx context.Context, ref string) (content.Status, error) {
+	return content.Status{}, cerrdefs.ErrNotFound
+}
+
+func (b *buffer) ListStatuses(ctx context.Context, filters ...string) ([]content.Status, error) {
+	return nil, nil
+}
+
+func (b *buffer) Abort(ctx context.Context, ref string) error {
+	b.mu.Lock()
+	delete(b.refs, ref)
+	b.mu.Unlock()
+	return nil
+}
+
 func (b *buffer) ReaderAt(ctx context.Context, desc ocispecs.Descriptor) (content.ReaderAt, error) {
-	r, err := b.getBytesReader(ctx, desc.Digest)
+	r, err := b.getBytesReader(desc.Digest)
 	if err != nil {
 		return nil, err
 	}
 	return &readerAt{Reader: r, Closer: io.NopCloser(r), size: int64(r.Len())}, nil
 }
 
-func (b *buffer) getBytesReader(ctx context.Context, dgst digest.Digest) (*bytes.Reader, error) {
+func (b *buffer) getBytesReader(dgst digest.Digest) (*bytes.Reader, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -128,7 +151,7 @@ func (b *buffer) getBytesReader(ctx context.Context, dgst digest.Digest) (*bytes
 		return bytes.NewReader(dt), nil
 	}
 
-	return nil, errors.Wrapf(errdefs.ErrNotFound, "content %v", dgst)
+	return nil, errors.Wrapf(cerrdefs.ErrNotFound, "content %v", dgst)
 }
 
 func (b *buffer) addValue(k digest.Digest, dt []byte) {

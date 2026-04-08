@@ -5,15 +5,17 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"time"
 
-	archiveexporter "github.com/containerd/containerd/images/archive"
-	"github.com/containerd/containerd/leases"
+	archiveexporter "github.com/containerd/containerd/v2/core/images/archive"
+	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/distribution/reference"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
@@ -34,8 +36,8 @@ import (
 type ExporterVariant string
 
 const (
-	VariantOCI    = "oci"
-	VariantDocker = "docker"
+	VariantOCI    = client.ExporterOCI
+	VariantDocker = client.ExporterDocker
 )
 
 const (
@@ -58,9 +60,11 @@ func New(opt Opt) (exporter.Exporter, error) {
 	return im, nil
 }
 
-func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exporter.ExporterInstance, error) {
+func (e *imageExporter) Resolve(ctx context.Context, id int, opt map[string]string) (exporter.ExporterInstance, error) {
 	i := &imageExporterInstance{
 		imageExporter: e,
+		id:            id,
+		attrs:         opt,
 		tar:           true,
 		opts: containerimage.ImageCommitOpts{
 			RefCfg: cacheconfig.RefConfig{
@@ -99,51 +103,65 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 
 type imageExporterInstance struct {
 	*imageExporter
+	id    int
+	attrs map[string]string
+
 	opts containerimage.ImageCommitOpts
 	tar  bool
 	meta map[string][]byte
+}
+
+func (e *imageExporterInstance) ID() int {
+	return e.id
 }
 
 func (e *imageExporterInstance) Name() string {
 	return fmt.Sprintf("exporting to %s image format", e.opt.Variant)
 }
 
+func (e *imageExporterInstance) Type() string {
+	return string(e.opt.Variant)
+}
+
+func (e *imageExporterInstance) Attrs() map[string]string {
+	return e.attrs
+}
+
 func (e *imageExporterInstance) Config() *exporter.Config {
 	return exporter.NewConfigWithCompression(e.opts.RefCfg.Compression)
 }
 
-func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, sessionID string) (_ map[string]string, descref exporter.DescriptorReference, err error) {
+func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, buildInfo exporter.ExportBuildInfo) (_ map[string]string, _ exporter.FinalizeFunc, descref exporter.DescriptorReference, err error) {
 	if e.opt.Variant == VariantDocker && len(src.Refs) > 0 {
-		return nil, nil, errors.Errorf("docker exporter does not currently support exporting manifest lists")
+		return nil, nil, nil, errors.Errorf("docker exporter does not currently support exporting manifest lists")
 	}
 
+	src = src.Clone()
 	if src.Metadata == nil {
 		src.Metadata = make(map[string][]byte)
 	}
-	for k, v := range e.meta {
-		src.Metadata[k] = v
-	}
+	maps.Copy(src.Metadata, e.meta)
 
 	opts := e.opts
 	as, _, err := containerimage.ParseAnnotations(src.Metadata)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	opts.Annotations = opts.Annotations.Merge(as)
 
 	ctx, done, err := leaseutil.WithLease(ctx, e.opt.LeaseManager, leaseutil.MakeTemporary)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer func() {
 		if descref == nil {
-			done(context.TODO())
+			done(context.WithoutCancel(ctx))
 		}
 	}()
 
-	desc, err := e.opt.ImageWriter.Commit(ctx, src, sessionID, &opts)
+	desc, err := e.opt.ImageWriter.Commit(ctx, src, buildInfo.SessionID, buildInfo.InlineCache, &opts)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer func() {
 		if err == nil {
@@ -156,8 +174,8 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	}
 	if _, ok := desc.Annotations[ocispecs.AnnotationCreated]; !ok {
 		tm := time.Now()
-		if opts.Epoch != nil {
-			tm = *opts.Epoch
+		if opts.Epoch != nil && opts.Epoch.Value != nil {
+			tm = *opts.Epoch.Value
 		}
 		desc.Annotations[ocispecs.AnnotationCreated] = tm.UTC().Format(time.RFC3339)
 	}
@@ -172,7 +190,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 
 	dtdesc, err := json.Marshal(desc)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	resp[exptypes.ExporterImageDescriptorKey] = base64.StdEncoding.EncodeToString(dtdesc)
 
@@ -182,11 +200,11 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 
 	names, err := normalizedNames(e.opts.ImageName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if len(names) != 0 {
-		resp["image.name"] = strings.Join(names, ",")
+		resp[exptypes.ExporterImageNameKey] = strings.Join(names, ",")
 	}
 
 	expOpts := []archiveexporter.ExportOpt{archiveexporter.WithManifest(*desc, names...)}
@@ -195,15 +213,16 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		expOpts = append(expOpts, archiveexporter.WithAllPlatforms(), archiveexporter.WithSkipDockerManifest())
 	case VariantDocker:
 	default:
-		return nil, nil, errors.Errorf("invalid variant %q", e.opt.Variant)
+		return nil, nil, nil, errors.Errorf("invalid variant %q", e.opt.Variant)
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	timeoutCtx, cancel := context.WithCancelCause(ctx)
+	timeoutCtx, _ = context.WithTimeoutCause(timeoutCtx, 5*time.Second, errors.WithStack(context.DeadlineExceeded)) //nolint:govet
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
-	caller, err := e.opt.SessionManager.Get(timeoutCtx, sessionID, false)
+	caller, err := e.opt.SessionManager.Get(timeoutCtx, buildInfo.SessionID, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var refs []cache.ImmutableRef
@@ -216,9 +235,11 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	eg, egCtx := errgroup.WithContext(ctx)
 	mprovider := contentutil.NewMultiProvider(e.opt.ImageWriter.ContentStore())
 	for _, ref := range refs {
-		ref := ref
 		eg.Go(func() error {
-			remotes, err := ref.GetRemotes(egCtx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
+			if ref == nil {
+				return nil
+			}
+			remotes, err := ref.GetRemotes(egCtx, false, e.opts.RefCfg, false, session.NewGroup(buildInfo.SessionID))
 			if err != nil {
 				return err
 			}
@@ -235,43 +256,43 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		})
 	}
 	if err := eg.Wait(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if e.tar {
-		w, err := filesync.CopyFileWriter(ctx, resp, caller)
+		w, err := filesync.CopyFileWriter(ctx, resp, e.id, caller)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		report := progress.OneOff(ctx, "sending tarball")
 		if err := archiveexporter.Export(ctx, mprovider, w, expOpts...); err != nil {
 			w.Close()
 			if grpcerrors.Code(err) == codes.AlreadyExists {
-				return resp, nil, report(nil)
+				return resp, nil, nil, report(nil)
 			}
-			return nil, nil, report(err)
+			return nil, nil, nil, report(err)
 		}
 		err = w.Close()
 		if grpcerrors.Code(err) == codes.AlreadyExists {
-			return resp, nil, report(nil)
+			return resp, nil, nil, report(nil)
 		}
 		if err != nil {
-			return nil, nil, report(err)
+			return nil, nil, nil, report(err)
 		}
 		report(nil)
 	} else {
 		store := sessioncontent.NewCallerStore(caller, "export")
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		err := contentutil.CopyChain(ctx, store, mprovider, *desc)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 
-	return resp, nil, nil
+	return resp, nil, nil, nil
 }
 
 func normalizedNames(name string) ([]string, error) {
@@ -279,7 +300,7 @@ func normalizedNames(name string) ([]string, error) {
 		return nil, nil
 	}
 	names := strings.Split(name, ",")
-	var tagNames = make([]string, len(names))
+	tagNames := make([]string, len(names))
 	for i, name := range names {
 		parsed, err := reference.ParseNormalizedNamed(name)
 		if err != nil {

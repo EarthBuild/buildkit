@@ -1,7 +1,6 @@
 package solver
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -38,7 +37,7 @@ func expKey(k *CacheKey) ExportableCacheKey {
 }
 
 func TestInMemoryCache(t *testing.T) {
-	ctx := context.TODO()
+	ctx := t.Context()
 
 	m := NewInMemoryCacheManager()
 
@@ -47,11 +46,11 @@ func TestInMemoryCache(t *testing.T) {
 
 	keys, err := m.Query(nil, 0, dgst("foo"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err := m.Records(context.TODO(), keys[0])
+	matches, err := m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 1)
+	require.Equal(t, 1, len(matches))
 
 	res, err := m.Load(ctx, matches[0])
 	require.NoError(t, err)
@@ -63,11 +62,11 @@ func TestInMemoryCache(t *testing.T) {
 
 	keys, err = m.Query(nil, 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err = m.Records(context.TODO(), keys[0])
+	matches, err = m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 1)
+	require.Equal(t, 1, len(matches))
 
 	res, err = m.Load(ctx, matches[0])
 	require.NoError(t, err)
@@ -76,7 +75,7 @@ func TestInMemoryCache(t *testing.T) {
 	// invalid request
 	keys, err = m.Query(nil, 0, dgst("baz"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 0)
+	require.Equal(t, 0, len(keys))
 
 	// second level
 	k := testCacheKey(dgst("baz"), Index(1), *cacheFoo, *cacheBar)
@@ -85,23 +84,23 @@ func TestInMemoryCache(t *testing.T) {
 
 	keys, err = m.Query(nil, 0, dgst("baz"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 0)
+	require.Equal(t, 0, len(keys))
 
 	keys, err = m.Query(depKeys(*cacheFoo), 0, dgst("baz"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 0)
+	require.Equal(t, 0, len(keys))
 
 	keys, err = m.Query(depKeys(*cacheFoo), 1, dgst("baz"), Index(1))
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 0)
+	require.Equal(t, 0, len(keys))
 
 	keys, err = m.Query(depKeys(*cacheFoo), 0, dgst("baz"), Index(1))
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err = m.Records(context.TODO(), keys[0])
+	matches, err = m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 1)
+	require.Equal(t, 1, len(matches))
 
 	res, err = m.Load(ctx, matches[0])
 	require.NoError(t, err)
@@ -109,7 +108,7 @@ func TestInMemoryCache(t *testing.T) {
 
 	keys2, err := m.Query(depKeys(*cacheBar), 1, dgst("baz"), Index(1))
 	require.NoError(t, err)
-	require.Equal(t, len(keys2), 1)
+	require.Equal(t, 1, len(keys2))
 
 	require.Equal(t, keys[0].ID, keys2[0].ID)
 
@@ -119,11 +118,11 @@ func TestInMemoryCache(t *testing.T) {
 
 	keys, err = m.Query(depKeys(*cacheFoo), 0, dgst("baz"), Index(1))
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err = m.Records(context.TODO(), keys[0])
+	matches, err = m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 2)
+	require.Equal(t, 2, len(matches))
 
 	k = testCacheKeyWithDeps(dgst("bax"), 0, [][]CacheKeyWithSelector{
 		{{CacheKey: *cacheFoo}, {CacheKey: *cacheBaz}},
@@ -135,23 +134,23 @@ func TestInMemoryCache(t *testing.T) {
 	// foo, bar, baz should all point to result4
 	keys, err = m.Query(depKeys(*cacheFoo), 0, dgst("bax"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
 	id := keys[0].ID
 
 	keys, err = m.Query(depKeys(*cacheBar), 1, dgst("bax"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 	require.Equal(t, keys[0].ID, id)
 
 	keys, err = m.Query(depKeys(*cacheBaz), 0, dgst("bax"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 	require.Equal(t, keys[0].ID, id)
 }
 
 func TestInMemoryCacheSelector(t *testing.T) {
-	ctx := context.TODO()
+	ctx := t.Context()
 
 	m := NewInMemoryCacheManager()
 
@@ -165,19 +164,19 @@ func TestInMemoryCacheSelector(t *testing.T) {
 
 	keys, err := m.Query(depKeys(*cacheFoo), 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 0)
+	require.Equal(t, 0, len(keys))
 
 	keys, err = m.Query([]CacheKeyWithSelector{{Selector: "sel-invalid", CacheKey: *cacheFoo}}, 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 0)
+	require.Equal(t, 0, len(keys))
 
 	keys, err = m.Query([]CacheKeyWithSelector{{Selector: dgst("sel0"), CacheKey: *cacheFoo}}, 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err := m.Records(context.TODO(), keys[0])
+	matches, err := m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 1)
+	require.Equal(t, 1, len(matches))
 
 	res, err := m.Load(ctx, matches[0])
 	require.NoError(t, err)
@@ -185,7 +184,7 @@ func TestInMemoryCacheSelector(t *testing.T) {
 }
 
 func TestInMemoryCacheSelectorNested(t *testing.T) {
-	ctx := context.TODO()
+	ctx := t.Context()
 
 	m := NewInMemoryCacheManager()
 
@@ -201,11 +200,11 @@ func TestInMemoryCacheSelectorNested(t *testing.T) {
 		[]CacheKeyWithSelector{{Selector: dgst("sel0"), CacheKey: *cacheFoo}},
 		0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err := m.Records(context.TODO(), keys[0])
+	matches, err := m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 1)
+	require.Equal(t, 1, len(matches))
 
 	res, err := m.Load(ctx, matches[0])
 	require.NoError(t, err)
@@ -213,19 +212,19 @@ func TestInMemoryCacheSelectorNested(t *testing.T) {
 
 	keys, err = m.Query(depKeys(*cacheFoo), 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 0)
+	require.Equal(t, 0, len(keys))
 
 	keys, err = m.Query([]CacheKeyWithSelector{{Selector: dgst("bar"), CacheKey: *cacheFoo}}, 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 0)
+	require.Equal(t, 0, len(keys))
 
 	keys, err = m.Query(depKeys(expKey(NewCacheKey(dgst("second"), "", 0))), 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err = m.Records(context.TODO(), keys[0])
+	matches, err = m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 1)
+	require.Equal(t, 1, len(matches))
 
 	res, err = m.Load(ctx, matches[0])
 	require.NoError(t, err)
@@ -233,13 +232,14 @@ func TestInMemoryCacheSelectorNested(t *testing.T) {
 
 	keys, err = m.Query(depKeys(expKey(NewCacheKey(dgst("second"), "", 0))), 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 }
 
 func TestInMemoryCacheReleaseParent(t *testing.T) {
 	storage := NewInMemoryCacheStorage()
 	results := NewInMemoryResultStorage()
-	m := NewCacheManager(context.TODO(), identity.NewID(), storage, results)
+	ctx := t.Context()
+	m := NewCacheManager(ctx, identity.NewID(), storage, results)
 
 	res0 := testResult("result0")
 	cacheFoo, err := m.Save(NewCacheKey(dgst("foo"), "", 0), res0, time.Now())
@@ -251,11 +251,11 @@ func TestInMemoryCacheReleaseParent(t *testing.T) {
 
 	keys, err := m.Query(nil, 0, dgst("foo"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err := m.Records(context.TODO(), keys[0])
+	matches, err := m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 1)
+	require.Equal(t, 1, len(matches))
 
 	err = storage.Release(res0.ID())
 	require.NoError(t, err)
@@ -263,19 +263,19 @@ func TestInMemoryCacheReleaseParent(t *testing.T) {
 	// foo becomes unloadable
 	keys, err = m.Query(nil, 0, dgst("foo"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err = m.Records(context.TODO(), keys[0])
+	matches, err = m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 0)
+	require.Equal(t, 0, len(matches))
 
 	keys, err = m.Query(depKeys(expKey(keys[0])), 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err = m.Records(context.TODO(), keys[0])
+	matches, err = m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 1)
+	require.Equal(t, 1, len(matches))
 
 	// releasing bar releases both foo and bar
 	err = storage.Release(res1.ID())
@@ -283,7 +283,7 @@ func TestInMemoryCacheReleaseParent(t *testing.T) {
 
 	keys, err = m.Query(nil, 0, dgst("foo"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 0)
+	require.Equal(t, 0, len(keys))
 }
 
 // TestInMemoryCacheRestoreOfflineDeletion deletes a result while the
@@ -291,7 +291,8 @@ func TestInMemoryCacheReleaseParent(t *testing.T) {
 func TestInMemoryCacheRestoreOfflineDeletion(t *testing.T) {
 	storage := NewInMemoryCacheStorage()
 	results := NewInMemoryResultStorage()
-	m := NewCacheManager(context.TODO(), identity.NewID(), storage, results)
+	ctx := t.Context()
+	m := NewCacheManager(ctx, identity.NewID(), storage, results)
 
 	res0 := testResult("result0")
 	cacheFoo, err := m.Save(NewCacheKey(dgst("foo"), "", 0), res0, time.Now())
@@ -305,29 +306,30 @@ func TestInMemoryCacheRestoreOfflineDeletion(t *testing.T) {
 	_, err = results2.Save(res1, time.Now()) // only add bar
 	require.NoError(t, err)
 
-	m = NewCacheManager(context.TODO(), identity.NewID(), storage, results2)
+	m = NewCacheManager(ctx, identity.NewID(), storage, results2)
 
 	keys, err := m.Query(nil, 0, dgst("foo"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err := m.Records(context.TODO(), keys[0])
+	matches, err := m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 0)
+	require.Equal(t, 0, len(matches))
 
 	keys, err = m.Query(depKeys(expKey(keys[0])), 0, dgst("bar"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
-	matches, err = m.Records(context.TODO(), keys[0])
+	matches, err = m.Records(ctx, keys[0])
 	require.NoError(t, err)
-	require.Equal(t, len(matches), 1)
+	require.Equal(t, 1, len(matches))
 }
 
 func TestCarryOverFromSublink(t *testing.T) {
 	storage := NewInMemoryCacheStorage()
 	results := NewInMemoryResultStorage()
-	m := NewCacheManager(context.TODO(), identity.NewID(), storage, results)
+	ctx := t.Context()
+	m := NewCacheManager(ctx, identity.NewID(), storage, results)
 
 	cacheFoo, err := m.Save(NewCacheKey(dgst("foo"), "", 0), testResult("resultFoo"), time.Now())
 	require.NoError(t, err)
@@ -345,13 +347,13 @@ func TestCarryOverFromSublink(t *testing.T) {
 		{CacheKey: expKey(NewCacheKey(dgst("content0"), "", 0))},
 	}, 0, dgst("res"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 
 	keys, err = m.Query([]CacheKeyWithSelector{
 		{Selector: dgst("sel0"), CacheKey: *cacheBar},
 	}, 0, dgst("res"), 0)
 	require.NoError(t, err)
-	require.Equal(t, len(keys), 1)
+	require.Equal(t, 1, len(keys))
 }
 
 func dgst(s string) digest.Digest {

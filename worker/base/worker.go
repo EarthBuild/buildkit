@@ -2,23 +2,23 @@ package base
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/diff"
-	"github.com/containerd/containerd/gc"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/docker/docker/pkg/idtools"
-	"github.com/hashicorp/go-multierror"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/diff"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/pkg/gc"
+	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/executor"
 	"github.com/moby/buildkit/executor/resources"
 	"github.com/moby/buildkit/exporter"
@@ -34,10 +34,12 @@ import (
 	containerdsnapshot "github.com/moby/buildkit/snapshot/containerd"
 	"github.com/moby/buildkit/snapshot/imagerefchecker"
 	"github.com/moby/buildkit/solver"
+	"github.com/moby/buildkit/solver/llbsolver/cdidevices"
 	"github.com/moby/buildkit/solver/llbsolver/mounts"
 	"github.com/moby/buildkit/solver/llbsolver/ops"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/source"
+	"github.com/moby/buildkit/source/containerblob"
 	"github.com/moby/buildkit/source/containerimage"
 	"github.com/moby/buildkit/source/git"
 	"github.com/moby/buildkit/source/http"
@@ -49,6 +51,7 @@ import (
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/progress/controller"
 	"github.com/moby/buildkit/util/semutil"
+	"github.com/moby/sys/user"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -63,6 +66,7 @@ const labelCreatedAt = "buildkit/createdat"
 // See also CommonOpt.
 type WorkerOpt struct {
 	ID               string
+	Root             string
 	Labels           map[string]string
 	Platforms        []ocispecs.Platform
 	GCPolicy         []client.PruneInfo
@@ -75,13 +79,14 @@ type WorkerOpt struct {
 	Differ           diff.Comparer
 	ImageStore       images.Store // optional
 	RegistryHosts    docker.RegistryHosts
-	IdentityMapping  *idtools.IdentityMapping
+	IdentityMapping  *user.IdentityMapping
 	LeaseManager     *leaseutil.Manager
 	GarbageCollect   func(context.Context) (gc.Stats, error)
 	ParallelismSem   *semutil.Weighted
 	MetadataStore    *metadata.Store
 	MountPoolRoot    string
 	ResourceMonitor  *resources.Monitor
+	CDIManager       *cdidevices.Manager
 }
 
 // Worker is a local worker instance with dedicated snapshotter, cache, and so on.
@@ -93,6 +98,8 @@ type Worker struct {
 	imageWriter     *imageexporter.ImageWriter
 	ImageSource     *containerimage.Source
 	OCILayoutSource *containerimage.Source
+	GitSource       *git.Source
+	HTTPSource      *http.Source
 }
 
 // NewWorker instantiates a local worker
@@ -111,6 +118,7 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 		ContentStore:    opt.ContentStore,
 		Differ:          opt.Differ,
 		MetadataStore:   opt.MetadataStore,
+		Root:            opt.Root,
 		MountPoolRoot:   opt.MountPoolRoot,
 	})
 	if err != nil {
@@ -138,6 +146,17 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 
 	sm.Register(is)
 
+	var gitSource *git.Source
+	ibs, err := containerblob.NewSource(containerblob.SourceOpt{
+		ContentStore:  opt.ContentStore,
+		CacheAccessor: cm,
+		RegistryHosts: opt.RegistryHosts,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sm.Register(ibs)
 	if err := git.Supported(); err == nil {
 		gs, err := git.NewSource(git.Opt{
 			CacheAccessor: cm,
@@ -146,6 +165,7 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 			return nil, err
 		}
 		sm.Register(gs)
+		gitSource = gs
 	} else {
 		bklog.G(ctx).Warnf("git source cannot be enabled: %v", err)
 	}
@@ -207,25 +227,35 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 		imageWriter:     iw,
 		ImageSource:     is,
 		OCILayoutSource: os,
+		GitSource:       gitSource,
+		HTTPSource:      hs,
 	}, nil
 }
 
+func (w *Worker) GarbageCollect(ctx context.Context) error {
+	if w.WorkerOpt.GarbageCollect == nil {
+		return nil
+	}
+	_, err := w.WorkerOpt.GarbageCollect(ctx)
+	return err
+}
+
 func (w *Worker) Close() error {
-	var rerr error
+	var errs []error
 	if err := w.MetadataStore.Close(); err != nil {
-		rerr = multierror.Append(rerr, err)
+		errs = append(errs, err)
 	}
 	for _, provider := range w.NetworkProviders {
 		if err := provider.Close(); err != nil {
-			rerr = multierror.Append(rerr, err)
+			errs = append(errs, err)
 		}
 	}
 	if w.ResourceMonitor != nil {
 		if err := w.ResourceMonitor.Close(); err != nil {
-			rerr = multierror.Append(rerr, err)
+			errs = append(errs, err)
 		}
 	}
-	return rerr
+	return stderrors.Join(errs...)
 }
 
 // ParallelismStatus is Earthly-specific
@@ -248,6 +278,10 @@ func (w *Worker) LeaseManager() *leaseutil.Manager {
 	return w.WorkerOpt.LeaseManager
 }
 
+func (w *Worker) CDIManager() *cdidevices.Manager {
+	return w.WorkerOpt.CDIManager
+}
+
 func (w *Worker) ID() string {
 	return w.WorkerOpt.ID
 }
@@ -258,10 +292,14 @@ func (w *Worker) Labels() map[string]string {
 
 func (w *Worker) Platforms(noCache bool) []ocispecs.Platform {
 	if noCache {
+		matchers := make([]platforms.MatchComparer, len(w.WorkerOpt.Platforms))
+		for i, p := range w.WorkerOpt.Platforms {
+			matchers[i] = platforms.Only(p)
+		}
 		for _, p := range archutil.SupportedPlatforms(noCache) {
 			exists := false
-			for _, pp := range w.WorkerOpt.Platforms {
-				if platforms.Only(pp).Match(p) {
+			for _, m := range matchers {
+				if m.Match(p) {
 					exists = true
 					break
 				}
@@ -298,7 +336,7 @@ func (w *Worker) LoadRef(ctx context.Context, id string, hidden bool) (cache.Imm
 	var needsRemoteProviders cache.NeedsRemoteProviderError
 	if errors.As(err, &needsRemoteProviders) {
 		if optGetter := solver.CacheOptGetterOf(ctx); optGetter != nil {
-			var keys []interface{}
+			var keys []any
 			for _, dgst := range needsRemoteProviders {
 				keys = append(keys, cache.DescHandlerKey(dgst))
 			}
@@ -350,13 +388,13 @@ func (w *Worker) ResolveOp(v solver.Vertex, s frontend.FrontendLLBBridge, sm *se
 	return nil, errors.Errorf("could not resolve %v", v)
 }
 
-func (w *Worker) PruneCacheMounts(ctx context.Context, ids []string) error {
+func (w *Worker) PruneCacheMounts(ctx context.Context, ids map[string]bool) error {
 	mu := mounts.CacheMountsLocker()
 	mu.Lock()
 	defer mu.Unlock()
 
-	for _, id := range ids {
-		mds, err := mounts.SearchCacheDir(ctx, w.CacheMgr, id)
+	for id, nested := range ids {
+		mds, err := mounts.SearchCacheDir(ctx, w.CacheMgr, id, nested)
 		if err != nil {
 			return err
 		}
@@ -378,16 +416,127 @@ func (w *Worker) PruneCacheMounts(ctx context.Context, ids []string) error {
 	return nil
 }
 
-func (w *Worker) ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt, sm *session.Manager, g session.Group) (string, digest.Digest, []byte, error) {
-	// is this an registry source? Or an OCI layout source?
-	switch opt.ResolverType {
-	case llb.ResolverTypeOCILayout:
-		return w.OCILayoutSource.ResolveImageConfig(ctx, ref, opt, sm, g)
-		// we probably should put an explicit case llb.ResolverTypeRegistry and default here,
-		// but then go complains that we do not have a return statement,
-		// so we just add it after
+func (w *Worker) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt, sm *session.Manager, jobCtx solver.JobContext) (*sourceresolver.MetaResponse, error) {
+	if opt.SourcePolicies != nil {
+		return nil, errors.New("source policies can not be set for worker")
 	}
-	return w.ImageSource.ResolveImageConfig(ctx, ref, opt, sm, g)
+
+	var p *ocispecs.Platform
+	if imgOpt := opt.ImageOpt; imgOpt != nil && imgOpt.Platform != nil {
+		p = imgOpt.Platform
+	} else if ociOpt := opt.OCILayoutOpt; ociOpt != nil && ociOpt.Platform != nil {
+		p = ociOpt.Platform
+	}
+
+	var platform *pb.Platform
+	if p != nil {
+		platform = &pb.Platform{
+			Architecture: p.Architecture,
+			OS:           p.OS,
+			Variant:      p.Variant,
+			OSVersion:    p.OSVersion,
+		}
+	}
+
+	id, err := w.SourceManager.Identifier(&pb.Op_Source{Source: op}, platform)
+	if err != nil {
+		return nil, err
+	}
+
+	var g session.Group
+	if jobCtx != nil {
+		g = jobCtx.Session()
+	}
+
+	switch idt := id.(type) {
+	case *containerimage.ImageIdentifier:
+		if opt.ImageOpt == nil {
+			opt.ImageOpt = &sourceresolver.ResolveImageOpt{}
+		}
+		if p != nil {
+			opt.ImageOpt.Platform = p
+		}
+		resp, err := w.ImageSource.ResolveImageMetadata(ctx, idt, opt.ImageOpt, sm, g)
+		if err != nil {
+			return nil, err
+		}
+		return &sourceresolver.MetaResponse{
+			Op:    op,
+			Image: resp,
+		}, nil
+	case *containerimage.OCIIdentifier:
+		if opt.OCILayoutOpt == nil {
+			opt.OCILayoutOpt = &sourceresolver.ResolveOCILayoutOpt{}
+		}
+		if p != nil {
+			opt.OCILayoutOpt.Platform = p
+		}
+		resp, err := w.OCILayoutSource.ResolveOCILayoutMetadata(ctx, idt, opt.OCILayoutOpt, sm, g)
+		if err != nil {
+			return nil, err
+		}
+		return &sourceresolver.MetaResponse{
+			Op:    op,
+			Image: resp,
+		}, nil
+	case *git.GitIdentifier:
+		if w.GitSource == nil {
+			return nil, errors.New("git source is not supported")
+		}
+		mdOpt := git.MetadataOpts{}
+		if opt.GitOpt != nil {
+			mdOpt.ReturnObject = opt.GitOpt.ReturnObject
+		}
+		md, err := w.GitSource.ResolveMetadata(ctx, idt, sm, jobCtx, mdOpt)
+		if err != nil {
+			return nil, err
+		}
+		return &sourceresolver.MetaResponse{
+			Op: op,
+			Git: &sourceresolver.ResolveGitResponse{
+				Checksum:       md.Checksum,
+				Ref:            md.Ref,
+				CommitChecksum: md.CommitChecksum,
+				CommitObject:   md.CommitObject,
+				TagObject:      md.TagObject,
+			},
+		}, nil
+	case *http.HTTPIdentifier:
+		if w.HTTPSource == nil {
+			return nil, errors.New("http source is not supported")
+		}
+		mdOpt := http.MetadataOpts{}
+		if opt.HTTPOpt != nil && opt.HTTPOpt.ChecksumReq != nil {
+			mdOpt.ChecksumReq = &http.MetadataChecksumRequest{
+				Algo:   http.MetadataChecksumAlgo(opt.HTTPOpt.ChecksumReq.Algo),
+				Suffix: slices.Clone(opt.HTTPOpt.ChecksumReq.Suffix),
+			}
+		}
+		md, err := w.HTTPSource.ResolveMetadata(ctx, idt, sm, jobCtx, mdOpt)
+		if err != nil {
+			return nil, err
+		}
+		var checksumResponse *sourceresolver.ResolveHTTPChecksumResponse
+		if md.ChecksumResponse != nil {
+			checksumResponse = &sourceresolver.ResolveHTTPChecksumResponse{
+				Digest: md.ChecksumResponse.Digest,
+				Suffix: slices.Clone(md.ChecksumResponse.Suffix),
+			}
+		}
+		return &sourceresolver.MetaResponse{
+			Op: op,
+			HTTP: &sourceresolver.ResolveHTTPResponse{
+				Digest:           md.Digest,
+				Filename:         md.Filename,
+				LastModified:     md.LastModified,
+				ChecksumResponse: checksumResponse,
+			},
+		}, nil
+	}
+
+	return &sourceresolver.MetaResponse{
+		Op: op,
+	}, nil
 }
 
 func (w *Worker) DiskUsage(ctx context.Context, opt client.DiskUsageInfo) ([]*client.UsageInfo, error) {
@@ -444,14 +593,11 @@ func (w *Worker) Exporter(name string, sm *session.Manager) (exporter.Exporter, 
 }
 
 func (w *Worker) FromRemote(ctx context.Context, remote *solver.Remote) (ref cache.ImmutableRef, err error) {
-	if cd, ok := remote.Provider.(interface {
-		CheckDescriptor(context.Context, ocispecs.Descriptor) error
-	}); ok && len(remote.Descriptors) > 0 {
+	if len(remote.Descriptors) > 0 {
 		var eg errgroup.Group
 		for _, desc := range remote.Descriptors {
-			desc := desc
 			eg.Go(func() error {
-				if err := cd.CheckDescriptor(ctx, desc); err != nil {
+				if _, err := remote.Provider.Info(ctx, desc.Digest); err != nil {
 					return err
 				}
 				return nil

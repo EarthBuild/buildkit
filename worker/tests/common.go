@@ -4,24 +4,50 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/containerd/containerd/namespaces"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/executor"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/source/containerimage"
+	"github.com/moby/buildkit/util/iohelper"
+	"github.com/moby/buildkit/util/testutil/integration"
 	"github.com/moby/buildkit/worker/base"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
+var mirrorOnce sync.Once
+var mirror *integration.Mirror
+var mirrorMu sync.Mutex
+
+func RunMirror() func() error {
+	mirrorOnce.Do(func() {
+		m, err := integration.RunMirror()
+		if err != nil {
+			panic(err)
+		}
+		mirror = m
+	})
+	return func() error { return mirror.Close() }
+}
+
+func mirrorBusybox(t *testing.T) string {
+	mirrorMu.Lock()
+	defer mirrorMu.Unlock()
+	require.NotNil(t, mirror, "mirror must be initialized")
+	require.NoError(t, mirror.AddImages(t, integration.OfficialImages("busybox:latest")))
+	return mirror.Host + "/library/busybox:latest"
+}
+
 func NewBusyboxSourceSnapshot(ctx context.Context, t *testing.T, w *base.Worker, sm *session.Manager) cache.ImmutableRef {
-	img, err := containerimage.NewImageIdentifier("docker.io/library/busybox:latest")
+	img, err := containerimage.NewImageIdentifier(mirrorBusybox(t))
 	require.NoError(t, err)
 	src, err := w.SourceManager.Resolve(ctx, img, sm, nil)
 	require.NoError(t, err)
@@ -38,7 +64,7 @@ func NewCtx(s string) context.Context {
 
 func TestWorkerExec(t *testing.T, w *base.Worker) {
 	ctx := NewCtx("buildkit-test")
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 	sm, err := session.NewManager(&session.ManagerOpt{
 		HealthFrequency:       1 * time.Second,
 		HealthTimeout:         10 * time.Second,
@@ -53,7 +79,7 @@ func TestWorkerExec(t *testing.T, w *base.Worker) {
 	id := identity.NewID()
 
 	// verify pid1 exits when stdin sees EOF
-	ctxTimeout, cancelTimeout := context.WithTimeout(ctx, 5*time.Second)
+	ctxTimeout, cancelTimeout := context.WithTimeoutCause(ctx, 5*time.Second, nil)
 	started := make(chan struct{})
 	pipeR, pipeW := io.Pipe()
 	go func() {
@@ -74,8 +100,8 @@ func TestWorkerExec(t *testing.T, w *base.Worker) {
 			Env:  []string{"PATH=/bin:/usr/bin:/sbin:/usr/sbin"},
 		},
 		Stdin:  pipeR,
-		Stdout: &nopCloser{stdout},
-		Stderr: &nopCloser{stderr},
+		Stdout: &iohelper.NopWriteCloser{Writer: stdout},
+		Stderr: &iohelper.NopWriteCloser{Writer: stderr},
 	}, started)
 	cancelTimeout()
 	t.Logf("Stdout: %s", stdout.String())
@@ -85,10 +111,11 @@ func TestWorkerExec(t *testing.T, w *base.Worker) {
 	require.Empty(t, stderr.String())
 
 	// first start pid1 in the background
+	execID := identity.NewID()
 	eg := errgroup.Group{}
 	started = make(chan struct{})
 	eg.Go(func() error {
-		_, err := w.WorkerOpt.Executor.Run(ctx, id, execMount(root), nil, executor.ProcessInfo{
+		_, err := w.WorkerOpt.Executor.Run(ctx, execID, execMount(root), nil, executor.ProcessInfo{
 			Meta: executor.Meta{
 				Args: []string{"sleep", "10"},
 				Cwd:  "/",
@@ -108,12 +135,12 @@ func TestWorkerExec(t *testing.T, w *base.Worker) {
 	stderr.Reset()
 
 	// verify pid1 is the sleep command via Exec
-	err = w.WorkerOpt.Executor.Exec(ctx, id, executor.ProcessInfo{
+	err = w.WorkerOpt.Executor.Exec(ctx, execID, executor.ProcessInfo{
 		Meta: executor.Meta{
 			Args: []string{"ps", "-o", "pid,comm"},
 		},
-		Stdout: &nopCloser{stdout},
-		Stderr: &nopCloser{stderr},
+		Stdout: &iohelper.NopWriteCloser{Writer: stdout},
+		Stderr: &iohelper.NopWriteCloser{Writer: stderr},
 	})
 	t.Logf("Stdout: %s", stdout.String())
 	t.Logf("Stderr: %s", stderr.String())
@@ -126,13 +153,13 @@ func TestWorkerExec(t *testing.T, w *base.Worker) {
 	stdin := bytes.NewReader([]byte("hello"))
 	stdout.Reset()
 	stderr.Reset()
-	err = w.WorkerOpt.Executor.Exec(ctx, id, executor.ProcessInfo{
+	err = w.WorkerOpt.Executor.Exec(ctx, execID, executor.ProcessInfo{
 		Meta: executor.Meta{
 			Args: []string{"sh", "-c", "cat > /tmp/msg"},
 		},
 		Stdin:  io.NopCloser(stdin),
-		Stdout: &nopCloser{stdout},
-		Stderr: &nopCloser{stderr},
+		Stdout: &iohelper.NopWriteCloser{Writer: stdout},
+		Stderr: &iohelper.NopWriteCloser{Writer: stderr},
 	})
 	require.NoError(t, err)
 	require.Empty(t, stdout.String())
@@ -141,12 +168,12 @@ func TestWorkerExec(t *testing.T, w *base.Worker) {
 	// verify contents of /tmp/msg
 	stdout.Reset()
 	stderr.Reset()
-	err = w.WorkerOpt.Executor.Exec(ctx, id, executor.ProcessInfo{
+	err = w.WorkerOpt.Executor.Exec(ctx, execID, executor.ProcessInfo{
 		Meta: executor.Meta{
 			Args: []string{"cat", "/tmp/msg"},
 		},
-		Stdout: &nopCloser{stdout},
-		Stderr: &nopCloser{stderr},
+		Stdout: &iohelper.NopWriteCloser{Writer: stdout},
+		Stderr: &iohelper.NopWriteCloser{Writer: stderr},
 	})
 	t.Logf("Stdout: %s", stdout.String())
 	t.Logf("Stderr: %s", stderr.String())
@@ -155,7 +182,7 @@ func TestWorkerExec(t *testing.T, w *base.Worker) {
 	require.Empty(t, stderr.String())
 
 	// stop pid1
-	cancel()
+	cancel(errors.WithStack(context.Canceled))
 
 	err = eg.Wait()
 	// we expect pid1 to get canceled after we test the exec
@@ -260,8 +287,8 @@ func TestWorkerCancel(t *testing.T, w *base.Worker) {
 
 	started := make(chan struct{})
 
-	pid1Ctx, pid1Cancel := context.WithCancel(ctx)
-	defer pid1Cancel()
+	pid1Ctx, pid1Cancel := context.WithCancelCause(ctx)
+	defer pid1Cancel(errors.WithStack(context.Canceled))
 
 	var (
 		pid1Err, pid2Err error
@@ -285,8 +312,8 @@ func TestWorkerCancel(t *testing.T, w *base.Worker) {
 		t.Error("Unexpected timeout waiting for pid1 to start")
 	}
 
-	pid2Ctx, pid2Cancel := context.WithCancel(ctx)
-	defer pid2Cancel()
+	pid2Ctx, pid2Cancel := context.WithCancelCause(ctx)
+	defer pid2Cancel(errors.WithStack(context.Canceled))
 
 	started = make(chan struct{})
 
@@ -311,21 +338,13 @@ func TestWorkerCancel(t *testing.T, w *base.Worker) {
 		t.Error("Unexpected timeout waiting for pid2 to start")
 	}
 
-	pid2Cancel()
+	pid2Cancel(errors.WithStack(context.Canceled))
 	<-pid2Done
 	require.Contains(t, pid2Err.Error(), "exit code: 137", "pid2 exits with sigkill")
 
-	pid1Cancel()
+	pid1Cancel(errors.WithStack(context.Canceled))
 	<-pid1Done
 	require.Contains(t, pid1Err.Error(), "exit code: 137", "pid1 exits with sigkill")
-}
-
-type nopCloser struct {
-	io.Writer
-}
-
-func (n *nopCloser) Close() error {
-	return nil
 }
 
 func execMount(m cache.Mountable) executor.Mount {

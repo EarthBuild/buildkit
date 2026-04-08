@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/v2/core/content"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/buildkit/util/contentutil"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -26,9 +26,9 @@ func NewMultiMultiProvider() *MultiMultiProvider {
 }
 
 type imgData struct {
-	base     content.Provider
+	base     content.InfoReaderProvider
 	baseDgst digest.Digest
-	subs     map[digest.Digest]content.Provider
+	subs     map[digest.Digest]content.InfoReaderProvider
 }
 
 // MultiMultiProvider is a provider backed by a set of images, each of which is made out of
@@ -51,7 +51,7 @@ func (mmp *MultiMultiProvider) ReaderAt(ctx context.Context, desc ocispecs.Descr
 		}
 		return mp.ReaderAt(ctx, desc)
 	}
-	return nil, errors.Wrapf(errdefs.ErrNotFound, "content %v", desc.Digest)
+	return nil, errors.Wrapf(cerrdefs.ErrNotFound, "content %v", desc.Digest)
 }
 
 // Get returns a read-only MultiProvider and the base digest for a given imgName.
@@ -64,7 +64,7 @@ func (mmp *MultiMultiProvider) Get(ctx context.Context, imgName string) (*conten
 func (mmp *MultiMultiProvider) getNoLock(ctx context.Context, imgName string) (*contentutil.MultiProvider, digest.Digest, error) {
 	imgData, ok := mmp.imgs[imgName]
 	if !ok {
-		return nil, "", errors.Wrapf(errdefs.ErrNotFound, "img name %v", imgName)
+		return nil, "", errors.Wrapf(cerrdefs.ErrNotFound, "img name %v", imgName)
 	}
 	mp := contentutil.NewMultiProvider(imgData.base)
 	for dgst, p := range imgData.subs {
@@ -74,12 +74,12 @@ func (mmp *MultiMultiProvider) getNoLock(ctx context.Context, imgName string) (*
 }
 
 // AddImgSub adds a new child content provider for an image.
-func (mmp *MultiMultiProvider) AddImgSub(imgName string, dgst digest.Digest, p content.Provider) error {
+func (mmp *MultiMultiProvider) AddImgSub(imgName string, dgst digest.Digest, p content.InfoReaderProvider) error {
 	mmp.mu.Lock()
 	defer mmp.mu.Unlock()
 	imgData, ok := mmp.imgs[imgName]
 	if !ok {
-		return errors.Wrapf(errdefs.ErrNotFound, "img name %v", imgName)
+		return errors.Wrapf(cerrdefs.ErrNotFound, "img name %v", imgName)
 	}
 	imgData.subs[dgst] = p
 	mmp.addDigestEntry(dgst, imgName)
@@ -87,7 +87,7 @@ func (mmp *MultiMultiProvider) AddImgSub(imgName string, dgst digest.Digest, p c
 }
 
 // AddImg adds a new child image. The image is removed from the collection when the context is canceled.
-func (mmp *MultiMultiProvider) AddImg(ctx context.Context, imgName string, base content.Provider, baseDigest digest.Digest) error {
+func (mmp *MultiMultiProvider) AddImg(ctx context.Context, imgName string, base content.InfoReaderProvider, baseDigest digest.Digest) error {
 	if baseDigest == "" {
 		return errors.Errorf("baseDigest cant be empty")
 	}
@@ -123,7 +123,7 @@ func (mmp *MultiMultiProvider) AddImg(ctx context.Context, imgName string, base 
 	imgData := &imgData{
 		base:     base,
 		baseDgst: baseDigest,
-		subs:     make(map[digest.Digest]content.Provider),
+		subs:     make(map[digest.Digest]content.InfoReaderProvider),
 	}
 	mmp.imgs[imgName] = imgData
 	imgData.subs[baseDigest] = base

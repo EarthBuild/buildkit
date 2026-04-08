@@ -33,7 +33,7 @@ func main() {
 }
 
 func goBuildBase() llb.State {
-	goAlpine := llb.Image("docker.io/library/golang:1.20-alpine")
+	goAlpine := llb.Image("docker.io/library/golang:1.26-alpine")
 	return goAlpine.
 		AddEnv("PATH", "/usr/local/go/bin:"+system.DefaultPathEnvUnix).
 		AddEnv("GOPATH", "/go").
@@ -59,7 +59,7 @@ func containerd(version string) llb.State {
 	return goRepo(
 		goBuildBase().
 			Run(llb.Shlex("apk add --no-cache btrfs-progs-dev")).Root(),
-		"github.com/containerd/containerd", version, llb.KeepGitDir())(
+		"github.com/containerd/containerd/v2/client", version, llb.KeepGitDir())(
 		llb.Shlex("make bin/containerd"),
 	)
 }

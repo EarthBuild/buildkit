@@ -22,8 +22,14 @@ cross:
 .PHONY: images
 images:
 # moby/buildkit:local and moby/buildkit:local-rootless are created on Docker
-	hack/images local moby/buildkit
-	TARGET=rootless hack/images local moby/buildkit
+	$(BUILDX_CMD) bake image
+	IMAGE_TARGET=rootless $(BUILDX_CMD) bake image
+
+.PHONY: frontends
+frontends:
+# docker/dockerfile:local and docker/dockerfile:local-labs are created on Docker
+	$(BUILDX_CMD) bake frontend-image
+	FRONTEND_CHANNEL=labs $(BUILDX_CMD) bake frontend-image
 
 .PHONY: install
 install:
@@ -32,7 +38,9 @@ install:
 
 .PHONY: release
 release:
-	./hack/release
+	$(BUILDX_CMD) bake release
+	mv -f $(CURDIR)/bin/release/**/* $(CURDIR)/bin/release/
+	find $(CURDIR)/bin/release -type d -empty -delete
 
 .PHONY: clean
 clean:
@@ -70,6 +78,10 @@ validate-authors:
 validate-generated-files:
 	$(BUILDX_CMD) bake validate-generated-files
 
+.PHONY: validate-archutil
+validate-archutil:
+	$(BUILDX_CMD) bake validate-archutil
+
 .PHONY: validate-doctoc
 validate-doctoc:
 	$(BUILDX_CMD) bake validate-doctoc
@@ -79,7 +91,7 @@ validate-docs:
 	$(BUILDX_CMD) bake validate-docs
 
 .PHONY: validate-all
-validate-all: test lint validate-vendor validate-generated-files validate-doctoc validate-docs
+validate-all: test lint validate-vendor validate-generated-files validate-archutil validate-doctoc validate-docs
 
 .PHONY: vendor
 vendor:
@@ -93,6 +105,10 @@ vendor:
 generated-files:
 	$(BUILDX_CMD) bake generated-files
 
+.PHONY: archutil
+archutil:
+	$(BUILDX_CMD) bake archutil
+
 .PHONY: authors
 authors:
 	$(BUILDX_CMD) bake authors
@@ -104,6 +120,10 @@ doctoc:
 .PHONY: docs
 docs:
 	$(BUILDX_CMD) bake docs
+
+.PHONY: docs-dockerfile
+docs-dockerfile:
+	$(BUILDX_CMD) bake docs-dockerfile
 
 .PHONY: mod-outdated
 mod-outdated:

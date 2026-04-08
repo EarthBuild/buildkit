@@ -8,6 +8,7 @@ import (
 	"github.com/moby/buildkit/cache/contenthash"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
+	"github.com/moby/buildkit/util/cachedigest"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
@@ -20,6 +21,7 @@ type Selector struct {
 	FollowLinks     bool
 	IncludePatterns []string
 	ExcludePatterns []string
+	RequiredPaths   []string
 }
 
 func (sel Selector) HasWildcardOrFilters() bool {
@@ -42,7 +44,6 @@ func NewContentHashFunc(selectors []Selector) solver.ResultBasedCacheFunc {
 		eg, ctx := errgroup.WithContext(ctx)
 
 		for i, sel := range selectors {
-			i, sel := i, sel
 			eg.Go(func() error {
 				dgst, err := contenthash.Checksum(
 					ctx, ref.ImmutableRef, path.Join("/", sel.Path),
@@ -51,6 +52,7 @@ func NewContentHashFunc(selectors []Selector) solver.ResultBasedCacheFunc {
 						FollowLinks:     sel.FollowLinks,
 						IncludePatterns: sel.IncludePatterns,
 						ExcludePatterns: sel.ExcludePatterns,
+						RequiredPaths:   sel.RequiredPaths,
 					},
 					s,
 				)
@@ -66,6 +68,6 @@ func NewContentHashFunc(selectors []Selector) solver.ResultBasedCacheFunc {
 			return "", err
 		}
 
-		return digest.FromBytes(bytes.Join(dgsts, []byte{0})), nil
+		return cachedigest.FromBytes(bytes.Join(dgsts, []byte{0}), cachedigest.TypeDigestList)
 	}
 }

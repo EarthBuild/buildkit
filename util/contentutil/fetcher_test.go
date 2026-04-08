@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/v2/core/content"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/require"
@@ -31,7 +31,7 @@ func TestFetcher(t *testing.T) {
 
 	dt, err := content.ReadBlob(ctx, b1, ocispecs.Descriptor{Digest: digest.FromBytes([]byte("foobar"))})
 	require.NoError(t, err)
-	require.Equal(t, string(dt), "foobar")
+	require.Equal(t, "foobar", string(dt))
 
 	rdr, err := p.ReaderAt(ctx, ocispecs.Descriptor{Digest: digest.FromBytes([]byte("foobar"))})
 	require.NoError(t, err)

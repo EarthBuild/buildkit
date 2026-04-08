@@ -14,6 +14,7 @@ import (
 	"github.com/moby/buildkit/util/testutil/integration"
 	"github.com/moby/buildkit/util/testutil/workers"
 	"github.com/stretchr/testify/require"
+	"github.com/tonistiigi/fsutil"
 )
 
 var runNetworkTests = integration.TestFuncs(
@@ -31,7 +32,7 @@ func testRunDefaultNetwork(t *testing.T, sb integration.Sandbox) {
 	if os.Getenv("BUILDKIT_RUN_NETWORK_INTEGRATION_TESTS") == "" {
 		t.SkipNow()
 	}
-	if sb.Rootless() {
+	if sb.Rootless() { // bridge is not used by default, even with detach-netns
 		t.SkipNow()
 	}
 
@@ -52,7 +53,7 @@ RUN ip link show eth0
 	defer c.Close()
 
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -87,7 +88,7 @@ RUN --network=none ! ip link show eth0
 	defer c.Close()
 
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -127,11 +128,11 @@ RUN --network=host nc 127.0.0.1 %s | grep foo
 	defer c.Close()
 
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
-		AllowedEntitlements: []entitlements.Entitlement{entitlements.EntitlementNetworkHost},
+		AllowedEntitlements: []string{entitlements.EntitlementNetworkHost.String()},
 	}, nil)
 
 	hostAllowed := sb.Value("network.host")
@@ -146,11 +147,12 @@ RUN --network=host nc 127.0.0.1 %s | grep foo
 			require.NoError(t, err)
 		}
 	default:
-		require.Fail(t, "unexpected network.host mode %q", hostAllowed)
+		require.Fail(t, fmt.Sprintf("unexpected network.host mode %q", hostAllowed))
 	}
 }
 
 func testRunGlobalNetwork(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	f := getFrontend(t, sb)
 
 	s, err := echoserver.NewTestServer("foo")
@@ -174,11 +176,11 @@ RUN --network=none ! nc -z 127.0.0.1 %s
 	defer c.Close()
 
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
-		AllowedEntitlements: []entitlements.Entitlement{entitlements.EntitlementNetworkHost},
+		AllowedEntitlements: []string{entitlements.EntitlementNetworkHost.String()},
 		FrontendAttrs: map[string]string{
 			"force-network-mode": "host",
 		},
@@ -196,6 +198,6 @@ RUN --network=none ! nc -z 127.0.0.1 %s
 			require.NoError(t, err)
 		}
 	default:
-		require.Fail(t, "unexpected network.host mode %q", hostAllowed)
+		require.Fail(t, fmt.Sprintf("unexpected network.host mode %q", hostAllowed))
 	}
 }

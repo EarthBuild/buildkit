@@ -10,11 +10,11 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/executor"
 	resourcestypes "github.com/moby/buildkit/executor/resources/types"
@@ -28,6 +28,7 @@ import (
 	"github.com/moby/buildkit/solver/llbsolver/mounts"
 	"github.com/moby/buildkit/solver/llbsolver/ops/opsutils"
 	"github.com/moby/buildkit/solver/pb"
+	"github.com/moby/buildkit/util/cachedigest"
 	"github.com/moby/buildkit/util/progress/logs"
 	"github.com/moby/buildkit/util/semutil"
 	utilsystem "github.com/moby/buildkit/util/system"
@@ -100,42 +101,62 @@ func (e *ExecOp) Proto() *pb.ExecOp {
 	return e.op
 }
 
-func cloneExecOp(old *pb.ExecOp) pb.ExecOp {
-	n := *old
-	meta := *n.Meta
-	meta.ExtraHosts = nil
-	for i := range n.Meta.ExtraHosts {
-		h := *n.Meta.ExtraHosts[i]
-		meta.ExtraHosts = append(meta.ExtraHosts, &h)
-	}
-	n.Meta = &meta
-	n.Mounts = nil
-	for i := range old.Mounts {
-		m := *old.Mounts[i]
-		n.Mounts = append(n.Mounts, &m)
-	}
-	return n
+func cloneExecOp(old *pb.ExecOp) *pb.ExecOp {
+	return old.CloneVT()
 }
 
-func (e *ExecOp) CacheMap(ctx context.Context, g session.Group, index int) (*solver.CacheMap, bool, error) {
+func checkShouldClearCacheOpts(m *pb.Mount) bool {
+	if m.CacheOpt == nil {
+		return false
+	}
+
+	// This is a dockerfile default cache mount.
+	// We are treating this as a special case so we don't cause a cache miss unintentionally.
+	if m.CacheOpt.ID == m.Dest && m.CacheOpt.Sharing == 0 {
+		return false
+	}
+
+	// Check the case where a dockerfile cache-namespace may be used.
+	// This would be `<namespace>/<dest>`
+	_, trimmed, ok := strings.Cut(m.CacheOpt.ID, "/")
+	if ok && trimmed == m.Dest && m.CacheOpt.Sharing == 0 {
+		return false
+	}
+
+	return true
+}
+
+func (e *ExecOp) CacheMap(ctx context.Context, jobCtx solver.JobContext, index int) (*solver.CacheMap, bool, error) {
 	op := cloneExecOp(e.op)
+
 	for i := range op.Meta.ExtraHosts {
 		h := op.Meta.ExtraHosts[i]
 		h.IP = ""
 		op.Meta.ExtraHosts[i] = h
 	}
+
 	for i := range op.Mounts {
-		op.Mounts[i].Selector = ""
+		m := op.Mounts[i]
+		m.Selector = ""
+
+		if checkShouldClearCacheOpts(m) {
+			m.CacheOpt.ID = ""
+			m.CacheOpt.Sharing = 0
+		}
 	}
 	op.Meta.ProxyEnv = nil
 
-	p := platforms.DefaultSpec()
+	var p ocispecs.Platform
 	if e.platform != nil {
 		p = ocispecs.Platform{
 			OS:           e.platform.OS,
 			Architecture: e.platform.Architecture,
 			Variant:      e.platform.Variant,
+			OSVersion:    e.platform.OSVersion,
+			OSFeatures:   e.platform.OSFeatures,
 		}
+	} else {
+		p = platforms.DefaultSpec()
 	}
 
 	// Special case for cache compatibility with buggy versions that wrongly
@@ -155,24 +176,32 @@ func (e *ExecOp) CacheMap(ctx context.Context, g session.Group, index int) (*sol
 	}
 
 	dt, err := json.Marshal(struct {
-		Type    string
-		Exec    *pb.ExecOp
-		OS      string
-		Arch    string
-		Variant string `json:",omitempty"`
+		Type       string
+		Exec       *pb.ExecOp
+		OS         string
+		Arch       string
+		Variant    string   `json:",omitempty"`
+		OSVersion  string   `json:",omitempty"`
+		OSFeatures []string `json:",omitempty"`
 	}{
-		Type:    execCacheType,
-		Exec:    &op,
-		OS:      p.OS,
-		Arch:    p.Architecture,
-		Variant: p.Variant,
+		Type:       execCacheType,
+		Exec:       op,
+		OS:         p.OS,
+		Arch:       p.Architecture,
+		Variant:    p.Variant,
+		OSVersion:  p.OSVersion,
+		OSFeatures: p.OSFeatures,
 	})
 	if err != nil {
 		return nil, false, err
 	}
 
+	dgst, err := cachedigest.FromBytes(dt, cachedigest.TypeJSON)
+	if err != nil {
+		return nil, false, err
+	}
 	cm := &solver.CacheMap{
-		Digest: digest.FromBytes(dt),
+		Digest: dgst,
 		Deps: make([]struct {
 			Selector          digest.Digest
 			ComputeDigestFunc solver.ResultBasedCacheFunc
@@ -193,16 +222,38 @@ func (e *ExecOp) CacheMap(ctx context.Context, g session.Group, index int) (*sol
 			}
 			cm.Deps[i].Selector = digest.FromBytes(bytes.Join(dgsts, []byte{0}))
 		}
-		if !dep.NoContentBasedHash {
+		if dep.ContentBasedHash {
 			cm.Deps[i].ComputeDigestFunc = opsutils.NewContentHashFunc(toSelectors(dedupePaths(dep.Selectors)))
 		}
 		cm.Deps[i].PreprocessFunc = unlazyResultFunc
+	}
+
+	if e.w != nil && e.w.CDIManager() != nil {
+		for _, d := range e.op.CdiDevices {
+			setup, ok := e.w.CDIManager().OnDemandInstaller(d.Name)
+			if ok {
+				prev := cm.Deps[0].PreprocessFunc
+				cm.Deps[0].PreprocessFunc = func(ctx context.Context, r solver.Result, g session.Group) error {
+					if err := prev(ctx, r, g); err != nil {
+						return err
+					}
+					// we could pass glibc/musl type in here based on rootfs to get correct dynamic libs
+					return setup(ctx)
+				}
+			}
+		}
 	}
 
 	return cm, true, nil
 }
 
 func dedupePaths(inp []string) []string {
+	// If there's one or fewer inputs, then dedupe won't do anything.
+	// Skip the allocations and logic of this function in that case.
+	if len(inp) <= 1 {
+		return inp
+	}
+
 	old := make(map[string]struct{}, len(inp))
 	for _, p := range inp {
 		old[p] = struct{}{}
@@ -211,7 +262,10 @@ func dedupePaths(inp []string) []string {
 	for p1 := range old {
 		var skip bool
 		for p2 := range old {
-			if p1 != p2 && strings.HasPrefix(p1, p2+"/") {
+			// Check if p2 is a prefix of p1. Ensure that p2 ends in a slash
+			// so that we know p2 is a parent directory of p1. We don't want
+			// /foo to be a parent of /foobar.
+			if p1 != p2 && strings.HasPrefix(p1, forceTrailingSlash(p2)) {
 				skip = true
 				break
 			}
@@ -220,56 +274,103 @@ func dedupePaths(inp []string) []string {
 			paths = append(paths, p1)
 		}
 	}
-	sort.Slice(paths, func(i, j int) bool {
-		return paths[i] < paths[j]
-	})
+	slices.Sort(paths)
 	return paths
+}
+
+// forceTrailingSlash ensures that the path always ends with a path separator.
+// If the path already ends with a /, this method returns the same string.
+func forceTrailingSlash(s string) string {
+	if strings.HasSuffix(s, "/") {
+		return s
+	}
+	return s + "/"
 }
 
 func toSelectors(p []string) []opsutils.Selector {
 	sel := make([]opsutils.Selector, 0, len(p))
 	for _, p := range p {
+		if p == "" || p == "/" {
+			return nil
+		}
 		sel = append(sel, opsutils.Selector{Path: p, FollowLinks: true})
 	}
 	return sel
 }
 
 type dep struct {
-	Selectors          []string
-	NoContentBasedHash bool
+	Selectors []string
+
+	// ContentBasedHash enables content-based caching. This is used to ensure
+	// that all caching is done safely and efficiently.
+	ContentBasedHash bool
 }
 
 func (e *ExecOp) getMountDeps() ([]dep, error) {
 	deps := make([]dep, e.numInputs)
 	for _, m := range e.op.Mounts {
-		if m.Input == pb.Empty {
+		switch m.MountType {
+		case pb.MountType_SECRET, pb.MountType_SSH, pb.MountType_TMPFS:
+			continue
+		}
+
+		if m.Input == int64(pb.Empty) {
 			continue
 		}
 		if int(m.Input) >= len(deps) {
 			return nil, errors.Errorf("invalid mountinput %v", m)
 		}
 
-		// Mark the selector path as used. In this section, we need to
-		// record root selectors so the selection criteria isn't narrowed
-		// erroneously.
 		sel := path.Join("/", m.Selector)
 		deps[m.Input].Selectors = append(deps[m.Input].Selectors, sel)
 
-		if (!m.Readonly || m.Dest == pb.RootMount) && m.Output != -1 { // exclude read-only rootfs && read-write mounts
-			deps[m.Input].NoContentBasedHash = true
-		}
-	}
+		// Assume that we *cannot* perform content-based caching, and then
+		// enable it selectively only for cases where we want to
+		contentBasedCache := false
 
-	// Remove extraneous selectors that may have been generated from above.
-	for i, dep := range deps {
-		for _, sel := range dep.Selectors {
-			// If the root path is included in the list of selectors,
-			// this is the same as if no selector was used. Zero out this field.
-			if sel == "/" {
-				deps[i].Selectors = nil
-				break
+		// Allow content-based cached where safe - these are enforced to avoid
+		// the following case:
+		// - A "snapshot" contains "foo/a.txt" and "bar/b.txt"
+		// - "RUN --mount from=snapshot,src=bar touch bar/c.txt" creates a new
+		//   file in bar
+		// - If we run again, but this time "snapshot" contains a new
+		//   "foo/sneaky.txt", the content-based cache matches the previous
+		//   run, since we only select "bar"
+		// - But this cached result is incorrect - "foo/sneaky.txt" isn't in
+		//   our cached result, but it is in our input.
+		if m.Output == int64(pb.SkipOutput) {
+			// if the mount has no outputs, it's safe to enable content-based
+			// caching, since it's guaranteed to not be used as an input for
+			// any future steps
+			contentBasedCache = true
+		} else if m.Readonly {
+			// if the mount is read-only, then it's also safe, since it can't
+			// be modified by the operation
+			contentBasedCache = true
+		} else if sel == pb.RootMount {
+			// if the mount mounts the entire source, then it's also safe,
+			// since there are no unselected "sneaky" files
+			contentBasedCache = true
+		}
+
+		// Now apply the user-specified option.
+		switch m.ContentCache {
+		case pb.MountContentCache_OFF:
+			contentBasedCache = false
+		case pb.MountContentCache_ON:
+			if !contentBasedCache {
+				// If we can't enable cache for safety, then force-enabling it is invalid
+				return nil, errors.Errorf("invalid mount cache content %v", m)
+			}
+		case pb.MountContentCache_DEFAULT:
+			if m.Dest == pb.RootMount {
+				// we explicitly choose to not implement it on the root mount,
+				// since this is likely very expensive (and not incredibly useful)
+				contentBasedCache = false
 			}
 		}
+
+		deps[m.Input].ContentBasedHash = contentBasedCache
 	}
 	return deps, nil
 }
@@ -283,7 +384,7 @@ func addDefaultEnvvar(env []string, k, v string) []string {
 	return append(env, k+"="+v)
 }
 
-func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Result) (results []solver.Result, err error) {
+func (e *ExecOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []solver.Result) (results []solver.Result, err error) {
 	trace.SpanFromContext(ctx).AddEvent("ExecOp started")
 
 	refs := make([]*worker.WorkerRef, len(inputs))
@@ -299,6 +400,7 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 	if e.platform != nil {
 		platformOS = e.platform.OS
 	}
+	g := jobCtx.Session()
 	p, err := container.PrepareMounts(ctx, e.mm, e.cm, g, e.op.Meta.Cwd, e.op.Mounts, refs, func(m *pb.Mount, ref cache.ImmutableRef) (cache.MutableRef, error) {
 		desc := fmt.Sprintf("mount %s from exec %s", m.Dest, strings.Join(e.op.Meta.Args, " "))
 		return e.cm.New(ctx, ref, g, cache.WithDescription(desc))
@@ -351,7 +453,7 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 		return nil, err
 	}
 
-	emu, err := getEmulator(ctx, e.platform, e.cm.IdentityMapping())
+	emu, err := getEmulator(ctx, e.platform)
 	if err != nil {
 		return nil, err
 	}
@@ -374,6 +476,7 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 		ReadonlyRootFS:            p.ReadonlyRootFS,
 		ExtraHosts:                extraHosts,
 		Ulimit:                    e.op.Meta.Ulimit,
+		CDIDevices:                e.op.CdiDevices,
 		CgroupParent:              e.op.Meta.CgroupParent,
 		NetMode:                   e.op.Network,
 		SecurityMode:              e.op.Security,
@@ -387,13 +490,23 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 	if e.platform != nil {
 		currentOS = e.platform.OS
 	}
-	meta.Env = addDefaultEnvvar(meta.Env, "PATH", utilsystem.DefaultPathEnv(currentOS))
+	// don't set PATH for Windows. #5445
+	if currentOS != "windows" {
+		meta.Env = addDefaultEnvvar(meta.Env, "PATH", utilsystem.DefaultPathEnv(currentOS))
+	}
 
 	secretEnv, err := e.loadSecretEnv(ctx, g)
 	if err != nil {
 		return nil, err
 	}
 	meta.Env = append(meta.Env, secretEnv...)
+
+	if e.op.Meta.ValidExitCodes != nil {
+		meta.ValidExitCodes = make([]int, len(e.op.Meta.ValidExitCodes))
+		for i, code := range e.op.Meta.ValidExitCodes {
+			meta.ValidExitCodes[i] = int(code)
+		}
+	}
 
 	stdout, stderr, flush := logs.NewLogStreams(ctx, os.Getenv("BUILDKIT_DEBUG_EXEC_OUTPUT") == "1")
 	defer stdout.Close()
@@ -680,14 +793,11 @@ func (e *ExecOp) loadSecretEnv(ctx context.Context, g session.Group) ([]string, 
 		err = e.sm.Any(ctx, g, func(ctx context.Context, _ string, caller session.Caller) error {
 			dt, err = secrets.GetSecret(ctx, caller, id)
 			if err != nil {
-				if errors.Is(err, secrets.ErrNotFound) && sopt.Optional {
-					return nil
-				}
 				return err
 			}
 			return nil
 		})
-		if err != nil {
+		if err != nil && (!errors.Is(err, secrets.ErrNotFound) || !sopt.Optional) {
 			return nil, err
 		}
 		out = append(out, fmt.Sprintf("%s=%s", sopt.Name, string(dt)))
