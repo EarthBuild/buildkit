@@ -13624,7 +13624,8 @@ func parseFSMetadata(t *testing.T, dt []byte) []fsutiltypes.Stat {
 		dt = dt[4:]
 		err := s.Unmarshal(dt[:n])
 		require.NoError(t, err)
-		m = append(m, *s.CloneVT())
+		clone := s
+		m = append(m, clone)
 		dt = dt[n:]
 	}
 	return m
