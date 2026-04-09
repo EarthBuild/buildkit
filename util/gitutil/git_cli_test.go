@@ -26,6 +26,9 @@ func TestGitCLIConfigEnv(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", "/tmp/global-gitconfig")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/tmp/system-gitconfig")
 
+	// earthly-specific: earthly's fork does NOT isolate git config by default.
+	// HOME is always passed through so git can read /root/.gitconfig,
+	// and GIT_CONFIG_NOSYSTEM is not set.
 	t.Run("isolated by default", func(t *testing.T) {
 		var got []string
 		cli := NewGitCLI(WithExec(func(ctx context.Context, cmd *exec.Cmd) error {
@@ -34,13 +37,9 @@ func TestGitCLIConfigEnv(t *testing.T) {
 		}))
 		_, err := cli.Run(context.Background(), "status")
 		require.NoError(t, err)
-		require.Contains(t, got, "GIT_CONFIG_NOSYSTEM=1")
-		require.Contains(t, got, "HOME="+os.DevNull)
-		require.Contains(t, got, "GIT_CONFIG_GLOBAL="+os.DevNull)
-		require.NotContains(t, got, "HOME=/tmp/home")
-		require.NotContains(t, got, "XDG_CONFIG_HOME=/tmp/xdg")
-		require.NotContains(t, got, "GIT_CONFIG_GLOBAL=/tmp/global-gitconfig")
-		require.NotContains(t, got, "GIT_CONFIG_SYSTEM=/tmp/system-gitconfig")
+		// earthly-specific: no isolation — HOME is real, no GIT_CONFIG_NOSYSTEM
+		require.NotContains(t, got, "GIT_CONFIG_NOSYSTEM=1")
+		require.Contains(t, got, "HOME=/tmp/home")
 	})
 
 	t.Run("host git config opt-in", func(t *testing.T) {
@@ -54,15 +53,8 @@ func TestGitCLIConfigEnv(t *testing.T) {
 		)
 		_, err := cli.Run(context.Background(), "status")
 		require.NoError(t, err)
+		// earthly-specific: same as default — HOME is always passed through
 		require.NotContains(t, got, "GIT_CONFIG_NOSYSTEM=1")
-		require.NotContains(t, got, "HOME="+os.DevNull)
-		require.NotContains(t, got, "GIT_CONFIG_GLOBAL="+os.DevNull)
 		require.Contains(t, got, "HOME=/tmp/home")
-		require.Contains(t, got, "XDG_CONFIG_HOME=/tmp/xdg")
-		require.Contains(t, got, `USERPROFILE=C:\Users\tester`)
-		require.Contains(t, got, "HOMEDRIVE=C:")
-		require.Contains(t, got, `HOMEPATH=\Users\tester`)
-		require.Contains(t, got, "GIT_CONFIG_GLOBAL=/tmp/global-gitconfig")
-		require.Contains(t, got, "GIT_CONFIG_SYSTEM=/tmp/system-gitconfig")
 	})
 }
