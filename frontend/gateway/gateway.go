@@ -458,8 +458,8 @@ func serveLLBBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLB
 		grpc.StreamInterceptor(grpcerrors.StreamServerInterceptor),
 		grpc.MaxRecvMsgSize(defaults.DefaultMaxRecvMsgSize),
 		grpc.MaxSendMsgSize(defaults.DefaultMaxSendMsgSize),
-		grpc.InitialWindowSize(65535 * 32),          // earthly-specific
-		grpc.InitialConnWindowSize(65535 * 16),       // earthly-specific
+		grpc.InitialWindowSize(65535 * 32),     // earthly-specific
+		grpc.InitialConnWindowSize(65535 * 16), // earthly-specific
 	}
 	server := grpc.NewServer(serverOpt...)
 	grpc_health_v1.RegisterHealthServer(server, health.NewServer())

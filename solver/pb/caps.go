@@ -31,9 +31,9 @@ const (
 	CapSourceGitKnownSSHHosts   apicaps.CapID = "source.git.knownsshhosts"
 	CapSourceGitMountSSHSock    apicaps.CapID = "source.git.mountsshsock"
 	CapSourceGitSubdir          apicaps.CapID = "source.git.subdir"
-	CapSourceGitLFSInclude      apicaps.CapID = "source.git.lfsinclude"      // earthly-specific
-	CapSourceGitLogLevel        apicaps.CapID = "source.git.logLevel"        // earthly-specific
-	CapSourceGitSSHCommand      apicaps.CapID = "source.git.sshCommand"      // earthly-specific
+	CapSourceGitLFSInclude      apicaps.CapID = "source.git.lfsinclude" // earthly-specific
+	CapSourceGitLogLevel        apicaps.CapID = "source.git.logLevel"   // earthly-specific
+	CapSourceGitSSHCommand      apicaps.CapID = "source.git.sshCommand" // earthly-specific
 	CapSourceGitChecksum        apicaps.CapID = "source.git.checksum"
 	CapSourceGitSkipSubmodules  apicaps.CapID = "source.git.skipsubmodules"
 	CapSourceGitSignatureVerify apicaps.CapID = "source.git.signatureverify"

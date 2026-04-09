@@ -103,7 +103,7 @@ func (s *statInfo) Name() string {
 }
 
 func (s *statInfo) Size() int64 {
-	return s.Stat.Size_
+	return s.Size_
 }
 
 func (s *statInfo) Mode() os.FileMode {

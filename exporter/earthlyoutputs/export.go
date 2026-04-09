@@ -16,8 +16,7 @@ import (
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	remoteserrors "github.com/containerd/containerd/v2/core/remotes/errors"
 	"github.com/containerd/platforms"
-	"github.com/docker/distribution/reference"
-	"github.com/moby/sys/user"
+	"github.com/distribution/reference"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/exporter"
@@ -34,6 +33,7 @@ import (
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/push"
+	"github.com/moby/sys/user"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -451,7 +451,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		resp[descKey] = base64.StdEncoding.EncodeToString(dtDesc)
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	timeoutCtx, cancel := context.WithTimeoutCause(ctx, 5*time.Second, nil)
 	defer cancel()
 	caller, err := e.opt.SessionManager.Get(timeoutCtx, sessionID, false)
 	if err != nil {
@@ -779,10 +779,10 @@ func exportDirFunc(ctx context.Context, md map[string]string, caller session.Cal
 				// apply host uid/gid
 				res = idMapFunc(p, st)
 			}
-			//TODO if opt.Epoch != nil {
-			//TODO 	// apply used-specified epoch time
-			//TODO 	st.ModTime = opt.Epoch.UnixNano()
-			//TODO }
+			// TODO if opt.Epoch != nil {
+			// TODO	// apply used-specified epoch time
+			// TODO	st.ModTime = opt.Epoch.UnixNano()
+			// TODO}
 			return res
 		}
 		fs, err = fsutil.NewFilterFS(fs, filterOpt)

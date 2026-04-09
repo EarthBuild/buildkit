@@ -56,7 +56,7 @@ func LocalhostExec(ctx context.Context, c session.Caller, args []string, dir str
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return errors.WithStack(err)
@@ -65,7 +65,7 @@ func LocalhostExec(ctx context.Context, c session.Caller, args []string, dir str
 		stderr.Write(msg.Stderr)
 		switch msg.Status {
 		case RUNNING:
-			//ignore
+			// ignore
 		case DONE:
 			if exitCodeSet {
 				panic("received multiple DONE messages (shouldn't happen)")
@@ -154,11 +154,11 @@ func receiveFile(stream Localhost_GetClient, dest string) (err error) {
 outer:
 	for {
 		msg, err := stream.Recv()
-		switch err {
-		case nil:
-		case io.EOF:
+		if err == nil {
+			// continue
+		} else if errors.Is(err, io.EOF) {
 			break outer
-		default:
+		} else {
 			return errors.WithStack(err)
 		}
 		_, err = f.Write(msg.Data)
@@ -270,7 +270,7 @@ func localhostPutSendFile(stream Localhost_PutClient, src, dst string) error {
 	for {
 		n, err := f.Read(buf)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return errors.Wrapf(err, "failed to read from %s", src)

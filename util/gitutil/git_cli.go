@@ -244,10 +244,10 @@ func (cli *GitCLI) Run(ctx context.Context, args ...string) (_ []byte, err error
 
 			"GIT_TERMINAL_PROMPT=0",
 			"GIT_SSH_COMMAND=" + getGitSSHCommand(cli.sshKnownHosts, logLevel, cli.sshCommand),
-			//	"GIT_TRACE=1",
+			// "GIT_TRACE=1",
 			// earthly-specific: Commented out. We do not want to disable reading from gitconfig.
-			//"GIT_CONFIG_NOSYSTEM=1", // Disable reading from system gitconfig.
-			//"HOME=/dev/null",        // Disable reading from user gitconfig.
+			// "GIT_CONFIG_NOSYSTEM=1", // Disable reading from system gitconfig.
+			// "HOME=/dev/null",        // Disable reading from user gitconfig.
 
 			"LC_ALL=C", // Ensure consistent output.
 		}

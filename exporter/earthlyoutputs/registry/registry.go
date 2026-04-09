@@ -35,10 +35,10 @@ storage:
 		Handler:           app,
 		ReadHeaderTimeout: 30 * time.Second,
 	}
-	ctx2, cancel := context.WithCancel(ctx)
+	ctx2, cancel := context.WithCancelCause(ctx)
 	go func() {
 		serveErr <- server.Serve(ln)
-		cancel()
+		cancel(nil)
 	}()
 	go func() {
 		<-ctx2.Done()

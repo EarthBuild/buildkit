@@ -389,8 +389,8 @@ func main() {
 		reflection.Register(server)
 
 		// Earthly specific.
-		ctxReg, cancelReg := context.WithCancel(ctx)
-		defer cancelReg()
+		ctxReg, cancelReg := context.WithCancelCause(ctx)
+		defer cancelReg(nil)
 		lrPort, ok := os.LookupEnv("BUILDKIT_LOCAL_REGISTRY_LISTEN_PORT")
 		lrAddr := fmt.Sprintf("0.0.0.0:%s", lrPort)
 		if ok {
@@ -400,7 +400,7 @@ func main() {
 				for {
 					select {
 					case <-shutdownCh:
-						cancelReg()
+						cancelReg(nil)
 					case err := <-serveErr:
 						if err != nil {
 							bklog.G(ctx).Errorf("Registry serve error: %s\n", err.Error())
@@ -451,7 +451,7 @@ func main() {
 		case <-ctx.Done():
 			err = context.Cause(ctx)
 		case <-shutdownCh:
-			cancelReg()
+			cancelReg(nil)
 			err = nil
 		}
 

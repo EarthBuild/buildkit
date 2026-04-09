@@ -43,7 +43,7 @@ func unaryTimeoutInterceptor() grpc.UnaryServerInterceptor {
 			go handleTimeout(done, cancel)
 			// End of TODO
 			resp, err := handler(ctx, req)
-			if errors.Is(err, context.Canceled) && context.Cause(ctx) == errSessionTimeout {
+			if errors.Is(err, context.Canceled) && errors.Is(context.Cause(ctx), errSessionTimeout) {
 				return resp, errors.Errorf("build exceeded max duration of %s", sessionTimeout.String())
 			}
 			return resp, err
@@ -65,7 +65,7 @@ func streamTimeoutInterceptor() grpc.StreamServerInterceptor {
 			go handleTimeout(done, cancel)
 			// End of TODO
 			err := handler(srv, newWrappedStream(ctx, stream))
-			if errors.Is(err, context.Canceled) && context.Cause(ctx) == errSessionTimeout {
+			if errors.Is(err, context.Canceled) && errors.Is(context.Cause(ctx), errSessionTimeout) {
 				return errors.Errorf("build exceeded max duration of %s", sessionTimeout.String())
 			}
 			return err

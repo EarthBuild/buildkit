@@ -321,11 +321,9 @@ type FSSyncTarget interface {
 }
 
 type fsSyncTarget struct {
-	id                int
-	outdir            string
-	outdirFunc        func(map[string]string) (string, error) // earthly-specific
-	f                 FileOutputFunc
-	verboseProgressCB fsutil.VerboseProgressCB // earthly-specific
+	id     int
+	outdir string
+	f      FileOutputFunc
 }
 
 func (target *fsSyncTarget) target() *fsSyncTarget {

@@ -1,10 +1,10 @@
 package socketforward
 
 import (
+	"context"
 	"io"
 
 	"github.com/pkg/errors"
-	context "golang.org/x/net/context"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -21,7 +21,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 		for {
 			if err := stream.RecvMsg(p); err != nil {
 				conn.Close()
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					return nil
 				}
 				return errors.WithStack(err)
@@ -29,7 +29,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 			select {
 			case <-ctx.Done():
 				conn.Close()
-				return ctx.Err()
+				return context.Cause(ctx)
 			default:
 			}
 			if _, err := conn.Write(p.Data); err != nil {
@@ -45,7 +45,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 			buf := make([]byte, 32*1024)
 			n, err := conn.Read(buf)
 			switch {
-			case err == io.EOF:
+			case errors.Is(err, io.EOF):
 				if closeStream != nil {
 					closeStream()
 				}
@@ -55,7 +55,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 			}
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return context.Cause(ctx)
 			default:
 			}
 			p := &BytesMessage{Data: buf[:n]}

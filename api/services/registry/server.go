@@ -1,4 +1,4 @@
-package earthly_registry_v1 //nolint:revive
+package earthly_registry_v1 //nolint:staticcheck
 
 import (
 	"io"
@@ -80,13 +80,12 @@ func (s *Server) Proxy(stream Registry_ProxyServer) error {
 
 	addr := strings.ReplaceAll(s.addr, "0.0.0.0", "127.0.0.1")
 
-	conn, err := net.Dial("tcp", addr)
+	ctx := stream.Context()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-
-	ctx := stream.Context()
 	eg, _ := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
@@ -143,7 +142,8 @@ func CopyWithDeadline(conn net.Conn, w io.Writer) (int64, error) {
 }
 
 func isNetTimeout(err error) bool {
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true
 	}
 	return false
