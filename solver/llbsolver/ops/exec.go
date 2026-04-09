@@ -592,7 +592,7 @@ func (e *ExecOp) doFromLocalHack(ctx context.Context, root executor.Mount, mount
 	}
 }
 
-func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
+func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session.Group, meta executor.Meta, _, _ io.WriteCloser) error {
 	if len(meta.Args) != 3 {
 		return errors.Errorf("CopyFileMagicStr takes exactly 2 args")
 	}
@@ -646,7 +646,7 @@ func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session
 
 var errSendFileMagicStrMissingArgs = errors.Errorf("SendFileMagicStr args missing; should be SendFileMagicStr [--dir] [--] <src> [<src> ...] <dst>")
 
-func (e *ExecOp) sendLocally(ctx context.Context, root executor.Mount, mounts []executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
+func (e *ExecOp) sendLocally(ctx context.Context, _ executor.Mount, mounts []executor.Mount, g session.Group, meta executor.Meta, _, _ io.WriteCloser) error {
 	i := 0
 	nArgs := len(meta.Args)
 
@@ -728,7 +728,7 @@ func (e *ExecOp) sendLocally(ctx context.Context, root executor.Mount, mounts []
 	})
 }
 
-func (e *ExecOp) execLocally(ctx context.Context, root executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
+func (e *ExecOp) execLocally(ctx context.Context, _ executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
 	if len(meta.Args) == 0 || meta.Args[0] != localhost.RunOnLocalHostMagicStr {
 		panic("first arg should be RunOnLocalHostMagicStr; this should not happen")
 	}

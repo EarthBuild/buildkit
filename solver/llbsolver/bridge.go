@@ -183,7 +183,7 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 
 // getExporter is earthly specific code which extracts the configured exporter
 // from the job's metadata
-func (b *llbBridge) getExporter(ctx context.Context) (*ExporterRequest, error) {
+func (b *llbBridge) getExporter(_ context.Context) (*ExporterRequest, error) {
 	var exp *ExporterRequest
 	numExporters := 0
 	b.builder.EachValue(context.TODO(), keyEarthlyExporterInstance, func(v any) error {
