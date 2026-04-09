@@ -76,7 +76,8 @@ RUN --mount=type=bind,target=github.com/moby/buildkit <<EOT
   set -ex
   mkdir /out
   find github.com/moby/buildkit -name '*.proto' -o -name vendor -prune -false | xargs \
-    protoc --go_out=/out --go-grpc_out=require_unimplemented_servers=false:/out \
+    protoc -I/usr/local/include/github.com/tonistiigi/fsutil/types \
+           --go_out=/out --go-grpc_out=require_unimplemented_servers=false:/out \
            --go-vtproto_out=features=marshal+unmarshal+size+equal+pool+clone:/out
 EOT
 
