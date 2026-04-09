@@ -10,10 +10,10 @@ import (
 )
 
 func TestGetGitSSHCommandUsesConfigPath(t *testing.T) {
-	cmd := getGitSSHCommand("")
+	cmd := getGitSSHCommand("", GitLogLevelDefault, "")
 	require.Equal(t, "ssh -F "+os.DevNull+" -o StrictHostKeyChecking=no", cmd)
 
-	cmd = getGitSSHCommand("/known-hosts")
+	cmd = getGitSSHCommand("/known-hosts", GitLogLevelDefault, "")
 	require.Equal(t, "ssh -F "+os.DevNull+" -o UserKnownHostsFile=/known-hosts", cmd)
 }
 
