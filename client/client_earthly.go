@@ -20,7 +20,7 @@ type withAdditionalHeaders struct {
 func (*withAdditionalHeaders) isClientOpt() {}
 
 func headersUnaryInterceptor(kv ...string) grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		ctx = metadata.AppendToOutgoingContext(ctx, kv...)
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}

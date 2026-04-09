@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"maps"
 	"strings"
 	"time"
 
@@ -268,9 +269,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		return nil, nil, nil, errors.Errorf("metadata is missing")
 	}
 
-	for k, v := range e.meta {
-		src.Metadata[k] = v
-	}
+	maps.Copy(src.Metadata, e.meta)
 	images := make(map[string]*imgData)
 	hasAnyTarExport := false
 	hasAnyLocalRegExport := false
@@ -279,8 +278,8 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		simpleMd := make(map[string][]byte)
 		mdPrefix := fmt.Sprintf("ref/%s/", k)
 		for mdK, mdV := range src.Metadata {
-			if strings.HasPrefix(mdK, mdPrefix) {
-				simpleMd[strings.TrimPrefix(mdK, mdPrefix)] = mdV
+			if after, ok := strings.CutPrefix(mdK, mdPrefix); ok {
+				simpleMd[after] = mdV
 			}
 		}
 		inlineCacheK := fmt.Sprintf("%s/%s", earthlyInlineCacheKey, k)
@@ -816,9 +815,7 @@ func addAnnotations(m map[digest.Digest]map[string]string, desc ocispecs.Descrip
 		m[desc.Digest] = desc.Annotations
 		return
 	}
-	for k, v := range desc.Annotations {
-		a[k] = v
-	}
+	maps.Copy(a, desc.Annotations)
 }
 
 func safeGrpcMetaKey(k string) string {
