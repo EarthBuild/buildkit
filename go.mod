@@ -117,18 +117,13 @@ require (
 )
 
 require (
-	github.com/containerd/containerd v1.7.30
 	github.com/docker/distribution v2.8.3+incompatible
-	github.com/docker/docker v28.5.2+incompatible
-	github.com/gogo/googleapis v1.4.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/moby/sys/mount v0.3.4
 )
 
 require (
 	cyphar.com/go-pathrs v0.2.1 // indirect
-	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.11.2 // indirect
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0 // indirect
 	github.com/anchore/go-struct-converter v0.1.0 // indirect
@@ -210,6 +205,7 @@ require (
 	github.com/in-toto/attestation v1.1.2 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/moby/sys/capability v0.4.0 // indirect
+	github.com/moby/sys/mount v0.3.4 // indirect
 	github.com/moby/sys/sequential v0.6.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
