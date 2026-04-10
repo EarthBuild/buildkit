@@ -196,8 +196,9 @@ func (x *FetchTokenRequest) GetScopes() []string {
 type FetchTokenResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Token         string                 `protobuf:"bytes,1,opt,name=Token,proto3" json:"Token,omitempty"`
-	ExpiresIn     int64                  `protobuf:"varint,2,opt,name=ExpiresIn,proto3" json:"ExpiresIn,omitempty"` // seconds
-	IssuedAt      int64                  `protobuf:"varint,3,opt,name=IssuedAt,proto3" json:"IssuedAt,omitempty"`   // timestamp
+	ExpiresIn     int64                  `protobuf:"varint,2,opt,name=ExpiresIn,proto3" json:"ExpiresIn,omitempty"`  // seconds
+	IssuedAt      int64                  `protobuf:"varint,3,opt,name=IssuedAt,proto3" json:"IssuedAt,omitempty"`    // timestamp
+	Anonymous     bool                   `protobuf:"varint,99,opt,name=Anonymous,proto3" json:"Anonymous,omitempty"` // earthly-specific
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -251,6 +252,13 @@ func (x *FetchTokenResponse) GetIssuedAt() int64 {
 		return x.IssuedAt
 	}
 	return 0
+}
+
+func (x *FetchTokenResponse) GetAnonymous() bool {
+	if x != nil {
+		return x.Anonymous
+	}
+	return false
 }
 
 type GetTokenAuthorityRequest struct {
@@ -468,11 +476,12 @@ const file_github_com_moby_buildkit_session_auth_auth_proto_rawDesc = "" +
 	"\x04Host\x18\x02 \x01(\tR\x04Host\x12\x14\n" +
 	"\x05Realm\x18\x03 \x01(\tR\x05Realm\x12\x18\n" +
 	"\aService\x18\x04 \x01(\tR\aService\x12\x16\n" +
-	"\x06Scopes\x18\x05 \x03(\tR\x06Scopes\"d\n" +
+	"\x06Scopes\x18\x05 \x03(\tR\x06Scopes\"\x82\x01\n" +
 	"\x12FetchTokenResponse\x12\x14\n" +
 	"\x05Token\x18\x01 \x01(\tR\x05Token\x12\x1c\n" +
 	"\tExpiresIn\x18\x02 \x01(\x03R\tExpiresIn\x12\x1a\n" +
-	"\bIssuedAt\x18\x03 \x01(\x03R\bIssuedAt\"B\n" +
+	"\bIssuedAt\x18\x03 \x01(\x03R\bIssuedAt\x12\x1c\n" +
+	"\tAnonymous\x18c \x01(\bR\tAnonymous\"B\n" +
 	"\x18GetTokenAuthorityRequest\x12\x12\n" +
 	"\x04Host\x18\x01 \x01(\tR\x04Host\x12\x12\n" +
 	"\x04Salt\x18\x02 \x01(\fR\x04Salt\"9\n" +

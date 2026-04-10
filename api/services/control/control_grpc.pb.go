@@ -26,11 +26,11 @@ const (
 	Control_Session_FullMethodName            = "/moby.buildkit.v1.Control/Session"
 	Control_ListWorkers_FullMethodName        = "/moby.buildkit.v1.Control/ListWorkers"
 	Control_Info_FullMethodName               = "/moby.buildkit.v1.Control/Info"
+	Control_ShutdownIfIdle_FullMethodName     = "/moby.buildkit.v1.Control/ShutdownIfIdle"
+	Control_Reserve_FullMethodName            = "/moby.buildkit.v1.Control/Reserve"
+	Control_SessionHistory_FullMethodName     = "/moby.buildkit.v1.Control/SessionHistory"
 	Control_ListenBuildHistory_FullMethodName = "/moby.buildkit.v1.Control/ListenBuildHistory"
 	Control_UpdateBuildHistory_FullMethodName = "/moby.buildkit.v1.Control/UpdateBuildHistory"
-	Control_ShutdownIfIdle_FullMethodName     = "/moby.buildkit.v1.Control/ShutdownIfIdle"   // earthly-specific
-	Control_Reserve_FullMethodName            = "/moby.buildkit.v1.Control/Reserve"           // earthly-specific
-	Control_SessionHistory_FullMethodName     = "/moby.buildkit.v1.Control/SessionHistory"   // earthly-specific
 )
 
 // ControlClient is the client API for Control service.
@@ -44,11 +44,12 @@ type ControlClient interface {
 	Session(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[BytesMessage, BytesMessage], error)
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*ListWorkersResponse, error)
 	Info(ctx context.Context, in *InfoRequest, opts ...grpc.CallOption) (*InfoResponse, error)
+	// Earthly-specific.
+	ShutdownIfIdle(ctx context.Context, in *ShutdownIfIdleRequest, opts ...grpc.CallOption) (*ShutdownIfIdleResponse, error)
+	Reserve(ctx context.Context, in *ReserveRequest, opts ...grpc.CallOption) (*ReserveResponse, error)
+	SessionHistory(ctx context.Context, in *SessionHistoryRequest, opts ...grpc.CallOption) (*SessionHistoryResponse, error)
 	ListenBuildHistory(ctx context.Context, in *BuildHistoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildHistoryEvent], error)
 	UpdateBuildHistory(ctx context.Context, in *UpdateBuildHistoryRequest, opts ...grpc.CallOption) (*UpdateBuildHistoryResponse, error)
-	ShutdownIfIdle(ctx context.Context, in *ShutdownIfIdleRequest, opts ...grpc.CallOption) (*ShutdownIfIdleResponse, error)   // earthly-specific
-	Reserve(ctx context.Context, in *ReserveRequest, opts ...grpc.CallOption) (*ReserveResponse, error)                       // earthly-specific
-	SessionHistory(ctx context.Context, in *SessionHistoryRequest, opts ...grpc.CallOption) (*SessionHistoryResponse, error)   // earthly-specific
 }
 
 type controlClient struct {
@@ -150,37 +151,6 @@ func (c *controlClient) Info(ctx context.Context, in *InfoRequest, opts ...grpc.
 	return out, nil
 }
 
-func (c *controlClient) ListenBuildHistory(ctx context.Context, in *BuildHistoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildHistoryEvent], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Control_ServiceDesc.Streams[3], Control_ListenBuildHistory_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[BuildHistoryRequest, BuildHistoryEvent]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Control_ListenBuildHistoryClient = grpc.ServerStreamingClient[BuildHistoryEvent]
-
-func (c *controlClient) UpdateBuildHistory(ctx context.Context, in *UpdateBuildHistoryRequest, opts ...grpc.CallOption) (*UpdateBuildHistoryResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpdateBuildHistoryResponse)
-	err := c.cc.Invoke(ctx, Control_UpdateBuildHistory_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// earthly-specific client methods
-
 func (c *controlClient) ShutdownIfIdle(ctx context.Context, in *ShutdownIfIdleRequest, opts ...grpc.CallOption) (*ShutdownIfIdleResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ShutdownIfIdleResponse)
@@ -211,6 +181,35 @@ func (c *controlClient) SessionHistory(ctx context.Context, in *SessionHistoryRe
 	return out, nil
 }
 
+func (c *controlClient) ListenBuildHistory(ctx context.Context, in *BuildHistoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildHistoryEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Control_ServiceDesc.Streams[3], Control_ListenBuildHistory_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[BuildHistoryRequest, BuildHistoryEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_ListenBuildHistoryClient = grpc.ServerStreamingClient[BuildHistoryEvent]
+
+func (c *controlClient) UpdateBuildHistory(ctx context.Context, in *UpdateBuildHistoryRequest, opts ...grpc.CallOption) (*UpdateBuildHistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateBuildHistoryResponse)
+	err := c.cc.Invoke(ctx, Control_UpdateBuildHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlServer is the server API for Control service.
 // All implementations should embed UnimplementedControlServer
 // for forward compatibility.
@@ -222,11 +221,12 @@ type ControlServer interface {
 	Session(grpc.BidiStreamingServer[BytesMessage, BytesMessage]) error
 	ListWorkers(context.Context, *ListWorkersRequest) (*ListWorkersResponse, error)
 	Info(context.Context, *InfoRequest) (*InfoResponse, error)
+	// Earthly-specific.
+	ShutdownIfIdle(context.Context, *ShutdownIfIdleRequest) (*ShutdownIfIdleResponse, error)
+	Reserve(context.Context, *ReserveRequest) (*ReserveResponse, error)
+	SessionHistory(context.Context, *SessionHistoryRequest) (*SessionHistoryResponse, error)
 	ListenBuildHistory(*BuildHistoryRequest, grpc.ServerStreamingServer[BuildHistoryEvent]) error
 	UpdateBuildHistory(context.Context, *UpdateBuildHistoryRequest) (*UpdateBuildHistoryResponse, error)
-	ShutdownIfIdle(context.Context, *ShutdownIfIdleRequest) (*ShutdownIfIdleResponse, error)   // earthly-specific
-	Reserve(context.Context, *ReserveRequest) (*ReserveResponse, error)                       // earthly-specific
-	SessionHistory(context.Context, *SessionHistoryRequest) (*SessionHistoryResponse, error)   // earthly-specific
 }
 
 // UnimplementedControlServer should be embedded to have
@@ -257,12 +257,6 @@ func (UnimplementedControlServer) ListWorkers(context.Context, *ListWorkersReque
 func (UnimplementedControlServer) Info(context.Context, *InfoRequest) (*InfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Info not implemented")
 }
-func (UnimplementedControlServer) ListenBuildHistory(*BuildHistoryRequest, grpc.ServerStreamingServer[BuildHistoryEvent]) error {
-	return status.Errorf(codes.Unimplemented, "method ListenBuildHistory not implemented")
-}
-func (UnimplementedControlServer) UpdateBuildHistory(context.Context, *UpdateBuildHistoryRequest) (*UpdateBuildHistoryResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method UpdateBuildHistory not implemented")
-}
 func (UnimplementedControlServer) ShutdownIfIdle(context.Context, *ShutdownIfIdleRequest) (*ShutdownIfIdleResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShutdownIfIdle not implemented")
 }
@@ -271,6 +265,12 @@ func (UnimplementedControlServer) Reserve(context.Context, *ReserveRequest) (*Re
 }
 func (UnimplementedControlServer) SessionHistory(context.Context, *SessionHistoryRequest) (*SessionHistoryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SessionHistory not implemented")
+}
+func (UnimplementedControlServer) ListenBuildHistory(*BuildHistoryRequest, grpc.ServerStreamingServer[BuildHistoryEvent]) error {
+	return status.Errorf(codes.Unimplemented, "method ListenBuildHistory not implemented")
+}
+func (UnimplementedControlServer) UpdateBuildHistory(context.Context, *UpdateBuildHistoryRequest) (*UpdateBuildHistoryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateBuildHistory not implemented")
 }
 func (UnimplementedControlServer) testEmbeddedByValue() {}
 
@@ -393,37 +393,6 @@ func _Control_Info_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Control_ListenBuildHistory_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(BuildHistoryRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(ControlServer).ListenBuildHistory(m, &grpc.GenericServerStream[BuildHistoryRequest, BuildHistoryEvent]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Control_ListenBuildHistoryServer = grpc.ServerStreamingServer[BuildHistoryEvent]
-
-func _Control_UpdateBuildHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpdateBuildHistoryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ControlServer).UpdateBuildHistory(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Control_UpdateBuildHistory_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ControlServer).UpdateBuildHistory(ctx, req.(*UpdateBuildHistoryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-// earthly-specific server handlers
-
 func _Control_ShutdownIfIdle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ShutdownIfIdleRequest)
 	if err := dec(in); err != nil {
@@ -478,6 +447,35 @@ func _Control_SessionHistory_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_ListenBuildHistory_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(BuildHistoryRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ControlServer).ListenBuildHistory(m, &grpc.GenericServerStream[BuildHistoryRequest, BuildHistoryEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Control_ListenBuildHistoryServer = grpc.ServerStreamingServer[BuildHistoryEvent]
+
+func _Control_UpdateBuildHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateBuildHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).UpdateBuildHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_UpdateBuildHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).UpdateBuildHistory(ctx, req.(*UpdateBuildHistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -502,10 +500,6 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Control_Info_Handler,
 		},
 		{
-			MethodName: "UpdateBuildHistory",
-			Handler:    _Control_UpdateBuildHistory_Handler,
-		},
-		{
 			MethodName: "ShutdownIfIdle",
 			Handler:    _Control_ShutdownIfIdle_Handler,
 		},
@@ -516,6 +510,10 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SessionHistory",
 			Handler:    _Control_SessionHistory_Handler,
+		},
+		{
+			MethodName: "UpdateBuildHistory",
+			Handler:    _Control_UpdateBuildHistory_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

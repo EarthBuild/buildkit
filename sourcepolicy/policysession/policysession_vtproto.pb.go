@@ -28,7 +28,15 @@ func (m *CheckPolicyRequest) CloneVT() *CheckPolicyRequest {
 	}
 	r := new(CheckPolicyRequest)
 	r.Platform = m.Platform.CloneVT()
-	r.Source = m.Source.CloneVT()
+	if rhs := m.Source; rhs != nil {
+		if vtpb, ok := interface{}(rhs).(interface {
+			CloneVT() *pb.ResolveSourceMetaResponse
+		}); ok {
+			r.Source = vtpb.CloneVT()
+		} else {
+			r.Source = proto.Clone(rhs).(*pb.ResolveSourceMetaResponse)
+		}
+	}
 	if rhs := m.Caps; rhs != nil {
 		tmpContainer := make(map[string]bool, len(rhs))
 		for k, v := range rhs {
@@ -82,7 +90,15 @@ func (m *CheckPolicyResponse_Request) CloneVT() isCheckPolicyResponse_Result {
 		return (*CheckPolicyResponse_Request)(nil)
 	}
 	r := new(CheckPolicyResponse_Request)
-	r.Request = m.Request.CloneVT()
+	if rhs := m.Request; rhs != nil {
+		if vtpb, ok := interface{}(rhs).(interface {
+			CloneVT() *pb.ResolveSourceMetaRequest
+		}); ok {
+			r.Request = vtpb.CloneVT()
+		} else {
+			r.Request = proto.Clone(rhs).(*pb.ResolveSourceMetaRequest)
+		}
+	}
 	return r
 }
 
@@ -137,7 +153,13 @@ func (this *CheckPolicyRequest) EqualVT(that *CheckPolicyRequest) bool {
 	if !this.Platform.EqualVT(that.Platform) {
 		return false
 	}
-	if !this.Source.EqualVT(that.Source) {
+	if equal, ok := interface{}(this.Source).(interface {
+		EqualVT(*pb.ResolveSourceMetaResponse) bool
+	}); ok {
+		if !equal.EqualVT(that.Source) {
+			return false
+		}
+	} else if !proto.Equal(this.Source, that.Source) {
 		return false
 	}
 	if len(this.Caps) != len(that.Caps) {
@@ -233,7 +255,13 @@ func (this *CheckPolicyResponse_Request) EqualVT(thatIface isCheckPolicyResponse
 		if q == nil {
 			q = &pb.ResolveSourceMetaRequest{}
 		}
-		if !p.EqualVT(q) {
+		if equal, ok := interface{}(p).(interface {
+			EqualVT(*pb.ResolveSourceMetaRequest) bool
+		}); ok {
+			if !equal.EqualVT(q) {
+				return false
+			}
+		} else if !proto.Equal(p, q) {
 			return false
 		}
 	}
@@ -351,12 +379,24 @@ func (m *CheckPolicyRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		}
 	}
 	if m.Source != nil {
-		size, err := m.Source.MarshalToSizedBufferVT(dAtA[:i])
-		if err != nil {
-			return 0, err
+		if vtmsg, ok := interface{}(m.Source).(interface {
+			MarshalToSizedBufferVT([]byte) (int, error)
+		}); ok {
+			size, err := vtmsg.MarshalToSizedBufferVT(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		} else {
+			encoded, err := proto.Marshal(m.Source)
+			if err != nil {
+				return 0, err
+			}
+			i -= len(encoded)
+			copy(dAtA[i:], encoded)
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(len(encoded)))
 		}
-		i -= size
-		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
 		i--
 		dAtA[i] = 0x12
 	}
@@ -446,12 +486,24 @@ func (m *CheckPolicyResponse_Request) MarshalToVT(dAtA []byte) (int, error) {
 func (m *CheckPolicyResponse_Request) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	if m.Request != nil {
-		size, err := m.Request.MarshalToSizedBufferVT(dAtA[:i])
-		if err != nil {
-			return 0, err
+		if vtmsg, ok := interface{}(m.Request).(interface {
+			MarshalToSizedBufferVT([]byte) (int, error)
+		}); ok {
+			size, err := vtmsg.MarshalToSizedBufferVT(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		} else {
+			encoded, err := proto.Marshal(m.Request)
+			if err != nil {
+				return 0, err
+			}
+			i -= len(encoded)
+			copy(dAtA[i:], encoded)
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(len(encoded)))
 		}
-		i -= size
-		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
 		i--
 		dAtA[i] = 0x12
 	} else {
@@ -572,7 +624,13 @@ func (m *CheckPolicyRequest) SizeVT() (n int) {
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
 	if m.Source != nil {
-		l = m.Source.SizeVT()
+		if size, ok := interface{}(m.Source).(interface {
+			SizeVT() int
+		}); ok {
+			l = size.SizeVT()
+		} else {
+			l = proto.Size(m.Source)
+		}
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
 	if len(m.Caps) > 0 {
@@ -621,7 +679,13 @@ func (m *CheckPolicyResponse_Request) SizeVT() (n int) {
 	var l int
 	_ = l
 	if m.Request != nil {
-		l = m.Request.SizeVT()
+		if size, ok := interface{}(m.Request).(interface {
+			SizeVT() int
+		}); ok {
+			l = size.SizeVT()
+		} else {
+			l = proto.Size(m.Request)
+		}
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	} else {
 		n += 3
@@ -762,8 +826,16 @@ func (m *CheckPolicyRequest) UnmarshalVT(dAtA []byte) error {
 			if m.Source == nil {
 				m.Source = &pb.ResolveSourceMetaResponse{}
 			}
-			if err := m.Source.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
-				return err
+			if unmarshal, ok := interface{}(m.Source).(interface {
+				UnmarshalVT([]byte) error
+			}); ok {
+				if err := unmarshal.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+					return err
+				}
+			} else {
+				if err := proto.Unmarshal(dAtA[iNdEx:postIndex], m.Source); err != nil {
+					return err
+				}
 			}
 			iNdEx = postIndex
 		case 3:
@@ -1003,13 +1075,29 @@ func (m *CheckPolicyResponse) UnmarshalVT(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			if oneof, ok := m.Result.(*CheckPolicyResponse_Request); ok {
-				if err := oneof.Request.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
-					return err
+				if unmarshal, ok := interface{}(oneof.Request).(interface {
+					UnmarshalVT([]byte) error
+				}); ok {
+					if err := unmarshal.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+						return err
+					}
+				} else {
+					if err := proto.Unmarshal(dAtA[iNdEx:postIndex], oneof.Request); err != nil {
+						return err
+					}
 				}
 			} else {
 				v := &pb.ResolveSourceMetaRequest{}
-				if err := v.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
-					return err
+				if unmarshal, ok := interface{}(v).(interface {
+					UnmarshalVT([]byte) error
+				}); ok {
+					if err := unmarshal.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+						return err
+					}
+				} else {
+					if err := proto.Unmarshal(dAtA[iNdEx:postIndex], v); err != nil {
+						return err
+					}
 				}
 				m.Result = &CheckPolicyResponse_Request{Request: v}
 			}

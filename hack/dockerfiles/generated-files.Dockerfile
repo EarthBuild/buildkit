@@ -75,8 +75,21 @@ FROM tools AS generated
 RUN --mount=type=bind,target=github.com/moby/buildkit <<EOT
   set -ex
   mkdir /out
-  find github.com/moby/buildkit -name '*.proto' -o -name vendor -prune -false | xargs \
-    protoc -I/usr/local/include/github.com/tonistiigi/fsutil/types \
+  find github.com/moby/buildkit -name '*.proto' \
+    -o -name vendor -prune -false \
+    | grep -v 'session/localhost/' \
+    | grep -v 'session/pullping/' \
+    | grep -v 'session/socketforward/' \
+    | grep -v 'api/services/registry/' \
+    | grep -v 'frontend/gateway/pb/' \
+    | xargs \
+    protoc \
+           --go_opt=Mgithub.com/tonistiigi/fsutil/types/stat.proto=github.com/tonistiigi/fsutil/types \
+           --go_opt=Mgithub.com/tonistiigi/fsutil/types/wire.proto=github.com/tonistiigi/fsutil/types \
+           --go-grpc_opt=Mgithub.com/tonistiigi/fsutil/types/stat.proto=github.com/tonistiigi/fsutil/types \
+           --go-grpc_opt=Mgithub.com/tonistiigi/fsutil/types/wire.proto=github.com/tonistiigi/fsutil/types \
+           --go-vtproto_opt=Mgithub.com/tonistiigi/fsutil/types/stat.proto=github.com/tonistiigi/fsutil/types \
+           --go-vtproto_opt=Mgithub.com/tonistiigi/fsutil/types/wire.proto=github.com/tonistiigi/fsutil/types \
            --go_out=/out --go-grpc_out=require_unimplemented_servers=false:/out \
            --go-vtproto_out=features=marshal+unmarshal+size+equal+pool+clone:/out
 EOT
