@@ -64,9 +64,9 @@ func LocalhostExec(ctx context.Context, c session.Caller, args []string, dir str
 		stdout.Write(msg.Stdout)
 		stderr.Write(msg.Stderr)
 		switch msg.Status {
-		case RUNNING:
+		case OutputMessage_RUNNING:
 			// ignore
-		case DONE:
+		case OutputMessage_DONE:
 			if exitCodeSet {
 				panic("received multiple DONE messages (shouldn't happen)")
 			}

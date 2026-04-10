@@ -26,7 +26,7 @@ func NewFileHash(path string, fi os.FileInfo) (hash.Hash, error) {
 
 	stat := &fstypes.Stat{
 		Mode:     uint32(fi.Mode()),
-		Size_:    fi.Size(),
+		Size:     fi.Size(),
 		ModTime:  fi.ModTime().UnixNano(),
 		Linkname: link,
 	}
@@ -103,7 +103,7 @@ func (s *statInfo) Name() string {
 }
 
 func (s *statInfo) Size() int64 {
-	return s.Size_
+	return s.Stat.Size
 }
 
 func (s *statInfo) Mode() os.FileMode {

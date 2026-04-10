@@ -269,4 +269,4 @@ tool (
 	google.golang.org/protobuf/cmd/protoc-gen-go
 )
 
-replace github.com/tonistiigi/fsutil => github.com/alexcb/fsutil v0.0.0-20231030221755-644b08355b65
+replace github.com/tonistiigi/fsutil => github.com/EarthBuild/fsutil v0.0.0-20260410102147-dafa0bd30022

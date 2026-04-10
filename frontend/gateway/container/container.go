@@ -698,7 +698,7 @@ func mkstat(fsys fs.FS, path, relpath string, fi os.FileInfo) (*fstypes.Stat, er
 	}
 
 	if !fi.IsDir() {
-		stat.Size_ = fi.Size()
+		stat.Size = fi.Size()
 		if fi.Mode()&os.ModeSymlink != 0 {
 			link, err := readlink(fsys, path)
 			if err != nil {

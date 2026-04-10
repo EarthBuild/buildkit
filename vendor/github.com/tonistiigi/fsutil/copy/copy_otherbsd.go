@@ -1,5 +1,5 @@
-//go:build darwin
-// +build darwin
+//go:build openbsd || netbsd
+// +build openbsd netbsd
 
 package fs
 
@@ -12,14 +12,6 @@ import (
 )
 
 func copyFile(source, target string) error {
-	if err := unix.Clonefileat(unix.AT_FDCWD, source, unix.AT_FDCWD, target, unix.CLONE_NOFOLLOW); err != nil {
-		if err != unix.EINVAL && err != unix.EXDEV {
-			return err
-		}
-	} else {
-		return nil
-	}
-
 	src, err := os.Open(source)
 	if err != nil {
 		return errors.Wrapf(err, "failed to open source %s", source)
@@ -38,7 +30,6 @@ func copyFileContent(dst, src *os.File) error {
 	buf := bufferPool.Get().(*[]byte)
 	_, err := io.CopyBuffer(dst, src, *buf)
 	bufferPool.Put(buf)
-
 	return err
 }
 

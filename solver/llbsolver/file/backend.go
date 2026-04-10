@@ -44,7 +44,7 @@ func mkdir(d string, action *pb.FileActionMkDir, user *copy.User, idmap *user.Id
 	}
 
 	if action.MakeParents {
-		if err := copy.MkdirAll(p, os.FileMode(action.Mode)&0777, ch, timestampToTime(action.Timestamp)); err != nil {
+		if _, err := copy.MkdirAll(p, os.FileMode(action.Mode)&0777, ch, timestampToTime(action.Timestamp)); err != nil {
 			return err
 		}
 	} else {

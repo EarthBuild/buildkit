@@ -147,7 +147,7 @@ func (lp *localhostProvider) Exec(stream localhost.Localhost_ExecServer) error {
 	}
 
 	var exitCode int
-	status := localhost.DONE
+	status := localhost.OutputMessage_DONE
 	err = cmd.Wait()
 	if err != nil {
 		var exiterr *exec.ExitError
@@ -155,10 +155,10 @@ func (lp *localhostProvider) Exec(stream localhost.Localhost_ExecServer) error {
 			if waitStatus, ok := exiterr.Sys().(syscall.WaitStatus); ok {
 				exitCode = waitStatus.ExitStatus()
 			} else {
-				status = localhost.KILLED
+				status = localhost.OutputMessage_KILLED
 			}
 		} else {
-			status = localhost.KILLED
+			status = localhost.OutputMessage_KILLED
 		}
 	}
 

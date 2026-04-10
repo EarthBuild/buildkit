@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -28,7 +29,7 @@ type Stream interface {
 func Send(ctx context.Context, conn Stream, fs FS, progressCb func(int, bool), verboseProgressCb VerboseProgressCB) error {
 	s := &sender{
 		conn:              &syncStream{Stream: conn},
-		fs:                fs,
+		fs:                WithHardlinkReset(fs),
 		files:             make(map[uint32]string),
 		progressCb:        progressCb,
 		verboseProgressCb: verboseProgressCb,
@@ -50,6 +51,7 @@ type sender struct {
 	progressCb        func(int, bool)
 	verboseProgressCb VerboseProgressCB
 	progressCurrent   int
+	progressCurrentMu sync.Mutex
 	sendpipeline      chan *sendHandle
 }
 
@@ -112,10 +114,10 @@ func (s *sender) run(ctx context.Context) error {
 }
 
 func (s *sender) updateProgress(size int, last bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.progressCurrent += size
 	if s.progressCb != nil {
+		s.progressCurrentMu.Lock()
+		defer s.progressCurrentMu.Unlock()
+		s.progressCurrent += size
 		s.progressCb(s.progressCurrent, last)
 	}
 }
@@ -152,7 +154,8 @@ func (s *sender) sendFile(h *sendHandle) error {
 
 func (s *sender) walk(ctx context.Context) error {
 	var i uint32 = 0
-	err := s.fs.Walk(ctx, "/", func(path string, entry os.DirEntry, err error) error {
+	target := string(filepath.Separator)
+	err := s.fs.Walk(ctx, target, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -164,7 +167,8 @@ func (s *sender) walk(ctx context.Context) error {
 		if !ok {
 			return errors.WithStack(&os.PathError{Path: path, Err: syscall.EBADMSG, Op: "fileinfo without stat info"})
 		}
-
+		stat.Path = filepath.ToSlash(stat.Path)
+		stat.Linkname = filepath.ToSlash(stat.Linkname)
 		p := &types.Packet{
 			Type: types.PACKET_STAT,
 			Stat: stat,

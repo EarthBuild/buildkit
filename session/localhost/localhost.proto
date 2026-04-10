@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package moby.localhost.v1;
 
-option go_package = "localhost";
+option go_package = "github.com/moby/buildkit/session/localhost";
 
 // Localhost is a service that allows for local execution on the client
 service Localhost {
