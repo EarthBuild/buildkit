@@ -891,10 +891,11 @@ func (lbf *llbBridgeForwarder) getMounter(ctx context.Context, id string, ref ca
 	lbf.mountsMu.Lock()
 	defer lbf.mountsMu.Unlock()
 
-	mounter, ok := lbf.mounts[id]
-	if ok {
-		return mounter, nil
-	}
+	// Earthly: skip mount cache to ensure persistent cache mounts
+	// reflect latest writes between consecutive SAVE ARTIFACT calls.
+	// Upstream commit 7aaa7974d introduced this cache for performance,
+	// but it causes stale reads when the same cache mount is modified
+	// between operations within a single target.
 	var mountable snapshot.Mountable
 	if ref != nil {
 		var err error
@@ -904,7 +905,7 @@ func (lbf *llbBridgeForwarder) getMounter(ctx context.Context, id string, ref ca
 		}
 	}
 
-	mounter = snapshot.LocalMounter(mountable)
+	mounter := snapshot.LocalMounter(mountable)
 	lbf.mounts[id] = mounter
 	return mounter, nil
 }
