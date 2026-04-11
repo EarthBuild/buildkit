@@ -121,6 +121,11 @@ func registerWorkerInitializer(wi workerInitializer, flags ...cli.Flag) {
 }
 
 func main() {
+	// Disable gRPC ALPN enforcement to allow mixed grpc-go versions
+	// between earthly client and buildkitd during the upgrade transition.
+	// TODO: remove once all released earthly binaries use grpc-go >= 1.67
+	os.Setenv("GRPC_ENFORCE_ALPN_ENABLED", "false")
+
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Println(c.App.Name, version.Package, c.App.Version, version.Revision)
 	}
