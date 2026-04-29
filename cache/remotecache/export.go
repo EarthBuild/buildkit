@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
@@ -24,6 +26,8 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/sync/semaphore"
 )
+
+const registryCacheExportMaxConcurrencyEnv = "BUILDKIT_REGISTRY_CACHE_EXPORT_MAX_CONCURRENCY"
 
 type ResolveCacheExporterFunc func(ctx context.Context, g session.Group, attrs map[string]string) (Exporter, error)
 
@@ -209,7 +213,8 @@ func (ce *contentCacheExporter) Finalize(ctx context.Context) (map[string]string
 		layerDescs[i] = dgstPair.Descriptor
 	}
 
-	// Push all layer blobs in parallel using images.Dispatch.
+	// Push layer blobs. The default is BuildKit's registry concurrency, but this
+	// can be lowered for memory-constrained runners.
 	copyHandler := images.HandlerFunc(func(ctx context.Context, desc ocispecs.Descriptor) ([]ocispecs.Descriptor, error) {
 		dgstPair := descs[desc.Digest]
 		layerDone := progress.OneOff(ctx, fmt.Sprintf("writing layer %s", desc.Digest))
@@ -219,7 +224,7 @@ func (ce *contentCacheExporter) Finalize(ctx context.Context) (map[string]string
 		layerDone(nil)
 		return nil, nil
 	})
-	if err := images.Dispatch(ctx, copyHandler, semaphore.NewWeighted(limited.DefaultMaxConcurrency), layerDescs...); err != nil {
+	if err := images.Dispatch(ctx, copyHandler, semaphore.NewWeighted(registryCacheExportMaxConcurrency()), layerDescs...); err != nil {
 		return nil, err
 	}
 
@@ -276,4 +281,16 @@ func (ce *contentCacheExporter) Finalize(ctx context.Context) (map[string]string
 	mfstDone(nil)
 
 	return res, nil
+}
+
+func registryCacheExportMaxConcurrency() int64 {
+	v := os.Getenv(registryCacheExportMaxConcurrencyEnv)
+	if v == "" {
+		return limited.DefaultMaxConcurrency
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 1 {
+		return limited.DefaultMaxConcurrency
+	}
+	return n
 }
