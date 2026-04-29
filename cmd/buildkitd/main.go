@@ -72,7 +72,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/prometheus"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -1146,7 +1148,143 @@ func newMeterProvider(ctx context.Context) (*sdkmetric.MeterProvider, error) {
 		r := sdkmetric.NewPeriodicReader(exp)
 		opts = append(opts, sdkmetric.WithReader(r))
 	}
-	return sdkmetric.NewMeterProvider(opts...), nil
+	mp := sdkmetric.NewMeterProvider(opts...)
+	if err := setupBuildkitProcessMemoryMetrics(mp); err != nil {
+		return nil, err
+	}
+	return mp, nil
+}
+
+func setupBuildkitProcessMemoryMetrics(mp *sdkmetric.MeterProvider) error {
+	meter := mp.Meter("github.com/moby/buildkit/process")
+	attrs := buildkitProcessMemoryMetricAttributes()
+
+	if err := registerBuildkitProcessMemoryGauge(
+		meter,
+		attrs,
+		"buildkit_process_memory_alloc_bytes",
+		"Bytes allocated and still in use by this buildkitd process.",
+		func(stats runtime.MemStats) uint64 { return stats.Alloc },
+	); err != nil {
+		return err
+	}
+
+	if err := registerBuildkitProcessMemoryGauge(
+		meter,
+		attrs,
+		"buildkit_process_memory_heap_alloc_bytes",
+		"Heap bytes allocated and still in use by this buildkitd process.",
+		func(stats runtime.MemStats) uint64 { return stats.HeapAlloc },
+	); err != nil {
+		return err
+	}
+
+	if err := registerBuildkitProcessMemoryGauge(
+		meter,
+		attrs,
+		"buildkit_process_memory_heap_sys_bytes",
+		"Heap bytes obtained from the OS by this buildkitd process.",
+		func(stats runtime.MemStats) uint64 { return stats.HeapSys },
+	); err != nil {
+		return err
+	}
+
+	return registerBuildkitProcessMemoryGauge(
+		meter,
+		attrs,
+		"buildkit_process_memory_sys_bytes",
+		"Total bytes obtained from the OS by this buildkitd process.",
+		func(stats runtime.MemStats) uint64 { return stats.Sys },
+	)
+}
+
+func registerBuildkitProcessMemoryGauge(
+	meter otelmetric.Meter,
+	attrs []attribute.KeyValue,
+	name string,
+	description string,
+	value func(runtime.MemStats) uint64,
+) error {
+	_, err := meter.Int64ObservableGauge(
+		name,
+		otelmetric.WithUnit("By"),
+		otelmetric.WithDescription(description),
+		otelmetric.WithInt64Callback(func(_ context.Context, observer otelmetric.Int64Observer) error {
+			var stats runtime.MemStats
+			runtime.ReadMemStats(&stats)
+
+			observer.Observe(clampUint64ToInt64(value(stats)), otelmetric.WithAttributes(attrs...))
+
+			return nil
+		}),
+	)
+	if err != nil {
+		return errors.Wrapf(err, "create %s gauge", name)
+	}
+
+	return nil
+}
+
+func clampUint64ToInt64(value uint64) int64 {
+	const maxInt64 = uint64(1<<63 - 1)
+
+	if value > maxInt64 {
+		return int64(maxInt64)
+	}
+
+	return int64(value)
+}
+
+func buildkitProcessMemoryMetricAttributes() []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		attribute.Int("process.pid", os.Getpid()),
+		attribute.String("earthbuild.process.role", "buildkitd"),
+		attribute.String("earthbuild.process.nesting", buildkitProcessNesting()),
+	}
+
+	for _, key := range []string{
+		"cicd.pipeline.name",
+		"cicd.pipeline.run.id",
+		"cicd.pipeline.run.url.full",
+		"cicd.system.name",
+		"deployment.environment",
+		"earthbuild.buildkit.container.name",
+		"earthbuild.installation.name",
+		"user.id",
+		"vcs.ref.name",
+		"vcs.repository.change.id",
+		"vcs.repository.name",
+		"vcs.revision.id",
+	} {
+		if value, ok := otelResourceAttributeFromEnv(key); ok {
+			attrs = append(attrs, attribute.String(key, value))
+		}
+	}
+
+	return attrs
+}
+
+func buildkitProcessNesting() string {
+	if value, _ := strconv.ParseBool(os.Getenv("EARTHLY_WITH_DOCKER")); value {
+		return "inner"
+	}
+
+	return "outer"
+}
+
+func otelResourceAttributeFromEnv(key string) (string, bool) {
+	for attr := range strings.SplitSeq(os.Getenv("OTEL_RESOURCE_ATTRIBUTES"), ",") {
+		attrKey, value, ok := strings.Cut(attr, "=")
+		if !ok || strings.TrimSpace(attrKey) != key {
+			continue
+		}
+
+		value = strings.TrimSpace(value)
+
+		return value, value != ""
+	}
+
+	return "", false
 }
 
 func getCDIManager(cfg config.CDIConfig) (*cdidevices.Manager, error) {
