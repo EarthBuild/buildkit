@@ -545,6 +545,11 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		EnableSessionExporter: req.EnableSessionExporter,
 	}, entitlementsFromPB(req.Entitlements), procs, req.Internal, req.SourcePolicy, req.SourcePolicySession)
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil && !stderrors.Is(cause, err) {
+			bklog.G(ctx).WithError(err).Warnf("solve failed: ref=%q frontend=%q session=%q context_cause=%+v", req.Ref, req.Frontend, req.Session, cause)
+		} else {
+			bklog.G(ctx).WithError(err).Warnf("solve failed: ref=%q frontend=%q session=%q", req.Ref, req.Frontend, req.Session)
+		}
 		return nil, err
 	}
 	return &controlapi.SolveResponse{

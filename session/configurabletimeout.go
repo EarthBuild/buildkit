@@ -5,13 +5,15 @@ import (
 	"time"
 
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
-func configurableMonitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelConn func(), healthCfg ManagerHealthCfg) {
-	defer cancelConn()
+func configurableMonitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelConn func(error), healthCfg ManagerHealthCfg) {
+	var cancelCause error
+	defer func() { cancelConn(cancelCause) }()
 	defer cc.Close()
 
 	ticker := time.NewTicker(healthCfg.frequency)
@@ -44,7 +46,8 @@ func configurableMonitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelC
 				bklog.G(ctx).WithFields(logFields).Warn("healthcheck failed")
 
 				if consecutiveFailures >= healthCfg.allowedFailures {
-					bklog.G(ctx).Error("healthcheck failed too many times")
+					cancelCause = errors.Wrapf(err, "session healthcheck failed too many times after %d consecutive failures", consecutiveFailures)
+					bklog.G(ctx).WithError(cancelCause).Error("healthcheck failed too many times")
 					return
 				}
 			} else {

@@ -1307,6 +1307,12 @@ func notifyStarted(ctx context.Context, v *client.Vertex, cached bool) func(err 
 		v.Cached = cached
 		if err != nil {
 			v.Error = err.Error()
+			cause := context.Cause(ctx)
+			if cause != nil && !errors.Is(cause, err) {
+				bklog.G(ctx).WithError(err).Warnf("vertex failed: name=%q digest=%s cached=%t context_cause=%+v", v.Name, v.Digest, cached, cause)
+			} else {
+				bklog.G(ctx).WithError(err).Warnf("vertex failed: name=%q digest=%s cached=%t", v.Name, v.Digest, cached)
+			}
 		} else {
 			v.Error = ""
 		}
