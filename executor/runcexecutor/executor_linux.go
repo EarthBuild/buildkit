@@ -67,7 +67,7 @@ func (w *runcExecutor) exec(ctx context.Context, id string, specsProcess *specs.
 type runcCall func(ctx context.Context, started chan<- int, io runc.IO, pidfile string) error
 
 func (w *runcExecutor) callWithIO(ctx context.Context, process executor.ProcessInfo, started func(), killer procKiller, call runcCall) error {
-	runcProcess, ctx := runcProcessHandle(ctx, killer)
+	runcProcess, ctx := runcProcessHandle(ctx, killer, process.Meta)
 	defer runcProcess.Release()
 
 	eg, ctx := errgroup.WithContext(ctx)
@@ -84,7 +84,7 @@ func (w *runcExecutor) callWithIO(ctx context.Context, process executor.ProcessI
 	})
 
 	eg.Go(func() error {
-		return handleSignals(ctx, runcProcess, process.Signal)
+		return handleSignals(ctx, runcProcess, process.Signal, process.Meta)
 	})
 
 	if !process.Meta.Tty {

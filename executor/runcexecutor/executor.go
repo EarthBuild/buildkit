@@ -635,7 +635,7 @@ type procHandle struct {
 // canceled and we are unable to send the SIGKILL to the in-container process.
 // The goal is to allow for runc to gracefully shutdown when the request context
 // is cancelled.
-func runcProcessHandle(ctx context.Context, killer procKiller) (*procHandle, context.Context) {
+func runcProcessHandle(ctx context.Context, killer procKiller, meta executor.Meta) (*procHandle, context.Context) {
 	runcCtx, cancel := context.WithCancelCause(context.Background())
 	p := &procHandle{
 		ready:    make(chan struct{}),
@@ -662,6 +662,7 @@ func runcProcessHandle(ctx context.Context, killer procKiller) (*procHandle, con
 		for {
 			select {
 			case <-ctx.Done():
+				bklog.G(ctx).WithError(context.Cause(ctx)).Warnf("killing process because execution context was canceled: container=%s cwd=%q args=%q", killer.id, meta.Cwd, meta.Args)
 				killCtx, timeout := context.WithCancelCause(context.Background())                                         //nolint:govet
 				killCtx, _ = context.WithTimeoutCause(killCtx, 7*time.Second, errors.WithStack(context.DeadlineExceeded)) //nolint:govet
 				if err := p.killer.Kill(killCtx); err != nil {
@@ -747,7 +748,7 @@ func (p *procHandle) WaitForStart(ctx context.Context, startedCh <-chan int, sta
 // handleSignals will wait until the procHandle is ready then will
 // send each signal received on the channel to the runc process (not directly
 // to the in-container process)
-func handleSignals(ctx context.Context, runcProcess *procHandle, signals <-chan syscall.Signal) error {
+func handleSignals(ctx context.Context, runcProcess *procHandle, signals <-chan syscall.Signal, meta executor.Meta) error {
 	if signals == nil {
 		return nil
 	}
@@ -763,6 +764,7 @@ func handleSignals(ctx context.Context, runcProcess *procHandle, signals <-chan 
 			if sig == syscall.SIGKILL {
 				// never send SIGKILL directly to runc, it needs to go to the
 				// process in-container
+				bklog.G(ctx).Warnf("forwarding explicit SIGKILL to process: container=%s cwd=%q args=%q", runcProcess.killer.id, meta.Cwd, meta.Args)
 				if err := runcProcess.killer.Kill(ctx); err != nil {
 					return err
 				}
