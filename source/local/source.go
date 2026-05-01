@@ -138,7 +138,16 @@ func (ls *localSourceHandler) CacheKey(ctx context.Context, jobCtx solver.JobCon
 				// source access fails because the session is already gone.
 				errMsg = fmt.Sprintf("%s; solve context cause: %v", errMsg, cause)
 			}
-			return "", "", nil, false, errors.New(errMsg)
+			err := errors.New(errMsg)
+			if recorder, ok := jobCtx.(solver.RootCauseRecorder); ok {
+				// Earthbuild: retain local source/session loss as cancellation
+				// context unless a more specific root cause is observed later.
+				recorder.RecordRootCause(ctx, solver.RootCause{
+					Source: solver.RootCauseSourceLocalSource,
+					Err:    err,
+				})
+			}
+			return "", "", nil, false, err
 		}
 		sessionID = id
 	}

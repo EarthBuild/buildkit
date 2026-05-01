@@ -546,16 +546,38 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		EnableSessionExporter: req.EnableSessionExporter,
 	}, entitlementsFromPB(req.Entitlements), procs, req.Internal, req.SourcePolicy, req.SourcePolicySession)
 	if err != nil {
-		if cause := context.Cause(ctx); cause != nil && !stderrors.Is(cause, err) {
-			bklog.G(ctx).WithError(err).Warnf("solve failed: ref=%q frontend=%q session=%q context_cause=%+v", req.Ref, req.Frontend, req.Session, cause)
-			if errdefs.IsCanceled(ctx, err) {
+		if errdefs.IsCanceled(ctx, err) {
+			if cause := context.Cause(ctx); cause != nil && !stderrors.Is(cause, err) && solver.IsSpecificRootCause(cause) {
+				bklog.G(ctx).WithError(err).Warnf("solve canceled: ref=%q frontend=%q session=%q context_cause=%+v", req.Ref, req.Frontend, req.Session, cause)
 				// Earthbuild: return the preserved cancellation cause to clients
 				// instead of a generic context canceled solve error.
 				return nil, cause
 			}
-		} else {
-			bklog.G(ctx).WithError(err).Warnf("solve failed: ref=%q frontend=%q session=%q", req.Ref, req.Frontend, req.Session)
+			if rootCause, ok := c.solver.RootCause(req.Ref); ok {
+				bklog.G(ctx).WithError(err).Warnf("solve canceled: ref=%q frontend=%q session=%q root_cause=%+v", req.Ref, req.Frontend, req.Session, rootCause.Err)
+				// Earthbuild: prefer the first recorded solve root cause over
+				// a later generic context canceled error.
+				return nil, rootCause
+			}
+			if cancellation, ok := c.solver.Cancellation(req.Ref); ok {
+				bklog.G(ctx).WithError(err).Warnf("solve canceled: ref=%q frontend=%q session=%q active_vertices=%d", req.Ref, req.Frontend, req.Session, len(cancellation.Active))
+				// Earthbuild: include solve/session identity and active
+				// operation context when BuildKit has no root cause.
+				return nil, cancellation
+			}
+			// Earthbuild: make bare cancellations diagnosable even when no
+			// status/root-cause context was preserved.
+			return nil, solver.SolveCancellation{
+				SolveRef:  req.Ref,
+				SessionID: req.Session,
+				Err:       err,
+			}
 		}
+		if cause := context.Cause(ctx); cause != nil && !stderrors.Is(cause, err) {
+			bklog.G(ctx).WithError(err).Warnf("solve failed: ref=%q frontend=%q session=%q context_cause=%+v", req.Ref, req.Frontend, req.Session, cause)
+			return nil, err
+		}
+		bklog.G(ctx).WithError(err).Warnf("solve failed: ref=%q frontend=%q session=%q", req.Ref, req.Frontend, req.Session)
 		return nil, err
 	}
 	return &controlapi.SolveResponse{

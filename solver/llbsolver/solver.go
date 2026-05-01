@@ -164,6 +164,13 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	}
 
 	defer j.Discard()
+	defer func() {
+		if err != nil && solver.IsCanceledError(ctx, err) {
+			// Earthbuild: snapshot active vertices before Discard removes the
+			// job from solver state, so Control.Solve can explain bare cancels.
+			j.SnapshotCancellation(err)
+		}
+	}()
 
 	var usage *resources.Sub[*resourcestypes.SysSample]
 	if s.sysSampler != nil {
@@ -245,11 +252,17 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 			err = context.Cause(ctx)
 		}
 		if err != nil {
+			// Earthbuild: keep gateway-forwarded solve errors available if
+			// the outer solve later reports only cancellation.
+			j.RecordRootCause(ctx, solver.RootCause{Source: solver.RootCauseSourceGateway, Err: err})
 			return nil, err
 		}
 	} else {
 		res, err = br.Solve(ctx, req, sessionID)
 		if err != nil {
+			// Earthbuild: keep gateway/frontend solve errors available if the
+			// outer solve later reports only cancellation.
+			j.RecordRootCause(ctx, solver.RootCause{Source: solver.RootCauseSourceGateway, Err: err})
 			return nil, err
 		}
 	}
@@ -335,6 +348,9 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	if exp.EnableSessionExporter {
 		exporters, err := s.getSessionExporters(ctx, j.SessionID, len(exp.Exporters), inp)
 		if err != nil {
+			// Earthbuild: distinguish session-exporter loss from generic
+			// cancellation when the client session disappears.
+			j.RecordRootCause(ctx, solver.RootCause{Source: solver.RootCauseSourceSession, Err: err})
 			return nil, err
 		}
 		exp.Exporters = append(exp.Exporters, exporters...)
@@ -355,7 +371,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 			}
 			name := exp.Exporters[i].Name()
 			id := exporterVertexID(j.SessionID, i)
-			if err := inBuilderContext(ctx, j, name, id, func(ctx context.Context, _ solver.JobContext) error {
+			if err := inBuilderContextWithRootCauseSource(ctx, j, name, id, solver.RootCauseSourceFinalizer, func(ctx context.Context, _ solver.JobContext) error {
 				return finalize(ctx)
 			}); err != nil {
 				return nil, err
@@ -377,7 +393,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 			name := exp.Exporters[i].Name()
 			id := exporterVertexID(j.SessionID, i)
 			eg.Go(func() error {
-				return inBuilderContext(egCtx, j, name, id, func(ctx context.Context, _ solver.JobContext) error {
+				return inBuilderContextWithRootCauseSource(egCtx, j, name, id, solver.RootCauseSourceFinalizer, func(ctx context.Context, _ solver.JobContext) error {
 					return finalize(ctx)
 				})
 			})
@@ -438,6 +454,14 @@ func (s *Solver) Status(ctx context.Context, id string, statsStream bool, status
 	return j.Status(ctx, statsStream, statusChan)
 }
 
+func (s *Solver) RootCause(id string) (solver.RootCause, bool) {
+	return s.solver.RootCause(id)
+}
+
+func (s *Solver) Cancellation(id string) (solver.SolveCancellation, bool) {
+	return s.solver.Cancellation(id)
+}
+
 func defaultResolver(wc *worker.Controller) ResolveWorkerFunc {
 	return func() (worker.Worker, error) {
 		return wc.GetDefault()
@@ -460,6 +484,10 @@ func allWorkers(wc *worker.Controller) func(func(w worker.Worker) error) error {
 }
 
 func inBuilderContext(ctx context.Context, b solver.Builder, name, id string, f func(ctx context.Context, jobCtx solver.JobContext) error) error {
+	return inBuilderContextWithRootCauseSource(ctx, b, name, id, "", f)
+}
+
+func inBuilderContextWithRootCauseSource(ctx context.Context, b solver.Builder, name, id string, source string, f func(ctx context.Context, jobCtx solver.JobContext) error) error {
 	if id == "" {
 		id = name
 	}
@@ -472,6 +500,18 @@ func inBuilderContext(ctx context.Context, b solver.Builder, name, id string, f 
 		notifyCompleted := notifyStarted(ctx, &v)
 		defer pw.Close()
 		err := f(ctx, jobCtx)
+		if err != nil && source != "" {
+			if recorder, ok := jobCtx.(solver.RootCauseRecorder); ok {
+				// Earthbuild: retain exporter/finalizer failures before a
+				// parallel cancellation path can hide the original error.
+				recorder.RecordRootCause(ctx, solver.RootCause{
+					VertexDigest: v.Digest,
+					VertexName:   v.Name,
+					Source:       source,
+					Err:          err,
+				})
+			}
+		}
 		notifyCompleted(err)
 		return err
 	})

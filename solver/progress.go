@@ -19,7 +19,8 @@ func (j *Job) Status(ctx context.Context, statsStream bool, ch chan *client.Solv
 	vs := &vertexStream{cache: map[digest.Digest]*client.Vertex{}, wasCached: make(map[digest.Digest]struct{})}
 	pr := j.pr.Reader(ctx)
 	defer func() {
-		if enc := vs.encore(); len(enc) > 0 {
+		rootCause, hasRootCause := j.RootCause()
+		if enc := vs.encore(rootCause, hasRootCause); len(enc) > 0 {
 			ch <- &client.SolveStatus{Vertexes: enc}
 		}
 		close(ch)
@@ -154,17 +155,56 @@ func (vs *vertexStream) markCached(dgst digest.Digest) {
 	}
 }
 
-func (vs *vertexStream) encore() []*client.Vertex {
+func (vs *vertexStream) encore(rootCause RootCause, hasRootCause bool) []*client.Vertex {
 	var out []*client.Vertex
+	hasSpecificError := false
+	for _, v := range vs.cache {
+		if v.Error != "" && !isGenericCancellationString(v.Error) {
+			hasSpecificError = true
+			break
+		}
+	}
+	rootCauseApplied := false
 	for _, v := range vs.cache {
 		if v.Started != nil && v.Completed == nil {
 			now := time.Now()
 			v.Completed = &now
 			if _, ok := vs.wasCached[v.Digest]; !ok && v.Error == "" {
-				v.Error = context.Canceled.Error()
+				if hasRootCause && !hasSpecificError && !rootCauseApplied && (rootCause.VertexDigest == "" || rootCause.VertexDigest == v.Digest) {
+					// Earthbuild: attach the recorded root cause to the final
+					// canceled status so clients can show the active operation.
+					v.Error = rootCause.Error()
+					rootCauseApplied = true
+				} else {
+					v.Error = context.Canceled.Error()
+				}
 			}
 			out = append(out, v)
 		}
 	}
+	if hasRootCause && !hasSpecificError && !rootCauseApplied {
+		now := time.Now()
+		started := rootCause.RecordedAt
+		if started.IsZero() {
+			started = now
+		}
+		dgst := rootCause.VertexDigest
+		if dgst == "" {
+			dgst = digest.FromBytes([]byte(rootCause.Error()))
+		}
+		// Earthbuild: if the root-cause vertex was not still active, emit a
+		// compact synthetic vertex so status consumers still receive it.
+		out = append(out, &client.Vertex{
+			Digest:    dgst,
+			Name:      rootCause.VertexName,
+			Started:   &started,
+			Completed: &now,
+			Error:     rootCause.Error(),
+		})
+	}
 	return out
+}
+
+func isGenericCancellationString(s string) bool {
+	return s == context.Canceled.Error()
 }

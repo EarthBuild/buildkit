@@ -346,6 +346,8 @@ type Job struct {
 	completedTime time.Time
 	releasers     []func() error
 	resolverCache *resolverCache
+	rootCause     *RootCause
+	cancelSummary *SolveCancellation
 
 	progressCloser func(error)
 	SessionID      string
@@ -1047,6 +1049,9 @@ func (s *sharedOp) CalcSlowCache(ctx context.Context, index Index, p PreprocessF
 			key, err = f(withAncestorCacheOpts(ctx, s.st), res, s.st)
 		}
 		if err != nil {
+			// Earthbuild: record the original slow-cache failure before the
+			// scheduler converts canceled request flow into cancellation.
+			s.st.RecordRootCause(ctx, RootCause{Source: RootCauseSourceSlowCache, Err: err})
 			select {
 			case <-ctx.Done():
 				if errdefs.IsCanceled(ctx, err) {
@@ -1086,6 +1091,9 @@ func (s *sharedOp) CacheMap(ctx context.Context, index int) (resp *cacheMapResp,
 	}()
 	op, err := s.getOp()
 	if err != nil {
+		// Earthbuild: preserve resolver errors before cancellation fan-out can
+		// collapse the solve to context.Canceled.
+		s.st.RecordRootCause(ctx, RootCause{Source: RootCauseSourceGateway, Err: err})
 		return nil, err
 	}
 	flightControlKey := fmt.Sprintf("cachemap-%d", index)
@@ -1113,6 +1121,9 @@ func (s *sharedOp) CacheMap(ctx context.Context, index int) (resp *cacheMapResp,
 		res, done, err := op.CacheMap(ctx, s.st, len(s.cacheRes))
 		complete := true
 		if err != nil {
+			// Earthbuild: record the original cache-map failure before it can
+			// be replaced by a generic solve cancellation.
+			s.st.RecordRootCause(ctx, RootCause{Source: RootCauseSourceCacheMap, Err: err})
 			select {
 			case <-ctx.Done():
 				if errdefs.IsCanceled(ctx, err) {
@@ -1159,6 +1170,9 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 	}()
 	op, err := s.getOp()
 	if err != nil {
+		// Earthbuild: preserve resolver errors before cancellation fan-out can
+		// collapse the solve to context.Canceled.
+		s.st.RecordRootCause(ctx, RootCause{Source: RootCauseSourceGateway, Err: err})
 		return nil, nil, nil, err
 	}
 	flightControlKey := "exec"
@@ -1171,6 +1185,8 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 		}
 		release, err := op.Acquire(ctx)
 		if err != nil {
+			// Earthbuild: record acquire failures as exec root-cause context.
+			s.st.RecordRootCause(ctx, RootCause{Source: RootCauseSourceExec, Err: err})
 			return nil, errors.Wrap(err, "acquire op resources")
 		}
 		defer release()
@@ -1193,6 +1209,9 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 		res, err := op.Exec(ctx, s.st, inputs)
 		complete := true
 		if err != nil {
+			// Earthbuild: record the original exec failure before it can be
+			// replaced by a generic solve cancellation.
+			s.st.RecordRootCause(ctx, RootCause{Source: RootCauseSourceExec, Err: err})
 			select {
 			case <-ctx.Done():
 				if errdefs.IsCanceled(ctx, err) {

@@ -89,7 +89,11 @@ func runCacheExporters(ctx context.Context, exporters []RemoteCacheExporter, j *
 	for i, exp := range exporters {
 		id := fmt.Sprint(j.SessionID, "-cache-", i)
 		eg.Go(func() (err error) {
-			err = inBuilderContext(ctx, j, exp.Name(), id, func(ctx context.Context, _ solver.JobContext) error {
+			rootCauseSource := solver.RootCauseSourceExporter
+			if exp.IgnoreError {
+				rootCauseSource = ""
+			}
+			err = inBuilderContextWithRootCauseSource(ctx, j, exp.Name(), id, rootCauseSource, func(ctx context.Context, _ solver.JobContext) error {
 				prepareDone := progress.OneOff(ctx, "preparing build cache for export")
 				if err := result.EachRef(cached, inp, func(res solver.CachedResult, ref cache.ImmutableRef) error {
 					ctx := withDescHandlerCacheOpts(ctx, ref)
@@ -170,7 +174,7 @@ func (s *Solver) runExporters(ctx context.Context, ref string, exporters []expor
 	for i, exp := range exporters {
 		id := exporterVertexID(job.SessionID, i)
 		eg.Go(func() error {
-			return inBuilderContext(ctx, job, exp.Name(), id, func(ctx context.Context, _ solver.JobContext) error {
+			return inBuilderContextWithRootCauseSource(ctx, job, exp.Name(), id, solver.RootCauseSourceExporter, func(ctx context.Context, _ solver.JobContext) error {
 				span, ctx := tracing.StartSpan(ctx, exp.Name())
 				defer span.End()
 
