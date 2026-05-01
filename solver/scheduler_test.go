@@ -3616,6 +3616,120 @@ func TestStaleEdgeMerge(t *testing.T) {
 	require.NotContains(t, s.actives, depV2.Digest())
 }
 
+func TestStaleSubBuildEdgeMerge(t *testing.T) {
+	// Same shape as TestStaleEdgeMerge, but the merged edges are owned by
+	// subbuild parents rather than directly by jobs.
+	t.Parallel()
+	ctx := t.Context()
+
+	s := NewSolver(SolverOpt{
+		ResolveOpFunc: testOpResolver,
+	})
+	defer s.Close()
+
+	depV0 := vtxConst(1, vtxOpt{name: "subDepV0"})
+	depV1 := vtxConst(1, vtxOpt{name: "subDepV1"})
+	depV2 := vtxConst(1, vtxOpt{name: "subDepV2"})
+
+	// These should all end up edge merged.
+	v0 := vtxAdd(2, vtxOpt{name: "subV0", inputs: []Edge{
+		{Vertex: depV0},
+	}})
+	v1 := vtxAdd(2, vtxOpt{name: "subV1", inputs: []Edge{
+		{Vertex: depV1},
+	}})
+	v2 := vtxAdd(2, vtxOpt{name: "subV2", inputs: []Edge{
+		{Vertex: depV2},
+	}})
+
+	parentV0 := vtxSubBuild(Edge{Vertex: v0}, vtxOpt{name: "subParentV0", cacheKeySeed: "sub-parent-0"})
+	parentV1 := vtxSubBuild(Edge{Vertex: v1}, vtxOpt{name: "subParentV1", cacheKeySeed: "sub-parent-1"})
+	parentV2 := vtxSubBuild(Edge{Vertex: v2}, vtxOpt{name: "subParentV2", cacheKeySeed: "sub-parent-2"})
+
+	j0, err := s.NewJob("sub-job0")
+	require.NoError(t, err)
+	res, err := j0.Build(ctx, Edge{Vertex: parentV0})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	require.Contains(t, s.actives, parentV0.Digest())
+	require.Contains(t, s.actives[parentV0.Digest()].jobs, j0)
+	require.Contains(t, s.actives, v0.Digest())
+	require.Contains(t, s.actives[v0.Digest()].parents, parentV0.Digest())
+	require.Contains(t, s.actives, depV0.Digest())
+	require.Contains(t, s.actives[depV0.Digest()].parents, parentV0.Digest())
+
+	j1, err := s.NewJob("sub-job1")
+	require.NoError(t, err)
+	res, err = j1.Build(ctx, Edge{Vertex: parentV1})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	require.Contains(t, s.actives, parentV1.Digest())
+	require.Contains(t, s.actives[parentV1.Digest()].jobs, j1)
+	require.Contains(t, s.actives, v0.Digest())
+	require.Contains(t, s.actives[v0.Digest()].parents, parentV0.Digest())
+	require.Contains(t, s.actives[v0.Digest()].parents, parentV1.Digest())
+	require.Contains(t, s.actives, depV0.Digest())
+	require.Contains(t, s.actives[depV0.Digest()].parents, parentV0.Digest())
+	require.Contains(t, s.actives[depV0.Digest()].parents, parentV1.Digest())
+
+	require.Contains(t, s.actives, v1.Digest())
+	require.Contains(t, s.actives[v1.Digest()].parents, parentV1.Digest())
+	require.Contains(t, s.actives, depV1.Digest())
+	require.Contains(t, s.actives[depV1.Digest()].parents, parentV1.Digest())
+
+	// Discard the original target parent. v0/depV0 must stay active because
+	// v1's subbuild edge was merged to v0's state.
+	require.NoError(t, j0.Discard())
+
+	require.Contains(t, s.actives, v0.Digest())
+	require.NotContains(t, s.actives[v0.Digest()].parents, parentV0.Digest())
+	require.Contains(t, s.actives[v0.Digest()].parents, parentV1.Digest())
+	require.Contains(t, s.actives, depV0.Digest())
+	require.NotContains(t, s.actives[depV0.Digest()].parents, parentV0.Digest())
+	require.Contains(t, s.actives[depV0.Digest()].parents, parentV1.Digest())
+
+	require.Contains(t, s.actives, v1.Digest())
+	require.Contains(t, s.actives[v1.Digest()].parents, parentV1.Digest())
+	require.Contains(t, s.actives, depV1.Digest())
+	require.Contains(t, s.actives[depV1.Digest()].parents, parentV1.Digest())
+
+	// Verify another subbuild can still merge against the surviving target.
+	j2, err := s.NewJob("sub-job2")
+	require.NoError(t, err)
+	res, err = j2.Build(ctx, Edge{Vertex: parentV2})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	require.Contains(t, s.actives, v0.Digest())
+	require.Contains(t, s.actives[v0.Digest()].parents, parentV1.Digest())
+	require.Contains(t, s.actives[v0.Digest()].parents, parentV2.Digest())
+	require.Contains(t, s.actives, depV0.Digest())
+	require.Contains(t, s.actives[depV0.Digest()].parents, parentV1.Digest())
+	require.Contains(t, s.actives[depV0.Digest()].parents, parentV2.Digest())
+
+	require.NoError(t, j1.Discard())
+
+	require.Contains(t, s.actives, v0.Digest())
+	require.NotContains(t, s.actives[v0.Digest()].parents, parentV1.Digest())
+	require.Contains(t, s.actives[v0.Digest()].parents, parentV2.Digest())
+	require.Contains(t, s.actives, depV0.Digest())
+	require.NotContains(t, s.actives[depV0.Digest()].parents, parentV1.Digest())
+	require.Contains(t, s.actives[depV0.Digest()].parents, parentV2.Digest())
+
+	require.NotContains(t, s.actives, v1.Digest())
+	require.NotContains(t, s.actives, depV1.Digest())
+
+	require.NoError(t, j2.Discard())
+	require.NotContains(t, s.actives, v0.Digest())
+	require.NotContains(t, s.actives, v1.Digest())
+	require.NotContains(t, s.actives, v2.Digest())
+	require.NotContains(t, s.actives, depV0.Digest())
+	require.NotContains(t, s.actives, depV1.Digest())
+	require.NotContains(t, s.actives, depV2.Digest())
+}
+
 func generateSubGraph(nodes int) (Edge, int) {
 	if nodes == 1 {
 		value := rand.Int() % 500 //nolint:gosec

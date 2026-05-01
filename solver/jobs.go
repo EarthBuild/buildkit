@@ -220,10 +220,10 @@ func (s *state) setEdge(index Index, targetEdge *edge, targetState *state) {
 	}
 }
 
-// addJobs recursively adds jobs to state and all its ancestors. currently
-// only used during edge merges to add jobs from the source of the merge to the
-// target and its ancestors.
-// requires that Solver.mu is read-locked and srcState.mu is locked
+// addJobs recursively adds jobs and parent references to state and all its
+// ancestors. currently only used during edge merges to add references from the
+// source of the merge to the target and its ancestors.
+// requires that Solver.mu and srcState.mu are locked.
 func (s *state) addJobs(srcState *state, memo map[*state]struct{}) {
 	if _, ok := memo[s]; ok {
 		return
@@ -235,6 +235,21 @@ func (s *state) addJobs(srcState *state, memo map[*state]struct{}) {
 
 	for j := range srcState.jobs {
 		s.jobs[j] = struct{}{}
+	}
+	for p := range srcState.parents {
+		if _, ok := s.parents[p]; ok {
+			continue
+		}
+		s.parents[p] = struct{}{}
+		parentState, ok := s.solver.actives[p]
+		if !ok {
+			bklog.G(context.TODO()).
+				WithField("vertex_digest", p).
+				Error("parent vertex not found during addJobs")
+			continue
+		}
+		parentState.childVtx[s.vtx.Digest()] = struct{}{}
+		maps.Copy(s.cache, parentState.cache)
 	}
 
 	for _, inputEdge := range s.vtx.Inputs() {
@@ -418,8 +433,8 @@ func (jl *Solver) hasOwner(target Edge, owner Edge) bool {
 }
 
 func (jl *Solver) setEdge(e Edge, targetEdge *edge) {
-	jl.mu.RLock()
-	defer jl.mu.RUnlock()
+	jl.mu.Lock()
+	defer jl.mu.Unlock()
 
 	st, ok := jl.actives[e.Vertex.Digest()]
 	if !ok {
