@@ -336,7 +336,11 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 
 		resp, err := c.ControlClient().Solve(ctx, sopt)
 		if err != nil {
-			return errors.Wrap(err, "failed to solve")
+			wrappedErr := errors.Wrap(err, "failed to solve")
+			// Earthbuild: preserve the solve failure as the cancellation cause so
+			// concurrent gateway/session work does not collapse it to context canceled.
+			cancelSolve(wrappedErr)
+			return wrappedErr
 		}
 		res = &SolveResponse{
 			ExporterResponse: resp.ExporterResponse,
@@ -359,7 +363,9 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			select {
 			case <-solveCtx.Done():
 			case <-time.After(5 * time.Second):
-				cancelSolve(errors.WithStack(context.Canceled))
+				// Earthbuild: keep the gateway callback error as the solve
+				// cancellation cause when the control solve does not fail first.
+				cancelSolve(err)
 			}
 
 			return err

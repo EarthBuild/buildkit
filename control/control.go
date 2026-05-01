@@ -33,6 +33,7 @@ import (
 	containerdsnapshot "github.com/moby/buildkit/snapshot/containerd"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/bboltcachestorage"
+	"github.com/moby/buildkit/solver/errdefs"
 	"github.com/moby/buildkit/solver/llbsolver"
 	"github.com/moby/buildkit/solver/llbsolver/cdidevices"
 	"github.com/moby/buildkit/solver/llbsolver/history"
@@ -547,6 +548,11 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 	if err != nil {
 		if cause := context.Cause(ctx); cause != nil && !stderrors.Is(cause, err) {
 			bklog.G(ctx).WithError(err).Warnf("solve failed: ref=%q frontend=%q session=%q context_cause=%+v", req.Ref, req.Frontend, req.Session, cause)
+			if errdefs.IsCanceled(ctx, err) {
+				// Earthbuild: return the preserved cancellation cause to clients
+				// instead of a generic context canceled solve error.
+				return nil, cause
+			}
 		} else {
 			bklog.G(ctx).WithError(err).Warnf("solve failed: ref=%q frontend=%q session=%q", req.Ref, req.Frontend, req.Session)
 		}

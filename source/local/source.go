@@ -132,7 +132,13 @@ func (ls *localSourceHandler) CacheKey(ctx context.Context, jobCtx solver.JobCon
 	if sessionID == "" {
 		id := jobCtx.Session().SessionIterator().NextSession()
 		if id == "" {
-			return "", "", nil, false, errors.New("could not access local files without session")
+			errMsg := fmt.Sprintf("could not access local files for %q without session", ls.src.Name)
+			if cause := context.Cause(ctx); cause != nil {
+				// Earthbuild: include the solve cancellation cause when local
+				// source access fails because the session is already gone.
+				errMsg = fmt.Sprintf("%s; solve context cause: %v", errMsg, cause)
+			}
+			return "", "", nil, false, errors.New(errMsg)
 		}
 		sessionID = id
 	}

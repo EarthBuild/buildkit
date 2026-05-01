@@ -179,6 +179,8 @@ func (e *edge) isComplete() bool {
 func (e *edge) finishIncoming(req pipeSender) {
 	err := e.err
 	if req.Request().Canceled && err == nil {
+		// Earthbuild: only synthesize context.Canceled when the edge has no
+		// more specific error to propagate.
 		err = context.Canceled
 	}
 	debugSchedulerFinishIncoming(e, err, req)
