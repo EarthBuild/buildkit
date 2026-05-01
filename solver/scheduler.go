@@ -363,16 +363,20 @@ type pipeFactory struct {
 func (pf *pipeFactory) NewInputRequest(ee Edge, req *edgeRequest) pipeReceiver {
 	target := pf.s.ef.getEdge(ee)
 	if target == nil {
-		dgst := ee.Vertex.Digest()
-		bklog.G(context.TODO()).Errorf("failed to get edge dgst=%s name=%s desiredState=%s; actives history: %s", dgst, ee.Vertex.Name(), req.desiredState, dgstTrackerInst.String()) // earthly-specific
-		debugSchedulerInconsistentGraphState(ee)
+		detail := inconsistentGraphStateEdgeDetail(ee, req.desiredState)
+		bklog.G(context.TODO()).Errorf("failed to get edge: inconsistent graph state (%s); actives history: %s", detail, dgstTrackerInst.String()) // earthly-specific
+		debugSchedulerInconsistentGraphState(ee, req.desiredState)
 		return pf.NewFuncRequest(func(_ context.Context) (any, error) {
-			return nil, errdefs.Internal(errors.Errorf("failed to get edge: inconsistent graph state in edge %s %s %d", ee.Vertex.Name(), ee.Vertex.Digest(), ee.Index))
+			return nil, errdefs.Internal(errors.Errorf("failed to get edge: inconsistent graph state (%s)", detail))
 		})
 	}
 	p := pf.s.newPipe(target, pf.e, pipeRequest{Payload: req})
 	debugSchedulerNewPipe(pf.e, p, req)
 	return p.Receiver
+}
+
+func inconsistentGraphStateEdgeDetail(ee Edge, desiredState edgeStatusType) string {
+	return fmt.Sprintf("missing active state for edge vertex=%q digest=%s index=%d desired_state=%s", ee.Vertex.Name(), ee.Vertex.Digest(), ee.Index, desiredState)
 }
 
 func (pf *pipeFactory) NewFuncRequest(f func(context.Context) (any, error)) pipeReceiver {

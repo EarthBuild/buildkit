@@ -226,12 +226,13 @@ func debugSchedulerNewFunc(e *edge, p pipeReceiver) {
 	}
 }
 
-func debugSchedulerInconsistentGraphState(ee Edge) {
+func debugSchedulerInconsistentGraphState(ee Edge, desiredState edgeStatusType) {
 	bklog.G(context.TODO()).
 		WithField("edge_vertex_name", ee.Vertex.Name()).
 		WithField("edge_vertex_digest", ee.Vertex.Digest()).
 		WithField("edge_index", ee.Index).
-		Error("failed to get edge: inconsistent graph state")
+		WithField("desired_state", desiredState).
+		Errorf("failed to get edge: inconsistent graph state (%s)", inconsistentGraphStateEdgeDetail(ee, desiredState))
 }
 
 func debugSchedulerFinishIncoming(e *edge, err error, req pipeSender) {
