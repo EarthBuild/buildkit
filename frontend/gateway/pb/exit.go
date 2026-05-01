@@ -2,6 +2,7 @@ package moby_buildkit_v1_frontend //nolint:staticcheck
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/containerd/typeurl/v2"
 	"github.com/moby/buildkit/util/grpcerrors"
@@ -35,10 +36,18 @@ func (err *ExitError) ToProto() grpcerrors.TypedErrorProto {
 }
 
 func (err *ExitError) Error() string {
+	var msg string
 	if err.Err != nil {
-		return err.Err.Error()
+		msg = err.Err.Error()
+	} else {
+		msg = fmt.Sprintf("exit code: %d", err.ExitCode)
 	}
-	return fmt.Sprintf("exit code: %d", err.ExitCode)
+
+	if detail := exitCodeDetail(err.ExitCode); detail != "" && !strings.Contains(msg, detail) {
+		return fmt.Sprintf("%s (%s)", msg, detail)
+	}
+
+	return msg
 }
 
 func (err *ExitError) Unwrap() error {
@@ -49,5 +58,16 @@ func (e *ExitMessage) WrapError(err error) error {
 	return &ExitError{
 		Err:      err,
 		ExitCode: e.Code,
+	}
+}
+
+func exitCodeDetail(code uint32) string {
+	switch code {
+	case 126:
+		return "exit code 126 conventionally means the command was found but could not be executed; " +
+			"check executable permissions, the shebang/interpreter, CPU architecture, noexec mounts, " +
+			"and container runtime or security restrictions"
+	default:
+		return ""
 	}
 }
