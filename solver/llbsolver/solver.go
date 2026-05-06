@@ -168,7 +168,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		if err != nil && solver.IsCanceledError(ctx, err) {
 			// Earthbuild: snapshot active vertices before Discard removes the
 			// job from solver state, so Control.Solve can explain bare cancels.
-			j.SnapshotCancellation(err)
+			j.SnapshotCancellation(ctx, err)
 		}
 	}()
 

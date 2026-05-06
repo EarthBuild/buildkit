@@ -83,6 +83,52 @@ func TestRootCauseRecorderUsesSpecificContextCause(t *testing.T) {
 	require.Contains(t, rc.Error(), "gateway callback failed")
 }
 
+func TestRootCauseRecorderTreatsCanceledKillAsCancellationContext(t *testing.T) {
+	t.Parallel()
+
+	s := NewSolver(SolverOpt{})
+	defer s.Close()
+	j, err := s.NewJob("solve-ref")
+	require.NoError(t, err)
+
+	canceledKill := errors.New(`process "/bin/sh -c long-running-command" did not complete successfully: exit code: 137: context canceled: context canceled`)
+	j.RecordRootCause(t.Context(), RootCause{Source: RootCauseSourceExec, Err: canceledKill})
+
+	rc, ok := j.RootCause()
+	require.True(t, ok)
+	require.Equal(t, RootCauseKindCancellation, rc.Kind)
+	require.Contains(t, rc.Error(), "BuildKit canceled execution")
+	require.NotContains(t, rc.Error(), "resource failure")
+
+	sessionCause := errors.New("session healthcheck failed too many times after 3 consecutive failures")
+	j.RecordRootCause(t.Context(), RootCause{Source: RootCauseSourceSession, Err: sessionCause})
+
+	rc, ok = j.RootCause()
+	require.True(t, ok)
+	require.ErrorIs(t, rc, sessionCause)
+	require.Equal(t, RootCauseKindSession, rc.Kind)
+}
+
+func TestSnapshotCancellationUsesSpecificContextCause(t *testing.T) {
+	t.Parallel()
+
+	s := NewSolver(SolverOpt{})
+	defer s.Close()
+	j, err := s.NewJob("solve-ref")
+	require.NoError(t, err)
+
+	specific := errors.New("session healthcheck failed too many times after 3 consecutive failures")
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(specific)
+
+	j.SnapshotCancellation(ctx, context.Canceled)
+
+	cancellation, ok := j.Cancellation()
+	require.True(t, ok)
+	require.ErrorIs(t, cancellation.Err, specific)
+	require.Contains(t, cancellation.Error(), "session healthcheck failed")
+}
+
 func TestEncoreAddsRootCauseToCanceledVertex(t *testing.T) {
 	t.Parallel()
 

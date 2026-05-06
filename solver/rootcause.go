@@ -30,6 +30,7 @@ type RootCauseKind string
 
 const (
 	RootCauseKindError        RootCauseKind = "error"
+	RootCauseKindCancellation RootCauseKind = "cancellation"
 	RootCauseKindSession      RootCauseKind = "session"
 	RootCauseKindShutdown     RootCauseKind = "shutdown"
 	RootCauseKindResourceKill RootCauseKind = "resource kill"
@@ -61,6 +62,8 @@ func (rc RootCause) Error() string {
 
 	prefix := "BuildKit"
 	switch rc.Kind {
+	case RootCauseKindCancellation:
+		prefix = "BuildKit canceled execution"
 	case RootCauseKindSession:
 		prefix = "BuildKit lost the solve session"
 	case RootCauseKindShutdown:
@@ -212,7 +215,7 @@ func (j *Job) RootCause() (RootCause, bool) {
 	return *j.rootCause, true
 }
 
-func (j *Job) SnapshotCancellation(err error) {
+func (j *Job) SnapshotCancellation(ctx context.Context, err error) {
 	j.mu.Lock()
 	if j.cancelSummary != nil {
 		j.mu.Unlock()
@@ -224,7 +227,7 @@ func (j *Job) SnapshotCancellation(err error) {
 		SolveRef:  j.id,
 		SessionID: j.SessionID,
 		Active:    j.activeVertices(5),
-		Err:       err,
+		Err:       bestRootCauseError(ctx, err),
 	}
 
 	j.mu.Lock()
@@ -335,7 +338,7 @@ func IsSpecificRootCause(err error) bool {
 }
 
 func IsCanceledError(ctx context.Context, err error) bool {
-	return errdefs.IsCanceled(ctx, err) || isGenericCancellation(err)
+	return errdefs.IsCanceled(ctx, err) || isGenericCancellation(err) || isCancellationCleanup(err)
 }
 
 const (
@@ -351,6 +354,8 @@ func rootCausePriority(err error) (int, RootCauseKind) {
 
 	msg := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(msg, "session healthcheck failed"):
+		return rootCausePriorityUseful, RootCauseKindSession
 	case strings.Contains(msg, "no active sessions"),
 		strings.Contains(msg, "without session"),
 		strings.Contains(msg, "session not found"),
@@ -361,11 +366,12 @@ func rootCausePriority(err error) (int, RootCauseKind) {
 		strings.Contains(msg, "buildkitd is shutting down"),
 		strings.Contains(msg, "daemon is shutting down"):
 		return rootCausePriorityUseful, RootCauseKindShutdown
-	case strings.Contains(msg, "signal: killed"),
-		strings.Contains(msg, "out of memory"),
+	case strings.Contains(msg, "out of memory"),
 		strings.Contains(msg, "oom"),
-		strings.Contains(msg, "exit code: 137"):
+		(isKilledProcess(msg) && !strings.Contains(msg, "context canceled")):
 		return rootCausePriorityUseful, RootCauseKindResourceKill
+	case isKilledProcess(msg) && strings.Contains(msg, "context canceled"):
+		return rootCausePriorityCancellationContext, RootCauseKindCancellation
 	case isGenericCancellation(err):
 		return rootCausePriorityIgnore, ""
 	default:
@@ -383,4 +389,16 @@ func isGenericCancellation(err error) bool {
 	msg := strings.TrimSpace(strings.ToLower(err.Error()))
 	return msg == context.Canceled.Error() ||
 		msg == "rpc error: code = canceled desc = context canceled"
+}
+
+func isCancellationCleanup(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return isKilledProcess(msg) && strings.Contains(msg, "context canceled")
+}
+
+func isKilledProcess(msg string) bool {
+	return strings.Contains(msg, "signal: killed") || strings.Contains(msg, "exit code: 137")
 }

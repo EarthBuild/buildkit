@@ -32,9 +32,17 @@ type History struct {
 	End   time.Time
 }
 
+type closedSession struct {
+	End   time.Time
+	Cause string
+}
+
+const closedSessionRetention = time.Minute
+
 // Manager is a controller for accessing currently active sessions
 type Manager struct {
 	sessions        map[string]*client
+	closedSessions  map[string]closedSession
 	mu              sync.Mutex
 	updateCondition *sync.Cond
 	healthCfg       ManagerHealthCfg
@@ -73,7 +81,8 @@ func NewManager(opt *ManagerOpt) (*Manager, error) {
 		}
 	}
 	sm := &Manager{
-		sessions: make(map[string]*client),
+		sessions:       make(map[string]*client),
+		closedSessions: make(map[string]closedSession),
 		healthCfg: ManagerHealthCfg{
 			frequency:       opt.HealthFrequency,
 			timeout:         opt.HealthTimeout,
@@ -259,11 +268,14 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 	sm.recordSessionStart(id) // earthly-specific
 
 	defer func() {
+		cause := context.Cause(c.ctx)
 		sm.mu.Lock()
 		delete(sm.sessions, id)
+		sm.recordClosedSessionLocked(id, cause)
 		if len(sm.sessions) == 0 {
 			sm.idleAt = time.Now() // earthly-specific
 		}
+		sm.updateCondition.Broadcast()
 		sm.mu.Unlock()
 		sm.recordSessionEnd(id) // earthly-specific
 	}()
@@ -305,7 +317,16 @@ func (sm *Manager) Get(ctx context.Context, id string, noWait bool) (Caller, err
 		}
 		var ok bool
 		c, ok = sm.sessions[id]
-		if (!ok || c.closed()) && !noWait {
+		if c != nil && c.closed() {
+			err := sm.closedSessionErrorLocked(id, c, ok)
+			sm.mu.Unlock()
+			return nil, err
+		}
+		if !ok && !noWait {
+			if err := sm.closedSessionErrorLocked(id, nil, ok); err != nil {
+				sm.mu.Unlock()
+				return nil, err
+			}
 			sm.updateCondition.Wait()
 			continue
 		}
@@ -318,6 +339,46 @@ func (sm *Manager) Get(ctx context.Context, id string, noWait bool) (Caller, err
 	}
 
 	return c, nil
+}
+
+func (sm *Manager) recordClosedSessionLocked(id string, cause error) {
+	if id == "" {
+		return
+	}
+	if sm.closedSessions == nil {
+		sm.closedSessions = make(map[string]closedSession)
+	}
+	now := time.Now()
+	causeText := ""
+	if cause != nil {
+		causeText = cause.Error()
+	}
+	sm.closedSessions[id] = closedSession{End: now, Cause: causeText}
+	for sessionID, closed := range sm.closedSessions {
+		if now.Sub(closed.End) > closedSessionRetention {
+			delete(sm.closedSessions, sessionID)
+		}
+	}
+}
+
+func (sm *Manager) closedSessionErrorLocked(id string, c *client, active bool) error {
+	var cause error
+	if c != nil {
+		cause = context.Cause(c.Context())
+	}
+	if cause != nil {
+		return errors.Wrapf(cause, "session closed for %s", id)
+	}
+	if closed, ok := sm.closedSessions[id]; ok {
+		if closed.Cause != "" {
+			return errors.Errorf("session closed for %s at %s: %s", id, closed.End.Format(time.RFC3339Nano), closed.Cause)
+		}
+		return errors.Errorf("session closed for %s at %s", id, closed.End.Format(time.RFC3339Nano))
+	}
+	if active {
+		return errors.Errorf("session closed for %s", id)
+	}
+	return nil
 }
 
 func (c *client) Context() context.Context {
