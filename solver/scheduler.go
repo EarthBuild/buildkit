@@ -15,9 +15,20 @@ import (
 
 var debugScheduler = false // TODO: replace with logs in build trace
 
+// cacheKeyDebug, when enabled via BUILDKIT_CACHE_KEY_DEBUG=1, makes every vertex
+// emit its authoritative cache-key digest(s) as a log line. This is the
+// vertex→digest join that the persisted cache deliberately does not store (the
+// cache is content-addressed and vertex-agnostic). With it, external tooling can
+// diff cache keys run-over-run and reverse-look-up the plaintext inputs via the
+// --save-cache-debug API to explain why a step missed cache.
+var cacheKeyDebug = false
+
 func init() {
 	if os.Getenv("BUILDKIT_SCHEDULER_DEBUG") == "1" {
 		debugScheduler = true
+	}
+	if os.Getenv("BUILDKIT_CACHE_KEY_DEBUG") == "1" {
+		cacheKeyDebug = true
 	}
 }
 

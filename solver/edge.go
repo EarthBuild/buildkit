@@ -2,6 +2,8 @@ package solver
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +53,7 @@ type edge struct {
 	cacheMapDigests    []digest.Digest
 	execReq            pipe.Receiver
 	execCacheLoad      bool
+	cacheMissReason    string
 	err                error
 	cacheRecords       map[string]*CacheRecord
 	cacheRecordsLoaded map[string]struct{}
@@ -109,6 +112,10 @@ type edgeState struct {
 	result   *SharedCachedResult
 	cacheMap *CacheMap
 	keys     []ExportableCacheKey
+	// cached reports whether result was loaded from cache rather than executed.
+	// It propagates to dependant edges so they can explain their own cache
+	// misses at the cache-break boundary (see calcCacheMissReason).
+	cached bool
 }
 
 type edgeRequest struct {
@@ -457,6 +464,7 @@ func (e *edge) processUpdate(upt pipe.Receiver) (depChanged bool) {
 		} else {
 			e.result = NewSharedCachedResult(upt.Status().Value.(CachedResult))
 			e.state = edgeStatusComplete
+			e.cached = e.execCacheLoad
 		}
 		return true
 	}
@@ -871,11 +879,71 @@ func (e *edge) execIfPossible(f *pipeFactory) bool {
 			e.postpone(f)
 			return true
 		}
+		e.cacheMissReason = e.calcCacheMissReason()
 		e.execReq = f.NewFuncRequest(e.execOp)
 		e.execCacheLoad = false
 		return true
 	}
 	return false
+}
+
+const cacheMissPrefix = "cache miss: "
+
+// calcCacheMissReason returns a short, human-readable explanation of why this
+// edge must be executed instead of loaded from cache. It only speaks up at the
+// cache-break boundary — a step that runs even though at least one of its
+// inputs was a cache hit — so a cold (sub)build, where a miss line on every step
+// would be noise, stays quiet (returns "").
+//
+// The reason is derived from reliable local state only: whether the cache was
+// explicitly disabled, and per-input cache-hit status (dep.cached). A cache-hit
+// input has a bit-identical prior result, so it cannot itself be the thing that
+// changed — which lets us attribute the miss without guessing. We deliberately
+// do not try to distinguish "this step's definition changed" from "this exact
+// combination of cached inputs was never built before": BuildKit's cache is
+// content-addressed over (definition digest + every input key), so the two are
+// indistinguishable from an edge's local view.
+//
+// Called from execIfPossible, i.e. under the scheduler, so reading dep state is
+// safe.
+func (e *edge) calcCacheMissReason() string {
+	if e.op.IgnoreCache() {
+		return cacheMissPrefix + "cache disabled for this step (--no-cache)"
+	}
+
+	var cached, rebuilt []string
+	for _, d := range e.deps {
+		if d.cached {
+			cached = append(cached, e.depName(d))
+		} else {
+			rebuilt = append(rebuilt, e.depName(d))
+		}
+	}
+
+	// Boundary gate: only explain the miss when something upstream was cached.
+	if len(cached) == 0 {
+		return ""
+	}
+
+	if len(rebuilt) > 0 {
+		// The step ran because these inputs were (re)built upstream.
+		return cacheMissPrefix + "rebuilt input(s): " + strings.Join(rebuilt, ", ")
+	}
+
+	// Every input came from cache, yet this step has no matching cached result.
+	return cacheMissPrefix + "all inputs cached but no matching result for this step (its definition changed, or this input combination is new)"
+}
+
+// depName returns a human-readable name for a dependency input, falling back to
+// the input index when the input vertex is unnamed.
+func (e *edge) depName(d *dep) string {
+	inputs := e.edge.Vertex.Inputs()
+	if int(d.index) < len(inputs) {
+		if name := inputs[int(d.index)].Vertex.Name(); name != "" {
+			return name
+		}
+	}
+	return fmt.Sprintf("input %d", int(d.index))
 }
 
 // postpone delays exec to next unpark invocation if we have unprocessed keys
@@ -908,7 +976,7 @@ func (e *edge) loadCache(ctx context.Context) (interface{}, error) {
 // execOp creates a request to execute the vertex operation
 func (e *edge) execOp(ctx context.Context) (interface{}, error) {
 	cacheKeys, inputs := e.commitOptions()
-	results, subExporters, err := e.op.Exec(ctx, toResultSlice(inputs))
+	results, subExporters, err := e.op.Exec(ctx, toResultSlice(inputs), e.cacheMissReason)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

@@ -5,6 +5,7 @@ package solver
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	digest "github.com/opencontainers/go-digest"
@@ -18,7 +19,12 @@ type dgstTrackerItem struct {
 	seen   time.Time
 }
 
+// dgstTracker is a fixed-size ring buffer of recent vertex actions, used to
+// reconstruct context for "inconsistent graph state" errors. The instance is a
+// package-level global written from concurrent vertex loads, so all access is
+// guarded by mu.
 type dgstTracker struct {
+	mu      sync.Mutex
 	head    int
 	records []dgstTrackerItem
 }
@@ -31,6 +37,8 @@ func newDgstTracker() *dgstTracker {
 }
 
 func (d *dgstTracker) add(dgst digest.Digest, action string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.head++
 	if d.head >= len(d.records) {
 		d.head = 0
@@ -41,6 +49,8 @@ func (d *dgstTracker) add(dgst digest.Digest, action string) {
 }
 
 func (d *dgstTracker) String() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	var sb strings.Builder
 
 	for i := d.head; i >= 0; i-- {
