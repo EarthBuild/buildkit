@@ -3,7 +3,6 @@ package solver
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/moby/buildkit/errdefs"
@@ -101,11 +100,22 @@ func (s *scheduler) loop() {
 
 // dispatch schedules an edge to be processed
 func (s *scheduler) dispatch(e *edge) {
-	helpMe := []string{"v1"} // earthly specific
+	// Earthbuild: breadcrumbs for the scheduler-error branches at the end of
+	// this function. This loop is the scheduler hot path and runs while other
+	// goroutines mutate edge/state under their own locks, so only cheap,
+	// race-free values may be recorded: NO reflective formatting (%+v) of
+	// edge or state structs — that races with their owners and a reflective
+	// read of a map being written is a runtime fatal that takes down the
+	// whole daemon (observed in CI as nested solve sessions vanishing
+	// without a root cause).
+	trace := dispatchTrace{
+		vertexName:    e.edge.Vertex.Name(),
+		incomingTotal: len(s.incoming),
+		outgoingTotal: len(s.outgoing),
+		incomingEdge:  len(s.incoming[e]),
+		outgoingEdge:  len(s.outgoing[e]),
+	}
 
-	helpMe = append(helpMe, fmt.Sprintf("%s: %+v", e.edge.Vertex.Name(), e))
-
-	helpMe = append(helpMe, fmt.Sprintf("%d %d %d %d", len(s.incoming), len(s.outgoing), len(s.incoming[e]), len(s.outgoing[e])))
 	inc := make([]pipeSender, len(s.incoming[e]))
 	for i, p := range s.incoming[e] {
 		inc[i] = p.Sender
@@ -125,7 +135,7 @@ func (s *scheduler) dispatch(e *edge) {
 			e.hasActiveOutgoing = true
 		}
 	}
-	helpMe = append(helpMe, fmt.Sprintf("hasActiveOutgoing %v", e.hasActiveOutgoing))
+	trace.hasActiveOutgoing = e.hasActiveOutgoing
 
 	pf := &pipeFactory{s: s, e: e}
 
@@ -135,11 +145,10 @@ func (s *scheduler) dispatch(e *edge) {
 	debugSchedulerPostUnpark(e, inc)
 
 	// set up new requests that didn't complete/were added by this run
-	helpMe = append(helpMe, fmt.Sprintf("make openIncoming %d", len(inc)))
 	openIncoming := make([]*edgePipe, 0, len(inc))
 	for _, r := range s.incoming[e] {
 		status := r.Sender.Status()
-		helpMe = append(helpMe, fmt.Sprintf("%+v", status))
+		trace.incomingStatus = append(trace.incomingStatus, pipeStatusBits(status.Completed, status.Canceled))
 		if !status.Completed {
 			openIncoming = append(openIncoming, r)
 		}
@@ -150,11 +159,10 @@ func (s *scheduler) dispatch(e *edge) {
 		delete(s.incoming, e)
 	}
 
-	helpMe = append(helpMe, fmt.Sprintf("make openOutgoing %d", len(out)))
 	openOutgoing := make([]*edgePipe, 0, len(out))
 	for _, r := range s.outgoing[e] {
 		status := r.Receiver.Status()
-		helpMe = append(helpMe, fmt.Sprintf("%+v", status))
+		trace.outgoingStatus = append(trace.outgoingStatus, pipeStatusBits(status.Completed, status.Canceled))
 		if !status.Completed {
 			openOutgoing = append(openOutgoing, r)
 		}
@@ -193,20 +201,57 @@ func (s *scheduler) dispatch(e *edge) {
 		e.keysDidChange = false
 	}
 
-	helpMe = append(helpMe, fmt.Sprintf("in: %d out: %d", len(openIncoming), len(openOutgoing)))
+	trace.openIncoming = len(openIncoming)
+	trace.openOutgoing = len(openOutgoing)
 
 	// validation to avoid deadlocks/resource leaks:
 	// TODO: if these start showing up in error reports they can be changed
 	// to error the edge instead. They can only appear from algorithm bugs in
 	// unpark(), not for any external input.
 	if len(openIncoming) > 0 && len(openOutgoing) == 0 {
-		bklog.G(context.TODO()).Errorf("return leaving incoming open help me: %s\n", strings.Join(helpMe, ";"))
+		bklog.G(context.TODO()).Errorf("return leaving incoming open: %s\n", trace.String())
 		e.markFailed(pf, errors.New("buildkit scheduler error: return leaving incoming open. Please report this with BUILDKIT_SCHEDULER_DEBUG=1"))
 	}
 	if len(openIncoming) == 0 && len(openOutgoing) > 0 {
-		bklog.G(context.TODO()).Errorf("return leaving outgoing open help me: %s\n", strings.Join(helpMe, ";"))
+		bklog.G(context.TODO()).Errorf("return leaving outgoing open: %s\n", trace.String())
 		e.markFailed(pf, errors.New("buildkit scheduler error: return leaving outgoing open. Please report this with BUILDKIT_SCHEDULER_DEBUG=1"))
 	}
+}
+
+// dispatchTrace carries race-free breadcrumbs from a dispatch run for the
+// scheduler-error logs above. Formatting happens only on the (rare) error
+// path. Earthbuild: replaces the previous per-dispatch %+v dumps of edge
+// state, which raced with other goroutines and could fatal the daemon.
+type dispatchTrace struct {
+	vertexName        string
+	incomingTotal     int
+	outgoingTotal     int
+	incomingEdge      int
+	outgoingEdge      int
+	hasActiveOutgoing bool
+	incomingStatus    []byte
+	outgoingStatus    []byte
+	openIncoming      int
+	openOutgoing      int
+}
+
+// pipeStatusBits encodes a pipe status as 'c' (completed), 'x' (canceled),
+// 'o' (open) for compact, allocation-light tracing.
+func pipeStatusBits(completed, canceled bool) byte {
+	switch {
+	case canceled:
+		return 'x'
+	case completed:
+		return 'c'
+	default:
+		return 'o'
+	}
+}
+
+func (d dispatchTrace) String() string {
+	return fmt.Sprintf("v2 %s: pipes total in/out %d/%d edge in/out %d/%d activeOut=%v statuses in=%q out=%q open in/out %d/%d",
+		d.vertexName, d.incomingTotal, d.outgoingTotal, d.incomingEdge, d.outgoingEdge,
+		d.hasActiveOutgoing, d.incomingStatus, d.outgoingStatus, d.openIncoming, d.openOutgoing)
 }
 
 // signal notifies that an edge needs to be processed again
