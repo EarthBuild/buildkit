@@ -4214,3 +4214,188 @@ type testExporterRecord struct {
 	results int
 	links   int
 }
+
+func TestMergedEdgeDiscardWhileSiblingInFlight(t *testing.T) {
+	// Earthbuild: production shape from EarthBuild's +test-misc: two solves
+	// share an expensive vertex via edge merge; one solve finishes and its
+	// job is discarded while the other solve's downstream op is still
+	// executing. The discard must not cancel the surviving solve.
+	t.Parallel()
+
+	for _, order := range []string{"owner-discards", "merged-in-discards"} {
+		t.Run(order, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+
+			s := NewSolver(SolverOpt{
+				ResolveOpFunc: testOpResolver,
+			})
+			defer s.Close()
+
+			entered := make(chan struct{})
+			release := make(chan struct{})
+
+			// Shared dep: same cache key on both jobs' graphs so the edges merge.
+			depA := vtxConst(7, vtxOpt{name: "dep-a"})
+			depB := vtxConst(7, vtxOpt{name: "dep-b"})
+
+			// Survivor consumer blocks mid-exec until released.
+			blocked := vtxSum(2, vtxOpt{
+				name:   "blocked-consumer",
+				inputs: []Edge{{Vertex: depA}},
+				execPreFunc: func(ctx context.Context) error {
+					close(entered)
+					select {
+					case <-release:
+						return nil
+					case <-ctx.Done():
+						return context.Cause(ctx)
+					}
+				},
+			})
+			quick := vtxSum(1, vtxOpt{
+				name:   "quick-consumer",
+				inputs: []Edge{{Vertex: depB}},
+			})
+
+			jBlocked, err := s.NewJob("job-blocked-" + order)
+			require.NoError(t, err)
+			jQuick, err := s.NewJob("job-quick-" + order)
+			require.NoError(t, err)
+
+			blockedErrCh := make(chan error, 1)
+			startBlocked := func() {
+				go func() {
+					_, err := jBlocked.Build(ctx, Edge{Vertex: blocked})
+					blockedErrCh <- err
+				}()
+				select {
+				case <-entered:
+				case <-time.After(10 * time.Second):
+					t.Error("timeout waiting for blocked consumer to start executing")
+				}
+			}
+			runQuick := func() {
+				res, err := jQuick.Build(ctx, Edge{Vertex: quick})
+				require.NoError(t, err)
+				require.NotNil(t, res)
+			}
+
+			if order == "owner-discards" {
+				// Quick job builds first and owns the shared dep state; the
+				// blocked job's dep edge merges into it afterwards.
+				runQuick()
+				startBlocked()
+			} else {
+				// Blocked job owns the shared dep state; quick job merges in.
+				startBlocked()
+				runQuick()
+			}
+
+			// Discard the finished job while the other op is still executing.
+			require.NoError(t, jQuick.Discard())
+
+			close(release)
+			select {
+			case err := <-blockedErrCh:
+				require.NoError(t, err, "surviving solve was canceled by sibling discard")
+			case <-time.After(10 * time.Second):
+				t.Fatal("timeout waiting for blocked build to finish")
+			}
+			require.NoError(t, jBlocked.Discard())
+		})
+	}
+}
+
+func TestSubBuildMergedEdgeDiscardWhileSiblingInFlight(t *testing.T) {
+	// Earthbuild: same as TestMergedEdgeDiscardWhileSiblingInFlight but the
+	// shared dep is reached through per-job subbuild parents, like Earthly
+	// targets. The dep state is then kept alive by parent refs rather than
+	// direct job refs, exercising the addJobs parent-copy path.
+	t.Parallel()
+
+	for _, order := range []string{"owner-discards", "merged-in-discards"} {
+		t.Run(order, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+
+			s := NewSolver(SolverOpt{
+				ResolveOpFunc: testOpResolver,
+			})
+			defer s.Close()
+
+			entered := make(chan struct{})
+			release := make(chan struct{})
+
+			depA := vtxConst(7, vtxOpt{name: "sub-dep-a"})
+			depB := vtxConst(7, vtxOpt{name: "sub-dep-b"})
+
+			blocked := vtxSum(2, vtxOpt{
+				name:   "sub-blocked-consumer",
+				inputs: []Edge{{Vertex: depA}},
+				execPreFunc: func(ctx context.Context) error {
+					close(entered)
+					select {
+					case <-release:
+						return nil
+					case <-ctx.Done():
+						return context.Cause(ctx)
+					}
+				},
+			})
+			quick := vtxSum(1, vtxOpt{
+				name:   "sub-quick-consumer",
+				inputs: []Edge{{Vertex: depB}},
+			})
+
+			parentBlocked := vtxSubBuild(Edge{Vertex: blocked}, vtxOpt{
+				name: "sub-parent-blocked", cacheKeySeed: "sub-parent-blocked",
+			})
+			parentQuick := vtxSubBuild(Edge{Vertex: quick}, vtxOpt{
+				name: "sub-parent-quick", cacheKeySeed: "sub-parent-quick",
+			})
+
+			jBlocked, err := s.NewJob("sub-job-blocked-" + order)
+			require.NoError(t, err)
+			jQuick, err := s.NewJob("sub-job-quick-" + order)
+			require.NoError(t, err)
+
+			blockedErrCh := make(chan error, 1)
+			startBlocked := func() {
+				go func() {
+					_, err := jBlocked.Build(ctx, Edge{Vertex: parentBlocked})
+					blockedErrCh <- err
+				}()
+				select {
+				case <-entered:
+				case <-time.After(10 * time.Second):
+					t.Error("timeout waiting for blocked consumer to start executing")
+				}
+			}
+			runQuick := func() {
+				res, err := jQuick.Build(ctx, Edge{Vertex: parentQuick})
+				require.NoError(t, err)
+				require.NotNil(t, res)
+			}
+
+			if order == "owner-discards" {
+				runQuick()
+				startBlocked()
+			} else {
+				startBlocked()
+				runQuick()
+			}
+
+			require.NoError(t, jQuick.Discard())
+
+			close(release)
+			select {
+			case err := <-blockedErrCh:
+				require.NoError(t, err, "surviving subbuild solve was canceled by sibling discard")
+			case <-time.After(10 * time.Second):
+				t.Fatal("timeout waiting for blocked build to finish")
+			}
+			require.NoError(t, jBlocked.Discard())
+		})
+	}
+}

@@ -5,6 +5,7 @@ package solver
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	digest "github.com/opencontainers/go-digest"
@@ -19,6 +20,7 @@ type dgstTrackerItem struct {
 }
 
 type dgstTracker struct {
+	mu      sync.Mutex // add is called from concurrent Job.Builds
 	head    int
 	records []dgstTrackerItem
 }
@@ -31,6 +33,8 @@ func newDgstTracker() *dgstTracker {
 }
 
 func (d *dgstTracker) add(dgst digest.Digest, action string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.head++
 	if d.head >= len(d.records) {
 		d.head = 0
@@ -41,6 +45,9 @@ func (d *dgstTracker) add(dgst digest.Digest, action string) {
 }
 
 func (d *dgstTracker) String() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	var sb strings.Builder
 
 	for i := d.head; i >= 0; i-- {
