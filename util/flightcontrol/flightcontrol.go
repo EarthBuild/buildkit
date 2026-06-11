@@ -178,6 +178,15 @@ func (c *call[T]) wait(ctx context.Context) (v T, err error) {
 		}
 		return empty, context.Cause(ctx)
 	case <-c.ready:
+		// Earthbuild: the shared context keeps fn alive while any caller
+		// lives, but fn can still fail with a cancellation through
+		// resources tied to another caller (its session group, leases).
+		// A live waiter must retry rather than inherit that artifact,
+		// otherwise an unrelated solve's teardown poisons a healthy build.
+		if c.err != nil && errors.Is(c.err, context.Canceled) && ctx.Err() == nil {
+			<-c.cleaned
+			return empty, errRetry
+		}
 		return c.result, c.err // shared not implemented yet
 	}
 }

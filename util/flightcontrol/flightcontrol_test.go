@@ -256,3 +256,63 @@ func testFunc(wait time.Duration, ret string, counter *int64) func(ctx context.C
 		}
 	}
 }
+
+func TestLiveWaiterRetriesWinnersCancellationArtifact(t *testing.T) {
+	// Earthbuild: the combined context keeps fn alive while any caller
+	// lives, but fn can still die of cancellation through resources tied to
+	// the winning caller (its session group, leases, etc.). A live waiter
+	// must treat such an error as a retry, not inherit the poison —
+	// otherwise an unrelated solve's teardown fails a healthy build (seen
+	// in CI as 'failed to apply diffs: context canceled' on shared lazy
+	// merge refs).
+	t.Parallel()
+
+	g := &Group[string]{}
+
+	var calls int64
+
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	fn := func(ctx context.Context) (string, error) {
+		if atomic.AddInt64(&calls, 1) == 1 {
+			close(started)
+			<-finish
+
+			return "", errors.Wrap(context.Canceled, "failed to apply diffs: failed to handle changes")
+		}
+
+		return "ok", nil
+	}
+
+	firstErrCh := make(chan error, 1)
+	go func() {
+		_, err := g.Do(context.Background(), "key", fn)
+		firstErrCh <- err
+	}()
+
+	<-started
+
+	secondResCh := make(chan string, 1)
+	secondErrCh := make(chan error, 1)
+	go func() {
+		res, err := g.Do(context.Background(), "key", fn)
+		secondResCh <- res
+		secondErrCh <- err
+	}()
+
+	// Give the second caller time to register as a live waiter, then let
+	// the first invocation fail with its cancellation artifact.
+	time.Sleep(50 * time.Millisecond)
+	close(finish)
+
+	// The first caller's own context is alive too — only its work died of
+	// the cancellation artifact — so it retries and succeeds as well.
+	require.NoError(t, <-firstErrCh)
+	require.NoError(t, <-secondErrCh)
+	require.Equal(t, "ok", <-secondResCh)
+	// Both callers retry; depending on backoff timing they share one retry
+	// invocation or trigger one each.
+	retries := atomic.LoadInt64(&calls)
+	require.GreaterOrEqual(t, retries, int64(2))
+	require.LessOrEqual(t, retries, int64(3))
+}
