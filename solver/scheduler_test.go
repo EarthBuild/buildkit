@@ -7,10 +7,12 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
 	digest "github.com/opencontainers/go-digest"
@@ -3852,6 +3854,161 @@ func blockingFuncion(i int) func(context.Context) error {
 		<-block
 		return nil
 	}
+}
+
+// buildCapturingLogs builds g under a fresh job, capturing per-vertex log lines
+// (client.VertexLog) keyed by vertex digest. The MultiReader buffers and replays
+// all progress, so capture is independent of goroutine timing.
+func buildCapturingLogs(ctx context.Context, t *testing.T, s *Solver, jobID string, g Edge) (string, map[digest.Digest]string) {
+	t.Helper()
+	j, err := s.NewJob(jobID)
+	require.NoError(t, err)
+
+	statusCtx, cancel := context.WithCancel(ctx)
+	logs := map[digest.Digest]string{}
+	var mu sync.Mutex
+	ch := make(chan *client.SolveStatus)
+	done := make(chan struct{})
+	go func() { _ = j.Status(statusCtx, true, ch) }()
+	go func() {
+		defer close(done)
+		for ss := range ch {
+			mu.Lock()
+			for _, l := range ss.Logs {
+				logs[l.Vertex] += string(l.Data)
+			}
+			mu.Unlock()
+		}
+	}()
+
+	res, err := j.Build(ctx, g)
+	require.NoError(t, err)
+	val := unwrap(res)
+
+	// All progress is buffered in the MultiReader by the time Build returns;
+	// give the in-memory stream a moment to drain to our reader, then stop it.
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	<-done
+	require.NoError(t, j.Discard())
+
+	mu.Lock()
+	defer mu.Unlock()
+	out := make(map[digest.Digest]string, len(logs))
+	for k, v := range logs {
+		out[k] = v
+	}
+	return val, out
+}
+
+// TestCacheMissReason verifies that a step which executes despite at least one
+// of its inputs being a cache hit emits a human-readable cache-miss reason as a
+// vertex log line, while a cold build (nothing upstream cached) stays quiet.
+func TestCacheMissReason(t *testing.T) {
+	t.Parallel()
+	ctx := context.TODO()
+
+	t.Run("cold build is quiet, definition change is explained", func(t *testing.T) {
+		t.Parallel()
+		s := NewSolver(SolverOpt{ResolveOpFunc: testOpResolver})
+		defer s.Close()
+
+		// Cold build: parent <- child, both execute. No input was cached, so
+		// neither step should report a cache miss.
+		g0 := Edge{Vertex: vtx(vtxOpt{
+			name: "parent0", cacheKeySeed: "p", value: "pv",
+			inputs: []Edge{{Vertex: vtx(vtxOpt{name: "child0", cacheKeySeed: "c", value: "cv"})}},
+		})}
+		_, logs0 := buildCapturingLogs(ctx, t, s, "job0", g0)
+		for d, l := range logs0 {
+			require.NotContains(t, l, cacheMissPrefix, "cold build should be quiet (vertex %s)", d)
+		}
+
+		// Rebuild: child seed unchanged (cache hit) but parent seed changed
+		// (miss). The child stays silent; the parent reports that all inputs
+		// were cached.
+		child1 := vtx(vtxOpt{name: "child1", cacheKeySeed: "c", value: "cv"})
+		parent1 := vtx(vtxOpt{
+			name: "parent1", cacheKeySeed: "p-CHANGED", value: "pv2",
+			inputs: []Edge{{Vertex: child1}},
+		})
+		_, logs1 := buildCapturingLogs(ctx, t, s, "job1", Edge{Vertex: parent1})
+		require.Contains(t, logs1[parent1.Digest()], cacheMissPrefix)
+		require.Contains(t, logs1[parent1.Digest()], "all inputs cached")
+		require.NotContains(t, logs1[child1.Digest()], cacheMissPrefix, "cached input should not report a miss")
+	})
+
+	t.Run("changed input is named", func(t *testing.T) {
+		t.Parallel()
+		s := NewSolver(SolverOpt{ResolveOpFunc: testOpResolver})
+		defer s.Close()
+
+		// Cold build of a 2-input parent.
+		g0 := Edge{Vertex: vtx(vtxOpt{
+			name: "p0", cacheKeySeed: "p", value: "pv",
+			inputs: []Edge{
+				{Vertex: vtx(vtxOpt{name: "a0", cacheKeySeed: "a", value: "av"})},
+				{Vertex: vtx(vtxOpt{name: "b0", cacheKeySeed: "b", value: "bv"})},
+			},
+		})}
+		buildCapturingLogs(ctx, t, s, "job0", g0)
+
+		// Rebuild: input "a" unchanged (cache hit), input "b" changed (rebuilt).
+		// Parent keeps its own seed, so the miss is attributable to input b.
+		parent1 := vtx(vtxOpt{
+			name: "p1", cacheKeySeed: "p", value: "pv",
+			inputs: []Edge{
+				{Vertex: vtx(vtxOpt{name: "a1", cacheKeySeed: "a", value: "av"})},
+				{Vertex: vtx(vtxOpt{name: "b1", cacheKeySeed: "b-CHANGED", value: "bv2"})},
+			},
+		})
+		_, logs1 := buildCapturingLogs(ctx, t, s, "job1", Edge{Vertex: parent1})
+		pl := logs1[parent1.Digest()]
+		require.Contains(t, pl, cacheMissPrefix)
+		require.Contains(t, pl, "rebuilt input(s)")
+		require.Contains(t, pl, "b1", "the changed input should be named")
+	})
+
+	t.Run("ignore cache is explained", func(t *testing.T) {
+		t.Parallel()
+		s := NewSolver(SolverOpt{ResolveOpFunc: testOpResolver})
+		defer s.Close()
+
+		g := Edge{Vertex: vtx(vtxOpt{name: "nc", cacheKeySeed: "x", value: "v", ignoreCache: true})}
+		_, logs := buildCapturingLogs(ctx, t, s, "job0", g)
+		require.Contains(t, logs[g.Vertex.Digest()], "--no-cache")
+	})
+}
+
+// TestCacheKeyDebug verifies that with BUILDKIT_CACHE_KEY_DEBUG enabled every
+// vertex emits its authoritative cache-key digest (the vertex→digest join), on
+// both the executed (miss) and cache-loaded (hit) paths, and that the digest
+// tracks the operation's cache seed.
+func TestCacheKeyDebug(t *testing.T) {
+	// Not parallel: toggles the package-level cacheKeyDebug flag.
+	cacheKeyDebug = true
+	defer func() { cacheKeyDebug = false }()
+
+	ctx := context.TODO()
+	s := NewSolver(SolverOpt{ResolveOpFunc: testOpResolver})
+	defer s.Close()
+
+	parentOp := digest.FromBytes([]byte("seed:pk")).String()
+
+	// Cold build: parent executes; its cache-key join is emitted.
+	child0 := vtx(vtxOpt{name: "ck-child0", cacheKeySeed: "ck", value: "cv"})
+	parent0 := vtx(vtxOpt{name: "ck-parent0", cacheKeySeed: "pk", value: "pv", inputs: []Edge{{Vertex: child0}}})
+	_, logs0 := buildCapturingLogs(ctx, t, s, "job0", Edge{Vertex: parent0})
+	require.Contains(t, logs0[parent0.Digest()], "[cache-key] vtx="+parent0.Digest().String()+" op="+parentOp,
+		"executed vertex should emit its authoritative cache key")
+
+	// Rebuild with identical seeds: parent is a cache hit, yet still emits the
+	// same join from the load-cache path (so tooling can diff run-over-run).
+	child1 := vtx(vtxOpt{name: "ck-child1", cacheKeySeed: "ck", value: "cv"})
+	parent1 := vtx(vtxOpt{name: "ck-parent1", cacheKeySeed: "pk", value: "pv", inputs: []Edge{{Vertex: child1}}})
+	_, logs1 := buildCapturingLogs(ctx, t, s, "job1", Edge{Vertex: parent1})
+	require.Contains(t, logs1[parent1.Digest()], "op="+parentOp,
+		"cache-hit vertex should still emit its authoritative cache key")
 }
 
 func newTrackingCacheManager(cm CacheManager) *trackingCacheManager {

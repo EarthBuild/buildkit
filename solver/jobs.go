@@ -3,6 +3,7 @@ package solver
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -701,7 +702,7 @@ type cacheMapResp struct {
 type activeOp interface {
 	CacheMap(context.Context, int) (*cacheMapResp, error)
 	LoadCache(ctx context.Context, rec *CacheRecord) (Result, error)
-	Exec(ctx context.Context, inputs []Result) (outputs []Result, exporters []ExportableCacheKey, err error)
+	Exec(ctx context.Context, inputs []Result, cacheMissReason string) (outputs []Result, exporters []ExportableCacheKey, err error)
 	IgnoreCache() bool
 	Cache() CacheManager
 	CalcSlowCache(context.Context, Index, PreprocessFunc, ResultBasedCacheFunc, Result) (digest.Digest, error)
@@ -766,6 +767,31 @@ func (c cacheWithCacheOpts) Records(ctx context.Context, ck *CacheKey) ([]*Cache
 	return c.CacheManager.Records(withAncestorCacheOpts(ctx, c.st), ck)
 }
 
+// emitCacheKeyDebug writes the vertex→cache-key-digest join as a log line when
+// BUILDKIT_CACHE_KEY_DEBUG is set. The op cache-map digest is the authoritative
+// key into the --save-cache-debug plaintext store; emitting it per vertex lets
+// tooling map a build step to its digest (something the content-addressed cache
+// never persists) and diff/look it up to explain cache misses. Called after
+// notifyStarted so the vertex's Started event is seen first.
+func (s *sharedOp) emitCacheKeyDebug() {
+	if !cacheKeyDebug || len(s.cacheRes) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(s.cacheRes))
+	for _, cm := range s.cacheRes {
+		if cm != nil {
+			keys = append(keys, cm.Digest.String())
+		}
+	}
+	if len(keys) == 0 {
+		return
+	}
+	s.st.mpw.Write(identity.NewID(), client.VertexLog{
+		Stream: 2, // stderr
+		Data:   []byte("[cache-key] vtx=" + s.st.vtx.Digest().String() + " op=" + strings.Join(keys, ",") + "\n"),
+	})
+}
+
 func (s *sharedOp) LoadCache(ctx context.Context, rec *CacheRecord) (Result, error) {
 	ctx = progress.WithProgress(ctx, s.st.mpw)
 	if s.st.mspan.Span != nil {
@@ -774,6 +800,7 @@ func (s *sharedOp) LoadCache(ctx context.Context, rec *CacheRecord) (Result, err
 	// no cache hit. start evaluating the node
 	span, ctx := tracing.StartSpan(ctx, "load cache: "+s.st.vtx.Name(), trace.WithAttributes(attribute.String("vertex", s.st.vtx.Digest().String())))
 	notifyCompleted := notifyStarted(ctx, &s.st.clientVertex, true)
+	s.emitCacheKeyDebug()
 	res, err := s.Cache().Load(withAncestorCacheOpts(ctx, s.st), rec)
 	tracing.FinishWithError(span, err)
 	notifyCompleted(err, true)
@@ -933,7 +960,7 @@ func (s *sharedOp) CacheMap(ctx context.Context, index int) (resp *cacheMapResp,
 	return &cacheMapResp{CacheMap: res[index], complete: s.cacheDone}, nil
 }
 
-func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result, exporters []ExportableCacheKey, err error) {
+func (s *sharedOp) Exec(ctx context.Context, inputs []Result, cacheMissReason string) (outputs []Result, exporters []ExportableCacheKey, err error) {
 	defer func() {
 		err = errdefs.WithOp(err, s.st.vtx.Sys())
 		err = errdefs.WrapVertex(err, s.st.origDigest)
@@ -969,6 +996,19 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 			tracing.FinishWithError(span, retErr)
 			notifyCompleted(retErr, false)
 		}()
+
+		s.emitCacheKeyDebug()
+
+		// Surface why this step is not a cache hit as a vertex log line. mpw
+		// carries the "vertex" metadata (set in loadUnlocked), so this is
+		// attributed to the right vertex and printed like any other step output.
+		// Emitted after notifyStarted so the vertex's Started event is seen first.
+		if cacheMissReason != "" {
+			s.st.mpw.Write(identity.NewID(), client.VertexLog{
+				Stream: 2, // stderr
+				Data:   []byte(cacheMissReason + "\n"),
+			})
+		}
 
 		res, err := op.Exec(ctx, s.st, inputs)
 		complete := true
