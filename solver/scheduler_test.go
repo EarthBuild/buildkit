@@ -3079,7 +3079,7 @@ func TestMergedEdgesCycle(t *testing.T) {
 	t.Parallel()
 
 	for range 20 {
-		ctx := context.TODO()
+		ctx := t.Context()
 
 		cacheManager := newTrackingCacheManager(NewInMemoryCacheManager())
 
@@ -3134,7 +3134,7 @@ func TestMergedEdgesCycleMultipleOwners(t *testing.T) {
 	t.Parallel()
 
 	for range 20 {
-		ctx := context.TODO()
+		ctx := t.Context()
 
 		cacheManager := newTrackingCacheManager(NewInMemoryCacheManager())
 
