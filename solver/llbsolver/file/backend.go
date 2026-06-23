@@ -214,12 +214,14 @@ func docopy(ctx context.Context, src, dest string, action *pb.FileActionCopy, u 
 			ci.ExcludePatterns = action.ExcludePatterns
 			ci.Chown = ch
 			ci.Utime = timestampToTime(action.Timestamp)
-			if m := int(action.Mode); m != -1 {
+			if action.ModeStr != "" {
+				ci.ModeStr = action.ModeStr
+			} else if m := int(action.Mode); m != -1 {
 				ci.Mode = &m
 			}
 			ci.CopyDirContents = action.DirCopyContents
 			ci.FollowLinks = action.FollowSymlink
-			// ci.AlwaysReplaceExistingDestPaths not supported in this fsutil fork
+			ci.AlwaysReplaceExistingDestPaths = action.AlwaysReplaceExistingDestPaths
 		},
 		copy.WithXAttrErrorHandler(xattrErrorHandler),
 	}
