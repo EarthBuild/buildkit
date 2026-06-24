@@ -101,7 +101,7 @@ func init() {
 		},
 		cli.StringFlag{
 			Name:  "containerd-worker-net",
-			Usage: "worker network type (auto, cni or host)",
+			Usage: "worker network type (auto, bridge, cni or host)",
 			Value: defaultConf.Workers.Containerd.NetworkConfig.Mode,
 		},
 		cli.StringFlag{
@@ -290,10 +290,12 @@ func containerdWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([
 	nc := netproviders.Opt{
 		Mode: common.config.Workers.Containerd.NetworkConfig.Mode,
 		CNI: cniprovider.Opt{
-			Root:       common.config.Root,
-			ConfigPath: common.config.Workers.Containerd.CNIConfigPath,
-			BinaryDir:  common.config.Workers.Containerd.CNIBinaryPath,
-			PoolSize:   common.config.Workers.Containerd.CNIPoolSize,
+			Root:         common.config.Root,
+			ConfigPath:   common.config.Workers.Containerd.CNIConfigPath,
+			BinaryDir:    common.config.Workers.Containerd.CNIBinaryPath,
+			PoolSize:     common.config.Workers.Containerd.CNIPoolSize,
+			BridgeName:   common.config.Workers.Containerd.BridgeName,
+			BridgeSubnet: common.config.Workers.Containerd.BridgeSubnet,
 		},
 	}
 
@@ -322,6 +324,7 @@ func containerdWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([
 
 		runtime = &containerd.RuntimeInfo{
 			Name:    cfg.Runtime.Name,
+			Path:    cfg.Runtime.Path,
 			Options: opts,
 		}
 	}
@@ -353,7 +356,7 @@ func validContainerdSocket(cfg config.ContainerdConfig) bool {
 		// FIXME(AkihiroSuda): prohibit tcp?
 		return true
 	}
-	socketPath := strings.TrimPrefix(socket, "unix://")
+	socketPath := strings.TrimPrefix(socket, socketScheme)
 	if _, err := os.Stat(socketPath); errors.Is(err, os.ErrNotExist) {
 		// FIXME(AkihiroSuda): add more conditions
 		bklog.L.Warnf("skipping containerd worker, as %q does not exist", socketPath)

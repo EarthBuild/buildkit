@@ -11,16 +11,13 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
 	"github.com/containerd/continuity/fs"
 	"github.com/containerd/continuity/sysx"
 	"github.com/hashicorp/go-multierror"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/util/bklog"
-	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/overlay"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
@@ -351,7 +348,7 @@ func (a *applier) applyHardlink(ctx context.Context, ca *changeApply) (bool, err
 }
 
 func (a *applier) applyCopy(ctx context.Context, ca *changeApply) error {
-	switch ca.srcStat.Mode & unix.S_IFMT {
+	switch statMode(ca.srcStat) & unix.S_IFMT {
 	case unix.S_IFREG:
 		if err := fs.CopyFile(ca.dstPath, ca.srcPath); err != nil {
 			return errors.Wrapf(err, "failed to copy from %s to %s during apply", ca.srcPath, ca.dstPath)
@@ -359,7 +356,7 @@ func (a *applier) applyCopy(ctx context.Context, ca *changeApply) error {
 	case unix.S_IFDIR:
 		if ca.dstStat == nil {
 			// dstPath doesn't exist, make it a dir
-			if err := unix.Mkdir(ca.dstPath, ca.srcStat.Mode); err != nil {
+			if err := unix.Mkdir(ca.dstPath, statMode(ca.srcStat)); err != nil {
 				return errors.Wrapf(err, "failed to create applied dir at %q from %q", ca.dstPath, ca.srcPath)
 			}
 		}
@@ -370,12 +367,12 @@ func (a *applier) applyCopy(ctx context.Context, ca *changeApply) error {
 			return errors.Wrap(err, "failed to create symlink during apply")
 		}
 	case unix.S_IFBLK, unix.S_IFCHR, unix.S_IFIFO, unix.S_IFSOCK:
-		if err := unix.Mknod(ca.dstPath, ca.srcStat.Mode, int(ca.srcStat.Rdev)); err != nil {
+		if err := unix.Mknod(ca.dstPath, statMode(ca.srcStat), int(ca.srcStat.Rdev)); err != nil {
 			return errors.Wrap(err, "failed to mknod during apply")
 		}
 	default:
 		// should never be here, all types should be handled
-		return errors.Errorf("unhandled file type %d during merge at path %q", ca.srcStat.Mode&unix.S_IFMT, ca.srcPath)
+		return errors.Errorf("unhandled file type %d during merge at path %q", statMode(ca.srcStat)&unix.S_IFMT, ca.srcPath)
 	}
 
 	// NOTE: it's important that chown happens before setting xattrs due to the fact that chown will
@@ -384,8 +381,8 @@ func (a *applier) applyCopy(ctx context.Context, ca *changeApply) error {
 		return errors.Wrap(err, "failed to chown during apply")
 	}
 
-	if ca.srcStat.Mode&unix.S_IFMT != unix.S_IFLNK {
-		if err := unix.Chmod(ca.dstPath, ca.srcStat.Mode); err != nil {
+	if statMode(ca.srcStat)&unix.S_IFMT != unix.S_IFLNK {
+		if err := unix.Chmod(ca.dstPath, statMode(ca.srcStat)); err != nil {
 			return errors.Wrapf(err, "failed to chmod path %q during apply", ca.dstPath)
 		}
 	}
@@ -421,9 +418,9 @@ func (a *applier) applyCopy(ctx context.Context, ca *changeApply) error {
 		}
 	}
 
-	atimeSpec := unix.Timespec{Sec: ca.srcStat.Atim.Sec, Nsec: ca.srcStat.Atim.Nsec}
-	mtimeSpec := unix.Timespec{Sec: ca.srcStat.Mtim.Sec, Nsec: ca.srcStat.Mtim.Nsec}
-	if ca.srcStat.Mode&unix.S_IFMT != unix.S_IFDIR {
+	atimeSpec := statAtime(ca.srcStat)
+	mtimeSpec := statMtime(ca.srcStat)
+	if statMode(ca.srcStat)&unix.S_IFMT != unix.S_IFDIR {
 		// apply times immediately for non-dirs
 		if err := unix.UtimesNanoAt(unix.AT_FDCWD, ca.dstPath, []unix.Timespec{atimeSpec, mtimeSpec}, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 			return err
@@ -449,7 +446,7 @@ func (a *applier) Flush() error {
 			return nil
 		}
 		if mtime, ok := a.dirModTimes[path]; ok {
-			if err := unix.UtimesNanoAt(unix.AT_FDCWD, path, []unix.Timespec{{Nsec: unix.UTIME_OMIT}, mtime}, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			if err := unix.UtimesNanoAt(unix.AT_FDCWD, path, []unix.Timespec{{Nsec: utimeOmit}, mtime}, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 				return err
 			}
 		}
@@ -600,8 +597,10 @@ func (d *differ) doubleWalkingChanges(ctx context.Context, handle func(context.C
 		if prevErr != nil {
 			return prevErr
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		default:
 		}
 
 		if kind == fs.ChangeKindUnmodified {
@@ -689,8 +688,11 @@ func (d *differ) overlayChanges(ctx context.Context, handle func(context.Context
 		if prevErr != nil {
 			return prevErr
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		default:
 		}
 
 		if kind == fs.ChangeKindUnmodified {
@@ -719,7 +721,10 @@ func (d *differ) overlayChanges(ctx context.Context, handle func(context.Context
 				return errors.Errorf("unhandled stat type for %+v", srcfi)
 			}
 
-			if !srcfi.IsDir() && c.srcStat.Nlink > 1 {
+			// Changes with Delete kind may share the same inode even if they are unrelated.
+			// Skip them to avoid creating hardlinks between whiteouts as whiteouts are not
+			// always created and may leave the hardlink dangling.
+			if !srcfi.IsDir() && c.srcStat.Nlink > 1 && c.kind != fs.ChangeKindDelete {
 				if linkSubPath, ok := d.inodes[statInode(c.srcStat)]; ok {
 					c.linkSubPath = linkSubPath
 				} else {
@@ -812,41 +817,4 @@ func opaqueXattr(userxattr bool) string {
 	return trustedOpaqueXattr
 }
 
-// needsUserXAttr checks whether overlay mounts should be provided the userxattr option. We can't use
-// NeedsUserXAttr from the overlayutils package directly because we don't always have direct knowledge
-// of the root of the snapshotter state (such as when using a remote snapshotter). Instead, we create
-// a temporary new snapshot and test using its root, which works because single layer snapshots will
-// use bind-mounts even when created by an overlay based snapshotter.
-func needsUserXAttr(ctx context.Context, sn Snapshotter, lm leases.Manager) (bool, error) {
-	key := identity.NewID()
 
-	ctx, done, err := leaseutil.WithLease(ctx, lm, leaseutil.MakeTemporary)
-	if err != nil {
-		return false, errors.Wrap(err, "failed to create lease for checking user xattr")
-	}
-	defer done(context.TODO())
-
-	err = sn.Prepare(ctx, key, "")
-	if err != nil {
-		return false, err
-	}
-	mntable, err := sn.Mounts(ctx, key)
-	if err != nil {
-		return false, err
-	}
-	mnts, unmount, err := mntable.Mount()
-	if err != nil {
-		return false, err
-	}
-	defer unmount()
-
-	var userxattr bool
-	if err := mount.WithTempMount(ctx, mnts, func(root string) error {
-		var err error
-		userxattr, err = overlayutils.NeedsUserXAttr(root)
-		return err
-	}); err != nil {
-		return false, err
-	}
-	return userxattr, nil
-}

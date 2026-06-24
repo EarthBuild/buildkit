@@ -4,9 +4,15 @@
 package cniprovider
 
 import (
-	"github.com/moby/buildkit/util/network"
+	"context"
+
+	resourcestypes "github.com/moby/buildkit/executor/resources/types"
 )
 
-func (ns *cniNS) sample() (*network.Sample, error) {
+func (ns *cniNS) sample() (*resourcestypes.NetworkSample, error) {
 	return nil, nil
+}
+
+func withDetachedNetNSIfAny(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
 }

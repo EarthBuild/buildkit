@@ -15,6 +15,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+const socketScheme = "unix://"
+
 func init() {
 	syscall.Umask(0)
 

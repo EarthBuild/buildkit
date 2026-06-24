@@ -16,6 +16,7 @@ import (
 	"github.com/moby/buildkit/util/progress/progressui"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"github.com/tonistiigi/fsutil"
 	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
 )
@@ -80,7 +81,7 @@ func action(clicontext *cli.Context) error {
 	if tag := clicontext.String("tag"); tag == "" {
 		return errors.New("tag is not specified")
 	}
-	c, err := client.New(ctx, clicontext.String("buildkit-addr"), client.WithFailFast())
+	c, err := client.New(ctx, clicontext.String("buildkit-addr"))
 	if err != nil {
 		return err
 	}
@@ -136,9 +137,15 @@ func newSolveOpt(clicontext *cli.Context, w io.WriteCloser) (*client.SolveOpt, e
 	if file == "" {
 		file = filepath.Join(buildCtx, "Dockerfile")
 	}
-	localDirs := map[string]string{
-		"context":    buildCtx,
-		"dockerfile": filepath.Dir(file),
+
+	cxtLocalMount, err := fsutil.NewFS(buildCtx)
+	if err != nil {
+		return nil, errors.New("invalid buildCtx local mount dir")
+	}
+
+	dockerfileLocalMount, err := fsutil.NewFS(filepath.Dir(file))
+	if err != nil {
+		return nil, errors.New("invalid dockerfile local mount dir")
 	}
 
 	frontend := "dockerfile.v0" // TODO: use gateway
@@ -173,7 +180,10 @@ func newSolveOpt(clicontext *cli.Context, w io.WriteCloser) (*client.SolveOpt, e
 				},
 			},
 		},
-		LocalDirs:     localDirs,
+		LocalMounts: map[string]fsutil.FS{
+			"context":    cxtLocalMount,
+			"dockerfile": dockerfileLocalMount,
+		},
 		Frontend:      frontend,
 		FrontendAttrs: frontendAttrs,
 	}, nil

@@ -10,6 +10,7 @@ option (gogoproto.stable_marshaler_all) = true;
 
 // Op represents a vertex of the LLB DAG.
 message Op {
+	// changes to this structure must be represented in json.go.
 	// inputs is a set of input edges.
 	repeated Input inputs = 1;
 	oneof op {
@@ -29,7 +30,7 @@ message Platform {
 	string Architecture = 1;
 	string OS = 2;
 	string Variant = 3;
-	string OSVersion = 4; // unused
+	string OSVersion = 4;
 	repeated string OSFeatures = 5; // unused
 }
 
@@ -108,6 +109,7 @@ message Mount {
 	SecretOpt secretOpt = 21;
 	SSHOpt SSHOpt = 22;
 	string resultID = 23;
+	MountContentCache contentCache = 24;
 
 	SockOpt SockOpt = 100; // earthly
 }
@@ -121,6 +123,13 @@ enum MountType {
 	TMPFS = 4;
 	HOST_BIND = 100;  // Earthly specific.
 	SOCKET = 101;  // Earthly specific.
+}
+
+// MountContentCache ...
+enum MountContentCache {
+	DEFAULT = 0;
+	ON = 1;
+	OFF = 2;
 }
 
 // TmpfsOpt defines options describing tpmfs mounts
@@ -304,6 +313,7 @@ message FileOp {
 }
 
 message FileAction {
+	// changes to this structure must be represented in json.go.
 	int64 input = 1 [(gogoproto.customtype) = "InputIndex", (gogoproto.nullable) = false]; // could be real input or target (target index + max input index)
 	int64 secondaryInput = 2 [(gogoproto.customtype) = "InputIndex", (gogoproto.nullable) = false]; // --//--
 	int64 output = 3 [(gogoproto.customtype) = "OutputIndex", (gogoproto.nullable) = false];
@@ -389,6 +399,7 @@ message ChownOpt {
 }
 
 message UserOpt {
+	// changes to this structure must be represented in json.go.
 	oneof user {
 		NamedUserOpt byName = 1;
 		uint32 byID = 2;

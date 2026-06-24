@@ -80,6 +80,8 @@ type NetworkConfig struct {
 	CNIConfigPath string `toml:"cniConfigPath"`
 	CNIBinaryPath string `toml:"cniBinaryPath"`
 	CNIPoolSize   int    `toml:"cniPoolSize"`
+	BridgeName    string `toml:"bridgeName"`
+	BridgeSubnet  string `toml:"bridgeSubnet"`
 }
 
 type OCIConfig struct {
@@ -146,6 +148,7 @@ type ContainerdConfig struct {
 
 type ContainerdRuntime struct {
 	Name    string                 `toml:"name"`
+	Path    string                 `toml:"path"`
 	Options map[string]interface{} `toml:"options"`
 }
 

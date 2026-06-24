@@ -18,6 +18,7 @@ import (
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // ResolveOpFunc finds an Op implementation for a Vertex
@@ -156,7 +157,7 @@ func (s *state) getEdge(index Index) *edge {
 	return e
 }
 
-func (s *state) setEdge(index Index, targetEdge *edge) {
+func (s *state) setEdge(index Index, targetEdge *edge, targetState *state) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.edges[index]
@@ -172,6 +173,13 @@ func (s *state) setEdge(index Index, targetEdge *edge) {
 		s.edges[index] = e
 	}
 	targetEdge.takeOwnership(e)
+
+	if targetState != nil {
+		if _, ok := targetState.allPw[s.mpw]; !ok {
+			targetState.mpw.Add(s.mpw)
+			targetState.allPw[s.mpw] = struct{}{}
+		}
+	}
 }
 
 func (s *state) combinedCacheManager() CacheManager {
@@ -248,7 +256,7 @@ type Job struct {
 	startedTime   time.Time
 	completedTime time.Time
 
-	progressCloser func()
+	progressCloser func(error)
 	SessionID      string
 	uniqueID       string // unique ID is used for provenance. We use a different field that client can't control
 }
@@ -325,7 +333,10 @@ func (jl *Solver) setEdge(e Edge, targetEdge *edge) {
 		return
 	}
 
-	st.setEdge(e.Index, targetEdge)
+	// potentially passing nil targetSt is intentional and handled in st.setEdge
+	targetSt := jl.actives[targetEdge.edge.Vertex.Digest()]
+
+	st.setEdge(e.Index, targetEdge, targetSt)
 }
 
 func (jl *Solver) getState(e Edge) *state {
@@ -511,7 +522,7 @@ func (jl *Solver) NewJob(id string) (*Job, error) {
 	pr, ctx, progressCloser := progress.NewContext(context.Background())
 	pw, _, _ := progress.NewFromContext(ctx) // TODO: expose progress.Pipe()
 
-	_, span := trace.NewNoopTracerProvider().Tracer("").Start(ctx, "")
+	_, span := noop.NewTracerProvider().Tracer("").Start(ctx, "")
 	j := &Job{
 		list:           jl,
 		pr:             progress.NewMultiReader(pr),
@@ -530,8 +541,9 @@ func (jl *Solver) NewJob(id string) (*Job, error) {
 }
 
 func (jl *Solver) Get(id string) (*Job, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx, _ = context.WithTimeoutCause(ctx, 6*time.Second, errors.WithStack(context.DeadlineExceeded))
+	defer cancel(errors.WithStack(context.Canceled))
 
 	go func() {
 		<-ctx.Done()
@@ -632,7 +644,7 @@ func (j *Job) walkProvenance(ctx context.Context, e Edge, f func(ProvenanceProvi
 }
 
 func (j *Job) CloseProgress() {
-	j.progressCloser()
+	j.progressCloser(errors.WithStack(context.Canceled))
 	j.pw.Close()
 }
 
@@ -833,7 +845,7 @@ func (s *sharedOp) CalcSlowCache(ctx context.Context, index Index, p PreprocessF
 				if errdefs.IsCanceled(ctx, err) {
 					complete = false
 					releaseError(err)
-					err = errors.Wrap(ctx.Err(), err.Error())
+					err = errors.Wrap(context.Cause(ctx), err.Error())
 				}
 			default:
 			}
@@ -899,7 +911,7 @@ func (s *sharedOp) CacheMap(ctx context.Context, index int) (resp *cacheMapResp,
 				if errdefs.IsCanceled(ctx, err) {
 					complete = false
 					releaseError(err)
-					err = errors.Wrap(ctx.Err(), err.Error())
+					err = errors.Wrap(context.Cause(ctx), err.Error())
 				}
 			default:
 			}
@@ -978,7 +990,7 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 				if errdefs.IsCanceled(ctx, err) {
 					complete = false
 					releaseError(err)
-					err = errors.Wrap(ctx.Err(), err.Error())
+					err = errors.Wrap(context.Cause(ctx), err.Error())
 				}
 			default:
 			}

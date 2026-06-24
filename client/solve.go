@@ -57,10 +57,10 @@ type SolveOpt struct {
 type ExportEntry struct {
 	Type               string
 	Attrs              map[string]string
-	Output             func(map[string]string) (io.WriteCloser, error) // for ExporterOCI, ExporterDocker and ExporterEarthly
-	OutputDir          string                                          // for ExporterLocal
-	OutputDirFunc      func(map[string]string) (string, error)         // for ExporterEarthly
-	OutputPullCallback pullping.PullCallback                           // for ExporterEarthly
+	Output             filesync.FileOutputFunc         // for ExporterOCI, ExporterDocker and ExporterEarthly
+	OutputDir          string                          // for ExporterLocal
+	OutputDirFunc      func(map[string]string) (string, error) // for ExporterEarthly
+	OutputPullCallback pullping.PullCallback                  // for ExporterEarthly
 	VerboseProgressCB  fsutil.VerboseProgressCB
 }
 
@@ -110,8 +110,8 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 	}
 	eg, ctx := errgroup.WithContext(ctx)
 
-	statusContext, cancelStatus := context.WithCancel(context.Background())
-	defer cancelStatus()
+	statusContext, cancelStatus := context.WithCancelCause(context.Background())
+	defer cancelStatus(errors.WithStack(context.Canceled))
 
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
 		statusContext = trace.ContextWithSpan(statusContext, span)
@@ -132,14 +132,6 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 	cacheOpt, err := parseCacheOptions(ctx, runGateway != nil, opt)
 	if err != nil {
 		return nil, err
-	}
-
-	var ex ExportEntry
-	if len(opt.Exports) > 1 {
-		return nil, errors.New("currently only single Exports can be specified")
-	}
-	if len(opt.Exports) == 1 {
-		ex = opt.Exports[0]
 	}
 
 	storesToUpdate := []string{}
@@ -165,65 +157,73 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			contentStores[key2] = store
 		}
 
-		var supportFile bool
-		var supportDir bool
-		switch ex.Type {
-		case ExporterLocal:
-			supportDir = true
-		case ExporterTar:
-			supportFile = true
-		case ExporterOCI, ExporterDocker:
-			supportDir = ex.OutputDir != ""
-			supportFile = ex.Output != nil
-		case ExporterEarthly:
-			supportFile = true
-		}
-
-		if supportFile && supportDir {
-			return nil, errors.Errorf("both file and directory output is not supported by %s exporter", ex.Type)
-		}
-		if !supportFile && ex.Output != nil {
-			return nil, errors.Errorf("output file writer is not supported by %s exporter", ex.Type)
-		}
-		if !supportDir && ex.OutputDir != "" {
-			return nil, errors.Errorf("output directory is not supported by %s exporter", ex.Type)
-		}
-
-		if supportFile {
-			if ex.Output == nil {
-				return nil, errors.Errorf("output file writer is required for %s exporter", ex.Type)
-			}
-			if ex.Type == ExporterEarthly {
-				if ex.OutputPullCallback != nil {
-					s.Allow(pullping.NewPullPing(ex.OutputPullCallback))
-				}
-				s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.VerboseProgressCB))
-			} else {
-				s.Allow(filesync.NewFSSyncTarget(ex.Output, ex.VerboseProgressCB))
-			}
-		}
-		if supportDir {
-			if ex.OutputDir == "" {
-				return nil, errors.Errorf("output directory is required for %s exporter", ex.Type)
-			}
+		var syncTargets []filesync.FSSyncTarget
+		for exID, ex := range opt.Exports {
+			var supportFile bool
+			var supportDir bool
 			switch ex.Type {
+			case ExporterLocal:
+				supportDir = true
+			case ExporterTar:
+				supportFile = true
 			case ExporterOCI, ExporterDocker:
-				if err := os.MkdirAll(ex.OutputDir, 0755); err != nil {
-					return nil, err
+				supportDir = ex.OutputDir != ""
+				supportFile = ex.Output != nil
+			case ExporterEarthly:
+				supportFile = true
+			}
+
+			if supportFile && supportDir {
+				return nil, errors.Errorf("both file and directory output is not supported by %s exporter", ex.Type)
+			}
+			if !supportFile && ex.Output != nil {
+				return nil, errors.Errorf("output file writer is not supported by %s exporter", ex.Type)
+			}
+			if !supportDir && ex.OutputDir != "" {
+				return nil, errors.Errorf("output directory is not supported by %s exporter", ex.Type)
+			}
+			if supportFile {
+				if ex.Output == nil {
+					return nil, errors.Errorf("output file writer is required for %s exporter", ex.Type)
 				}
-				cs, err := contentlocal.NewStore(ex.OutputDir)
-				if err != nil {
-					return nil, err
+				if ex.Type == ExporterEarthly {
+					if ex.OutputPullCallback != nil {
+						s.Allow(pullping.NewPullPing(ex.OutputPullCallback))
+					}
+					syncTargets = append(syncTargets, filesync.WithFSSyncEarthly(exID, ex.Output, ex.OutputDirFunc, ex.VerboseProgressCB))
+				} else {
+					syncTargets = append(syncTargets, filesync.WithFSSync(exID, ex.Output, ex.VerboseProgressCB))
 				}
-				contentStores["export"] = cs
-				storesToUpdate = append(storesToUpdate, ex.OutputDir)
-			default:
-				s.Allow(filesync.NewFSSyncTargetDir(ex.OutputDir, ex.VerboseProgressCB))
+			}
+
+			if supportDir {
+				if ex.OutputDir == "" {
+					return nil, errors.Errorf("output directory is required for %s exporter", ex.Type)
+				}
+				switch ex.Type {
+				case ExporterOCI, ExporterDocker:
+					if err := os.MkdirAll(ex.OutputDir, 0755); err != nil {
+						return nil, err
+					}
+					cs, err := contentlocal.NewStore(ex.OutputDir)
+					if err != nil {
+						return nil, err
+					}
+					contentStores["export"] = cs
+					storesToUpdate = append(storesToUpdate, ex.OutputDir)
+					syncTargets = append(syncTargets, filesync.WithFSSyncDir(exID, ex.OutputDir, ex.VerboseProgressCB))
+				default:
+					syncTargets = append(syncTargets, filesync.WithFSSyncDir(exID, ex.OutputDir, ex.VerboseProgressCB))
+				}
 			}
 		}
 
 		if len(contentStores) > 0 {
 			s.Allow(sessioncontent.NewAttachable(contentStores))
+		}
+
+		if len(syncTargets) > 0 {
+			s.Allow(filesync.NewFSSyncTarget(syncTargets...))
 		}
 
 		eg.Go(func() error {
@@ -243,16 +243,16 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 		frontendAttrs[k] = v
 	}
 
-	solveCtx, cancelSolve := context.WithCancel(ctx)
+	solveCtx, cancelSolve := context.WithCancelCause(ctx)
 	var res *SolveResponse
 	eg.Go(func() error {
 		ctx := solveCtx
-		defer cancelSolve()
+		defer cancelSolve(errors.WithStack(context.Canceled))
 
 		defer func() { // make sure the Status ends cleanly on build errors
 			go func() {
 				<-time.After(3 * time.Second)
-				cancelStatus()
+				cancelStatus(errors.WithStack(context.Canceled))
 			}()
 			if !opt.SessionPreInitialized {
 				bklog.G(ctx).Debugf("stopping session")
@@ -273,19 +273,34 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			frontendInputs[key] = def.ToPB()
 		}
 
+		exports := make([]*controlapi.Exporter, 0, len(opt.Exports))
+		exportDeprecated := ""
+		exportAttrDeprecated := map[string]string{}
+		for i, exp := range opt.Exports {
+			if i == 0 {
+				exportDeprecated = exp.Type
+				exportAttrDeprecated = exp.Attrs
+			}
+			exports = append(exports, &controlapi.Exporter{
+				Type:  exp.Type,
+				Attrs: exp.Attrs,
+			})
+		}
+
 		resp, err := c.ControlClient().Solve(ctx, &controlapi.SolveRequest{
-			Ref:            ref,
-			Definition:     pbd,
-			Exporter:       ex.Type,
-			ExporterAttrs:  ex.Attrs,
-			Session:        s.ID(),
-			Frontend:       opt.Frontend,
-			FrontendAttrs:  frontendAttrs,
-			FrontendInputs: frontendInputs,
-			Cache:          cacheOpt.options,
-			Entitlements:   opt.AllowedEntitlements,
-			Internal:       opt.Internal,
-			SourcePolicy:   opt.SourcePolicy,
+			Ref:                     ref,
+			Definition:              pbd,
+			Exporters:               exports,
+			ExporterDeprecated:      exportDeprecated,
+			ExporterAttrsDeprecated: exportAttrDeprecated,
+			Session:                 s.ID(),
+			Frontend:                opt.Frontend,
+			FrontendAttrs:           frontendAttrs,
+			FrontendInputs:          frontendInputs,
+			Cache:                   cacheOpt.options,
+			Entitlements:            opt.AllowedEntitlements,
+			Internal:                opt.Internal,
+			SourcePolicy:            opt.SourcePolicy,
 		})
 		if err != nil {
 			return errors.Wrap(err, "failed to solve")
@@ -311,7 +326,7 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			select {
 			case <-solveCtx.Done():
 			case <-time.After(5 * time.Second):
-				cancelSolve()
+				cancelSolve(errors.WithStack(context.Canceled))
 			}
 
 			return err

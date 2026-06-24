@@ -4,20 +4,25 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/containerd/containerd/containers"
+	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/oci"
 	cdseccomp "github.com/containerd/containerd/pkg/seccomp"
+	"github.com/containerd/continuity/fs"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/docker/docker/profiles/seccomp"
+	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/entitlements/security"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	selinux "github.com/opencontainers/selinux/go-selinux"
 	"github.com/opencontainers/selinux/go-selinux/label"
 	"github.com/pkg/errors"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -102,6 +107,18 @@ func generateIDmapOpts(idmap *idtools.IdentityMapping) ([]oci.SpecOpts, error) {
 	}, nil
 }
 
+func specMapping(s []idtools.IDMap) []specs.LinuxIDMapping {
+	var ids []specs.LinuxIDMapping
+	for _, item := range s {
+		ids = append(ids, specs.LinuxIDMapping{
+			HostID:      uint32(item.HostID),
+			ContainerID: uint32(item.ContainerID),
+			Size:        uint32(item.Size),
+		})
+	}
+	return ids
+}
+
 func generateRlimitOpts(ulimits []*pb.Ulimit) ([]oci.SpecOpts, error) {
 	if len(ulimits) == 0 {
 		return nil, nil
@@ -135,6 +152,73 @@ func withDefaultProfile() oci.SpecOpts {
 	}
 }
 
+func withROBind(src, dest string) oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *specs.Spec) error {
+		s.Mounts = append(s.Mounts, specs.Mount{
+			Destination: dest,
+			Type:        "bind",
+			Source:      src,
+			Options:     []string{"nosuid", "noexec", "nodev", "rbind", "ro"},
+		})
+		return nil
+	}
+}
+
+func withCGroup() oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *specs.Spec) error {
+		s.Mounts = append(s.Mounts, specs.Mount{
+			Destination: "/sys/fs/cgroup",
+			Type:        "cgroup",
+			Source:      "cgroup",
+			Options:     []string{"ro", "nosuid", "noexec", "nodev"},
+		})
+		return nil
+	}
+}
+
+func withBoundProc() oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *specs.Spec) error {
+		s.Mounts = removeMountsWithPrefix(s.Mounts, "/proc")
+		procMount := specs.Mount{
+			Destination: "/proc",
+			Type:        "bind",
+			Source:      "/proc",
+			// NOTE: "rbind"+"ro" does not make /proc read-only recursively.
+			// So we keep maskedPath and readonlyPaths (although not mandatory for rootless mode)
+			Options: []string{"rbind"},
+		}
+		s.Mounts = append([]specs.Mount{procMount}, s.Mounts...)
+
+		var maskedPaths []string
+		for _, s := range s.Linux.MaskedPaths {
+			if !hasPrefix(s, "/proc") {
+				maskedPaths = append(maskedPaths, s)
+			}
+		}
+		s.Linux.MaskedPaths = maskedPaths
+
+		var readonlyPaths []string
+		for _, s := range s.Linux.ReadonlyPaths {
+			if !hasPrefix(s, "/proc") {
+				readonlyPaths = append(readonlyPaths, s)
+			}
+		}
+		s.Linux.ReadonlyPaths = readonlyPaths
+
+		return nil
+	}
+}
+
+func removeMountsWithPrefix(mounts []specs.Mount, prefixDir string) []specs.Mount {
+	var ret []specs.Mount
+	for _, m := range mounts {
+		if !hasPrefix(m.Destination, prefixDir) {
+			ret = append(ret, m)
+		}
+	}
+	return ret
+}
+
 func getTracingSocketMount(socket string) *specs.Mount {
 	return &specs.Mount{
 		Destination: tracingSocketPath,
@@ -163,4 +247,46 @@ func cgroupV2NamespaceSupported() bool {
 		supportsCgroupNS = true
 	})
 	return supportsCgroupNS
+}
+
+func sub(m mount.Mount, subPath string) (mount.Mount, func() error, error) {
+	var retries = 10
+	root := m.Source
+	for {
+		src, err := fs.RootPath(root, subPath)
+		if err != nil {
+			return mount.Mount{}, nil, err
+		}
+		// similar to runc.WithProcfd
+		fh, err := os.OpenFile(src, unix.O_PATH|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return mount.Mount{}, nil, err
+		}
+
+		fdPath := "/proc/self/fd/" + strconv.Itoa(int(fh.Fd()))
+		if resolved, err := os.Readlink(fdPath); err != nil {
+			fh.Close()
+			return mount.Mount{}, nil, err
+		} else if resolved != src {
+			retries--
+			if retries <= 0 {
+				fh.Close()
+				return mount.Mount{}, nil, errors.Errorf("unable to safely resolve subpath %s", subPath)
+			}
+			fh.Close()
+			continue
+		}
+
+		m.Source = fdPath
+		lm := snapshot.LocalMounterWithMounts([]mount.Mount{m}, snapshot.ForceRemount())
+		mp, err := lm.Mount()
+		if err != nil {
+			fh.Close()
+			return mount.Mount{}, nil, err
+		}
+		m.Source = mp
+		fh.Close() // release the fd, we don't need it anymore
+
+		return m, lm.Unmount, nil
+	}
 }
