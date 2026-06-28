@@ -249,6 +249,9 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 	}
 
 	frontendAttrs := maps.Clone(opt.FrontendAttrs)
+	if frontendAttrs == nil {
+		frontendAttrs = map[string]string{}
+	}
 	maps.Copy(frontendAttrs, cacheOpt.frontendAttrs)
 
 	const statusInactivityTimeout = 5 * time.Second
