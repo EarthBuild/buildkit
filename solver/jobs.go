@@ -461,8 +461,10 @@ func (jl *Solver) getEdge(e Edge) (redge *edge) {
 	jl.mu.RLock()
 	defer jl.mu.RUnlock()
 
-	st, ok := jl.actives[e.Vertex.Digest()]
+	dgst := e.Vertex.Digest()
+	st, ok := jl.actives[dgst]
 	if !ok {
+		dgstTrackerInst.add(dgst, "get-edge-not-found")
 		return nil
 	}
 	return st.getEdge(e.Index)
@@ -518,11 +520,13 @@ func (jl *Solver) loadUnlocked(ctx context.Context, v, parent Vertex, j *Job, ca
 		// existing active vertex, as otherwise the original vertex will use an
 		// incorrect digest and can incorrectly delete it while it is still in use.
 		v = st.vtx
+		dgstTrackerInst.add(dgst, "loadUnlocked-found-dgstWithoutCache")
 	}
 
 	if !ok {
 		st, ok = jl.actives[dgst]
 
+		dgstTrackerInst.add(dgst, "loadUnlocked-not-found-dgstWithoutCache")
 		// !ignorecache merges with ignorecache but ignorecache doesn't merge with !ignorecache
 		if ok && !st.vtx.Options().IgnoreCache && v.Options().IgnoreCache {
 			dgst = dgstWithoutCache
@@ -556,6 +560,7 @@ func (jl *Solver) loadUnlocked(ctx context.Context, v, parent Vertex, j *Job, ca
 			origDigest:   origVtx.Digest(),
 		}
 		jl.actives[dgst] = st
+		dgstTrackerInst.add(dgst, "loadUnlocked-add")
 
 		if debugScheduler {
 			lg := bklog.G(ctx).
@@ -574,15 +579,18 @@ func (jl *Solver) loadUnlocked(ctx context.Context, v, parent Vertex, j *Job, ca
 					Debug("new active vertex input")
 			}
 		}
-	} else if debugScheduler {
-		lg := bklog.G(ctx).
-			WithField("vertex_name", v.Name()).
-			WithField("vertex_digest", v.Digest()).
-			WithField("actives_digest_key", dgst)
-		if j != nil {
-			lg = lg.WithField("job", j.id)
+	} else {
+		dgstTrackerInst.add(dgst, "loadUnlocked-exists")
+		if debugScheduler {
+			lg := bklog.G(ctx).
+				WithField("vertex_name", v.Name()).
+				WithField("vertex_digest", v.Digest()).
+				WithField("actives_digest_key", dgst)
+			if j != nil {
+				lg = lg.WithField("job", j.id)
+			}
+			lg.Debug("reusing active vertex")
 		}
-		lg.Debug("reusing active vertex")
 	}
 
 	st.mu.Lock()
@@ -598,6 +606,8 @@ func (jl *Solver) loadUnlocked(ctx context.Context, v, parent Vertex, j *Job, ca
 		if _, ok := st.jobs[j]; !ok {
 			st.jobs[j] = struct{}{}
 		}
+	} else {
+		dgstTrackerInst.add(dgst, "loadUnlocked-nil-job")
 	}
 	st.mu.Unlock()
 
@@ -725,6 +735,7 @@ func (jl *Solver) deleteIfUnreferenced(k digest.Digest, st *state) {
 		}
 		st.Release()
 		delete(jl.actives, k)
+		dgstTrackerInst.add(k, "delete")
 	} else if debugScheduler {
 		var jobIDs []string
 		for j := range st.jobs {
