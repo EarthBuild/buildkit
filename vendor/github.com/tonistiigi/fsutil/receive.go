@@ -55,14 +55,13 @@ const (
 const metadataPath = ".fsutil-metadata"
 
 type ReceiveOpt struct {
-	NotifyHashed      ChangeFunc
-	ContentHasher     ContentHasher
-	ProgressCb        func(int, bool)
-	VerboseProgressCb VerboseProgressCB
-	Merge             bool
-	Filter            FilterFunc
-	Differ            DiffType
-	MetadataOnly      FilterFunc
+	NotifyHashed  ChangeFunc
+	ContentHasher ContentHasher
+	ProgressCb    func(int, bool)
+	Merge         bool
+	Filter        FilterFunc
+	Differ        DiffType
+	MetadataOnly  FilterFunc
 }
 
 func Receive(ctx context.Context, conn Stream, dest string, opt ReceiveOpt) error {
@@ -70,37 +69,33 @@ func Receive(ctx context.Context, conn Stream, dest string, opt ReceiveOpt) erro
 	defer cancel()
 
 	r := &receiver{
-		conn:              &syncStream{Stream: conn},
-		dest:              dest,
-		files:             make(map[string]uint32),
-		pipes:             make(map[uint32]io.WriteCloser),
-		pipeNames:         make(map[uint32]string), // earthly-specific
-		notifyHashed:      opt.NotifyHashed,
-		contentHasher:     opt.ContentHasher,
-		progressCb:        opt.ProgressCb,
-		verboseProgressCb: opt.VerboseProgressCb, // earthly-specific
-		merge:             opt.Merge,
-		filter:            opt.Filter,
-		differ:            opt.Differ,
-		metadataOnly:      opt.MetadataOnly,
+		conn:          &syncStream{Stream: conn},
+		dest:          dest,
+		files:         make(map[string]uint32),
+		pipes:         make(map[uint32]io.WriteCloser),
+		notifyHashed:  opt.NotifyHashed,
+		contentHasher: opt.ContentHasher,
+		progressCb:    opt.ProgressCb,
+		merge:         opt.Merge,
+		filter:        opt.Filter,
+		differ:        opt.Differ,
+		metadataOnly:  opt.MetadataOnly,
 	}
 	return r.run(ctx)
 }
 
 type receiver struct {
-	dest              string
-	conn              Stream
-	files             map[string]uint32
-	pipes             map[uint32]io.WriteCloser
-	pipeNames         map[uint32]string // earthly-specific
-	mu                sync.RWMutex
-	muPipes           sync.RWMutex
-	progressCb        func(int, bool)
-	verboseProgressCb VerboseProgressCB // earthly-specific
-	merge             bool
-	filter            FilterFunc
-	differ            DiffType
-	metadataOnly      FilterFunc
+	dest         string
+	conn         Stream
+	files        map[string]uint32
+	pipes        map[uint32]io.WriteCloser
+	mu           sync.RWMutex
+	muPipes      sync.RWMutex
+	progressCb   func(int, bool)
+	merge        bool
+	filter       FilterFunc
+	differ       DiffType
+	metadataOnly FilterFunc
 
 	notifyHashed   ChangeFunc
 	contentHasher  ContentHasher
@@ -232,9 +227,6 @@ func (r *receiver) run(ctx context.Context) error {
 					}
 					break
 				}
-				if r.verboseProgressCb != nil {
-					r.verboseProgressCb(p.Stat.Path, StatusStat, p.Size())
-				}
 
 				// normalize unix wire-specific paths to platform-specific paths
 				path := filepath.FromSlash(p.Stat.Path)
@@ -306,22 +298,15 @@ func (r *receiver) run(ctx context.Context) error {
 			case types.PACKET_DATA:
 				r.muPipes.Lock()
 				pw, ok := r.pipes[p.ID]
-				pipeName := r.pipeNames[p.ID]
 				r.muPipes.Unlock()
 				if !ok {
 					return errors.Errorf("invalid file request %d", p.ID)
 				}
 				if len(p.Data) == 0 {
-					if r.verboseProgressCb != nil {
-						r.verboseProgressCb(pipeName, StatusReceived, 0)
-					}
 					if err := pw.Close(); err != nil {
 						return err
 					}
 				} else {
-					if r.verboseProgressCb != nil {
-						r.verboseProgressCb(pipeName, StatusReceiving, len(p.Data))
-					}
 					if _, err := pw.Write(p.Data); err != nil {
 						return err
 					}
@@ -375,7 +360,6 @@ func (r *receiver) asyncDataFunc(ctx context.Context, p string, wc io.WriteClose
 	wwc := newWrappedWriteCloser(wc)
 	r.muPipes.Lock()
 	r.pipes[id] = wwc
-	r.pipeNames[id] = p
 	r.muPipes.Unlock()
 	if err := r.conn.SendMsg(&types.Packet{Type: types.PACKET_REQ, ID: id}); err != nil {
 		return err
@@ -386,7 +370,6 @@ func (r *receiver) asyncDataFunc(ctx context.Context, p string, wc io.WriteClose
 	}
 	r.muPipes.Lock()
 	delete(r.pipes, id)
-	delete(r.pipeNames, id)
 	r.muPipes.Unlock()
 	return nil
 }

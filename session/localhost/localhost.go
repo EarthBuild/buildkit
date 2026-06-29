@@ -322,7 +322,7 @@ func localhostPutSendDir(stream Localhost_GetClient, src, dst string) error {
 		return err
 	}
 
-	err = fsutil.Send(stream.Context(), stream, fs, nil, nil)
+	err = fsutil.Send(stream.Context(), stream, fs, nil)
 	if err != nil {
 		return errors.Wrap(err, "fsutil.Send failed")
 	}

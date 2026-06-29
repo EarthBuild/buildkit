@@ -8,5 +8,5 @@ import (
 )
 
 func sendDiffCopy(stream Stream, fs fsutil.FS, progress progressCb) error {
-	return errors.WithStack(fsutil.Send(stream.Context(), stream, fs, progress, nil))
+	return errors.WithStack(fsutil.Send(stream.Context(), stream, fs, progress))
 }

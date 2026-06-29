@@ -260,7 +260,7 @@ func sendDir(stream localhost.Localhost_GetServer, path string) error {
 	if err != nil {
 		return err
 	}
-	err = fsutil.Send(stream.Context(), stream, fs, nil, nil)
+	err = fsutil.Send(stream.Context(), stream, fs, nil)
 	if err != nil {
 		return errors.Wrap(err, "fsutil.Send failed")
 	}
