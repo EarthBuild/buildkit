@@ -28,6 +28,7 @@ import (
 	"github.com/moby/buildkit/solver/llbsolver/mounts"
 	"github.com/moby/buildkit/solver/llbsolver/ops/opsutils"
 	"github.com/moby/buildkit/solver/pb"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/cachedigest"
 	"github.com/moby/buildkit/util/progress/logs"
 	"github.com/moby/buildkit/util/semutil"
@@ -42,6 +43,10 @@ import (
 const execCacheType = "buildkit.exec.v0"
 
 type ExecOp struct {
+	// Cross-machine single-flight coordinator; nil when the feature is off, in
+	// which case ExecOp behaves exactly as upstream.
+	sf *coordinator
+
 	op          *pb.ExecOp
 	cm          cache.Manager
 	mm          *mounts.MountManager
@@ -80,6 +85,7 @@ func NewExecOp(v solver.Vertex, op *pb.Op_Exec, platform *pb.Platform, cm cache.
 	}
 	name := fmt.Sprintf("exec %s", strings.Join(op.Exec.Meta.Args, " "))
 	return &ExecOp{
+		sf:          coordinatorFromEnv(),
 		op:          op.Exec,
 		mm:          mounts.NewMountManager(name, cm, sm),
 		cm:          cm,
@@ -386,6 +392,39 @@ func addDefaultEnvvar(env []string, k, v string) []string {
 
 func (e *ExecOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []solver.Result) (results []solver.Result, err error) {
 	trace.SpanFromContext(ctx).AddEvent("ExecOp started")
+
+	// Cross-machine single-flight (see singleflight.go). The key is the
+	// content-addressed lease key, computed in edge.execOp — the only place the
+	// full dep chain is in scope — and carried down through the context.
+	//
+	// This blocks a follower for as long as the leader takes. That is safe here:
+	// execOp runs as f.NewFuncRequest, i.e. in a goroutine and NOT under the
+	// scheduler mutex, so a waiting op cannot stall the scheduler.
+	if c := e.sf; c != nil {
+		if key := solver.SingleFlightKey(ctx); key != "" {
+			pub, follower := c.claim(ctx, key.Encoded())
+			if follower {
+				if res, ferr := e.adoptLeaderResult(ctx, pub); ferr == nil {
+					return res, nil
+				}
+				// We could not materialize what the leader built (it published a
+				// chain we cannot fetch, a layer went missing). Falling through to
+				// build it ourselves is always correct — only slower.
+				bklog.G(ctx).Warnf("single-flight: could not adopt the leader's result for %s; building it locally", key)
+			} else {
+				// We lead. Publish on success; free our followers to rebuild on
+				// failure, or they wait out the whole lease TTL for a result that
+				// is never coming.
+				defer func() {
+					if err != nil {
+						c.abandon(ctx, key.Encoded())
+						return
+					}
+					c.publish(ctx, key.Encoded(), e.publishable(ctx, jobCtx, results))
+				}()
+			}
+		}
+	}
 
 	refs := make([]*worker.WorkerRef, len(inputs))
 	for i, inp := range inputs {
