@@ -65,7 +65,7 @@ type ExportEntry struct {
 	OutputDirFunc      func(map[string]string) (string, error)         // for ExporterEarthly
 	OutputPullCallback pullping.PullCallback                           // for ExporterEarthly
 	OutputStore        content.Store
-	OnReceiveFile      fsutil.ChangeFunc // earthly-specific: per-file callback for received export files
+	OnReceiveProgress  func(int, bool) // earthly-specific: cumulative received-bytes callback (fsutil ProgressCb)
 }
 
 type CacheOptionsEntry struct {
@@ -194,7 +194,7 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 					if ex.OutputPullCallback != nil {
 						s.Allow(pullping.NewPullPing(ex.OutputPullCallback))
 					}
-					s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.OnReceiveFile))
+					s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.OnReceiveProgress))
 				} else {
 					syncTargets = append(syncTargets, filesync.WithFSSync(exID, ex.Output))
 				}
