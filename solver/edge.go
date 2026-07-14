@@ -958,6 +958,22 @@ func (e *edge) loadCache(ctx context.Context) (any, error) {
 // execOp creates a request to execute the vertex operation
 func (e *edge) execOp(ctx context.Context) (any, error) {
 	cacheKeys, inputs := e.commitOptions()
+
+	// Cross-machine single-flight (see solver/singleflight.go). This is the ONLY
+	// place the content-addressed cache key is in scope, so it is carried down to
+	// the op through the context. Deeper — in ExecOp.Exec — the only identifiers
+	// available are the vertex digest (which ignores content, so `COPY src/` would
+	// look identical across different sources) and solver.Result.ID() (which embeds
+	// a locally-assigned UUID, so it differs between machines). Either would be
+	// silently wrong.
+	//
+	// execOp runs as f.NewFuncRequest(e.execOp) — a goroutine, NOT under the
+	// scheduler mutex — so an op that blocks here waiting for a peer cannot stall
+	// the scheduler.
+	if len(cacheKeys) > 0 {
+		ctx = WithSingleFlightKey(ctx, LeaseKey(cacheKeys[0]))
+	}
+
 	results, subExporters, ctxOpts, err := e.op.Exec(ctx, toResultSlice(inputs))
 	if err != nil {
 		return nil, errors.WithStack(err)
