@@ -402,7 +402,7 @@ func (e *ExecOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []so
 	// scheduler mutex, so a waiting op cannot stall the scheduler.
 	if c := e.sf; c != nil {
 		if key := solver.SingleFlightKey(ctx); key != "" {
-			pub, follower := c.claim(ctx, key.Encoded())
+			pub, myLease, follower := c.claim(ctx, key.Encoded())
 			if follower {
 				if res, ferr := e.adoptLeaderResult(ctx, pub); ferr == nil {
 					return res, nil
@@ -411,16 +411,16 @@ func (e *ExecOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []so
 				// chain we cannot fetch, a layer went missing). Falling through to
 				// build it ourselves is always correct — only slower.
 				bklog.G(ctx).Warnf("single-flight: could not adopt the leader's result for %s; building it locally", key)
-			} else {
+			} else if myLease != nil {
 				// We lead. Publish on success; free our followers to rebuild on
 				// failure, or they wait out the whole lease TTL for a result that
 				// is never coming.
 				defer func() {
 					if err != nil {
-						c.abandon(ctx, key.Encoded())
+						c.give_up(ctx, myLease)
 						return
 					}
-					c.publish(ctx, key.Encoded(), e.publishable(ctx, jobCtx, results))
+					c.publish(ctx, myLease, e.publishable(ctx, jobCtx, results))
 				}()
 			}
 		}

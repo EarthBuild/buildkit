@@ -42,7 +42,7 @@ func TestClaimLeader(t *testing.T) {
 	defer srv.Close()
 
 	c := &coordinator{base: srv.URL, repo: "cache", client: srv.Client()}
-	pub, follower := c.claim(context.Background(), "abc")
+	pub, _, follower := c.claim(context.Background(), "abc")
 	require.False(t, follower, "first claimant must build it")
 	require.Nil(t, pub)
 }
@@ -61,7 +61,7 @@ func TestClaimFollowerGetsTheLeadersOutputs(t *testing.T) {
 	defer srv.Close()
 
 	c := &coordinator{base: srv.URL, repo: "cache", client: srv.Client()}
-	pub, follower := c.claim(context.Background(), "abc")
+	pub, _, follower := c.claim(context.Background(), "abc")
 	require.True(t, follower)
 	require.Len(t, pub.Outputs, 2)
 	require.Equal(t, want.Outputs[0][0].Digest, pub.Outputs[0][0].Digest)
@@ -74,7 +74,7 @@ func TestClaimFollowerGetsTheLeadersOutputs(t *testing.T) {
 func TestClaimFailsOpen(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {
 		c := &coordinator{base: "http://127.0.0.1:1", repo: "cache", client: http.DefaultClient}
-		_, follower := c.claim(context.Background(), "abc")
+		_, _, follower := c.claim(context.Background(), "abc")
 		require.False(t, follower, "an unreachable coordinator must degrade to plain buildkit")
 	})
 
@@ -84,7 +84,7 @@ func TestClaimFailsOpen(t *testing.T) {
 		}))
 		defer srv.Close()
 		c := &coordinator{base: srv.URL, repo: "cache", client: srv.Client()}
-		_, follower := c.claim(context.Background(), "abc")
+		_, _, follower := c.claim(context.Background(), "abc")
 		require.False(t, follower, "re-claim is a rebuild, not a wait")
 	})
 
@@ -95,7 +95,7 @@ func TestClaimFailsOpen(t *testing.T) {
 		}))
 		defer srv.Close()
 		c := &coordinator{base: srv.URL, repo: "cache", client: srv.Client()}
-		_, follower := c.claim(context.Background(), "abc")
+		_, _, follower := c.claim(context.Background(), "abc")
 		require.False(t, follower, "rebuild rather than guess at what the leader meant")
 	})
 }

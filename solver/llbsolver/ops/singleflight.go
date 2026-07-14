@@ -86,52 +86,85 @@ func coordinatorFromEnv() *coordinator {
 // Returns (nil, false) if WE must build it — including every failure path,
 // because building it ourselves is always safe. Returns (result, true) if a peer
 // already built it.
-func (c *coordinator) claim(ctx context.Context, key string) (*publishedResult, bool) {
+// lease is what a leader must quote to keep, publish, or give up its claim. The
+// coordinator hands the id out with the grant: without it a ZOMBIE (a leader
+// evicted for silence that finally finishes) could publish over its successor,
+// and two writers would race one entry.
+type lease struct {
+	key    string
+	holder string
+	stop   chan struct{}
+}
+
+func (c *coordinator) claim(ctx context.Context, key string) (*publishedResult, *lease, bool) {
 	url := fmt.Sprintf("%s/_rebuck/lease/claim/%s", c.base, key)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
 		// Coordinator unreachable: build it. A fleet that loses its coordinator
 		// degrades to plain BuildKit, which is exactly right.
-		return nil, false
+		return nil, nil, false
 	}
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
 		if resp.Header.Get("X-Rebuck-Lease") == "leader" {
-			return nil, false
+			l := &lease{key: key, holder: resp.Header.Get("X-Rebuck-Holder"), stop: make(chan struct{})}
+			// A build can easily outrun the lease TTL. Without a heartbeat the
+			// coordinator would presume us dead mid-flight, hand the job to a
+			// follower, and every waiter would rebuild what we are already
+			// building — the exact waste this feature exists to prevent.
+			go c.beat(l)
+			return nil, l, false
 		}
 		var pr publishedResult
 		if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
 			// The leader published something we cannot read. Rebuild rather than
 			// guess at what it meant.
-			return nil, false
+			return nil, nil, false
 		}
-		return &pr, true
+		return &pr, nil, true
 	default:
 		// 409 (the leader died — re-claim), 5xx, anything else: build it. We do
 		// not loop re-claiming; one wasted build beats a retry storm, and the
 		// next vertex will coordinate normally.
 		io.Copy(io.Discard, resp.Body)
-		return nil, false
+		return nil, nil, false
 	}
 }
 
-func (c *coordinator) publish(ctx context.Context, key string, pr *publishedResult) {
+// beat keeps a leader's claim alive until it publishes or gives up.
+func (c *coordinator) beat(l *lease) {
+	t := time.NewTicker(20 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-l.stop:
+			return
+		case <-t.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			c.post(ctx, "heartbeat", l, nil)
+			cancel()
+		}
+	}
+}
+
+func (c *coordinator) publish(ctx context.Context, l *lease, pr *publishedResult) {
+	close(l.stop)
 	if pr == nil {
-		c.abandon(ctx, key)
+		c.give_up(ctx, l)
 		return
 	}
 	body, err := json.Marshal(pr)
 	if err != nil {
-		c.abandon(ctx, key)
+		c.give_up(ctx, l)
 		return
 	}
-	c.post(ctx, "release", key, body)
+	c.post(ctx, "release", l, body)
 }
 
 // pushBlobs uploads our layers to the coordinator's registry so followers can
@@ -227,18 +260,23 @@ func (c *coordinator) pushBlob(ctx context.Context, provider content.Provider, d
 	return nil
 }
 
-// abandon frees our followers to rebuild. Called when we led and FAILED (or were
+// give_up frees our followers to rebuild. Called when we led and FAILED (or were
 // cancelled): they must not wait out the lease TTL for a result that is never
 // coming.
-func (c *coordinator) abandon(ctx context.Context, key string) {
+func (c *coordinator) give_up(ctx context.Context, l *lease) {
+	select {
+	case <-l.stop: // already closed by publish
+	default:
+		close(l.stop)
+	}
 	// The build context is likely already cancelled — this must still get out.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	c.post(ctx, "abandon", key, nil)
+	c.post(ctx, "abandon", l, nil)
 }
 
-func (c *coordinator) post(ctx context.Context, op, key string, body []byte) {
-	url := fmt.Sprintf("%s/_rebuck/lease/%s/%s", c.base, op, key)
+func (c *coordinator) post(ctx context.Context, op string, l *lease, body []byte) {
+	url := fmt.Sprintf("%s/_rebuck/lease/%s/%s", c.base, op, l.key)
 	var r io.Reader
 	if body != nil {
 		r = bytes.NewReader(body)
@@ -247,6 +285,8 @@ func (c *coordinator) post(ctx context.Context, op, key string, body []byte) {
 	if err != nil {
 		return
 	}
+	// Proves this is the CURRENT leader speaking, not a zombie.
+	req.Header.Set("X-Rebuck-Holder", l.holder)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return
