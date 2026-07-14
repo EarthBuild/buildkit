@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/containerd/containerd/v2/core/content"
@@ -121,12 +122,109 @@ func (c *coordinator) claim(ctx context.Context, key string) (*publishedResult, 
 }
 
 func (c *coordinator) publish(ctx context.Context, key string, pr *publishedResult) {
+	if pr == nil {
+		c.abandon(ctx, key)
+		return
+	}
 	body, err := json.Marshal(pr)
 	if err != nil {
 		c.abandon(ctx, key)
 		return
 	}
 	c.post(ctx, "release", key, body)
+}
+
+// pushBlobs uploads our layers to the coordinator's registry so followers can
+// actually fetch them.
+//
+// This is not optional, and it is easy to miss: GetRemotes(createIfNeeded=true)
+// only materializes the layer blob in the LEADER's local content store. Nothing
+// has left the machine. Without this step a follower's FromRemote resolves
+// descriptors it cannot fetch, fails open, and rebuilds — so single-flight would
+// appear to work while silently doing nothing at all.
+//
+// Nor can we lean on `--export-cache type=registry` for it: that runs at the END
+// of a build, and our followers are blocked in the MIDDLE of theirs.
+//
+// Returns false if any layer failed to land, in which case we publish nothing
+// and the followers rebuild. Slower, never wrong.
+func (c *coordinator) pushBlobs(ctx context.Context, provider content.Provider, descs []ocispecs.Descriptor) bool {
+	for _, desc := range descs {
+		// The fleet may already hold it — a shared base layer, an earlier build.
+		// The CAS is content-addressed, so re-uploading is pure waste.
+		if c.hasBlob(ctx, desc) {
+			continue
+		}
+		if err := c.pushBlob(ctx, provider, desc); err != nil {
+			bklog.G(ctx).Warnf("single-flight: pushing %s failed (%v); followers will rebuild", desc.Digest, err)
+			return false
+		}
+	}
+	return true
+}
+
+func (c *coordinator) hasBlob(ctx context.Context, desc ocispecs.Descriptor) bool {
+	url := fmt.Sprintf("%s/v2/%s/blobs/%s", c.base, c.repo, desc.Digest)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+func (c *coordinator) pushBlob(ctx context.Context, provider content.Provider, desc ocispecs.Descriptor) error {
+	ra, err := provider.ReaderAt(ctx, desc)
+	if err != nil {
+		return errors.Wrapf(err, "reading %s from the local content store", desc.Digest)
+	}
+	defer ra.Close()
+
+	// Open an upload session.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/v2/%s/blobs/uploads/", c.base, c.repo), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	loc := resp.Header.Get("Location")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted || loc == "" {
+		return errors.Errorf("open upload: registry returned %s", resp.Status)
+	}
+	if !strings.HasPrefix(loc, "http") {
+		loc = c.base + loc
+	}
+
+	// Stream it: a layer is hundreds of MB and this runs beside a compiler.
+	sep := "?"
+	if strings.Contains(loc, "?") {
+		sep = "&"
+	}
+	put, err := http.NewRequestWithContext(ctx, http.MethodPut,
+		fmt.Sprintf("%s%sdigest=%s", loc, sep, desc.Digest),
+		content.NewReader(ra))
+	if err != nil {
+		return err
+	}
+	put.ContentLength = desc.Size
+	presp, err := c.client.Do(put)
+	if err != nil {
+		return err
+	}
+	io.Copy(io.Discard, presp.Body)
+	presp.Body.Close()
+	if presp.StatusCode != http.StatusCreated {
+		return errors.Errorf("upload %s: registry returned %s", desc.Digest, presp.Status)
+	}
+	return nil
 }
 
 // abandon frees our followers to rebuild. Called when we led and FAILED (or were
@@ -211,7 +309,14 @@ func (e *ExecOp) publishable(ctx context.Context, jobCtx solver.JobContext, resu
 			bklog.G(ctx).Warnf("single-flight: cannot describe our result for publication (%v); followers will rebuild", err)
 			return nil
 		}
-		pub.Outputs = append(pub.Outputs, remotes[0].Descriptors)
+		rem := remotes[0]
+		// Describing the layers is not the same as SENDING them: GetRemotes only
+		// put them in our own content store. Push, or the followers are waiting
+		// for bytes that never leave this machine.
+		if !e.sf.pushBlobs(ctx, rem.Provider, rem.Descriptors) {
+			return nil
+		}
+		pub.Outputs = append(pub.Outputs, rem.Descriptors)
 	}
 	return pub
 }

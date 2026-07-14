@@ -3,9 +3,12 @@ package ops
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/containerd/containerd/v2/core/content"
 
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -138,3 +141,98 @@ func TestBlobFetcherHitsTheRegistryBlobRoute(t *testing.T) {
 	defer rc.Close()
 	require.Equal(t, "/v2/cache/blobs/"+d.Digest.String(), got)
 }
+
+// The leader must SEND its layers, not merely describe them. GetRemotes only
+// materializes a blob in the leader's own content store; without an actual push
+// the follower resolves descriptors it cannot fetch, fails open, and rebuilds —
+// so single-flight would look like it worked while doing nothing at all.
+func TestPushBlobsUploadsToTheRegistry(t *testing.T) {
+	payload := []byte("a layer, of sorts")
+	desc := ocispecs.Descriptor{Digest: digest.FromBytes(payload), Size: int64(len(payload))}
+
+	var head, post, put int
+	var got []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodHead:
+			head++
+			w.WriteHeader(http.StatusNotFound) // we do not hold it yet
+		case r.Method == http.MethodPost:
+			post++
+			w.Header().Set("Location", "/v2/cache/blobs/uploads/1")
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodPut:
+			put++
+			got, _ = io.ReadAll(r.Body)
+			require.Equal(t, desc.Digest.String(), r.URL.Query().Get("digest"))
+			w.WriteHeader(http.StatusCreated)
+		}
+	}))
+	defer srv.Close()
+
+	c := &coordinator{base: srv.URL, repo: "cache", client: srv.Client()}
+	ok := c.pushBlobs(context.Background(), fakeProvider{payload}, []ocispecs.Descriptor{desc})
+
+	require.True(t, ok)
+	require.Equal(t, 1, head)
+	require.Equal(t, 1, post)
+	require.Equal(t, 1, put)
+	require.Equal(t, payload, got, "the layer's bytes must actually reach the registry")
+}
+
+// A layer the fleet already holds must not be re-uploaded: the store is
+// content-addressed, so a second copy is pure waste.
+func TestPushBlobsSkipsWhatTheFleetAlreadyHas(t *testing.T) {
+	payload := []byte("shared base layer")
+	desc := ocispecs.Descriptor{Digest: digest.FromBytes(payload), Size: int64(len(payload))}
+
+	var put int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK) // already held
+			return
+		}
+		put++
+	}))
+	defer srv.Close()
+
+	c := &coordinator{base: srv.URL, repo: "cache", client: srv.Client()}
+	require.True(t, c.pushBlobs(context.Background(), fakeProvider{payload}, []ocispecs.Descriptor{desc}))
+	require.Zero(t, put, "a blob the fleet already holds must not be re-uploaded")
+}
+
+// A push that fails must NOT be published: the followers would wait for layers
+// that never arrived. Better they rebuild.
+func TestPushFailureMeansNoPublication(t *testing.T) {
+	payload := []byte("doomed")
+	desc := ocispecs.Descriptor{Digest: digest.FromBytes(payload), Size: int64(len(payload))}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := &coordinator{base: srv.URL, repo: "cache", client: srv.Client()}
+	require.False(t, c.pushBlobs(context.Background(), fakeProvider{payload}, []ocispecs.Descriptor{desc}))
+}
+
+type fakeProvider struct{ b []byte }
+
+func (p fakeProvider) ReaderAt(_ context.Context, _ ocispecs.Descriptor) (content.ReaderAt, error) {
+	return fakeReaderAt{p.b}, nil
+}
+
+type fakeReaderAt struct{ b []byte }
+
+func (r fakeReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(r.b)) {
+		return 0, io.EOF
+	}
+	return copy(p, r.b[off:]), nil
+}
+func (r fakeReaderAt) Close() error { return nil }
+func (r fakeReaderAt) Size() int64  { return int64(len(r.b)) }
