@@ -249,7 +249,7 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 
 // NewFSSyncTargetDir allows writing into a directory
 // earthly-specific: progressFn reports cumulative received bytes (fsutil ProgressCb)
-func NewFSSyncTargetDir(outdir string, progressFn func(int, bool)) session.Attachable {
+func NewFSSyncTargetDir(outdir string, progressFn func(bytes int, done bool)) session.Attachable {
 	p := &earthlySyncTarget{
 		outdir:     outdir,
 		progressFn: progressFn,
