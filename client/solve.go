@@ -65,7 +65,7 @@ type ExportEntry struct {
 	OutputDirFunc      func(map[string]string) (string, error)         // for ExporterEarthly
 	OutputPullCallback pullping.PullCallback                           // for ExporterEarthly
 	OutputStore        content.Store
-	OnReceiveProgress  func(int, bool) // earthly-specific: cumulative received-bytes callback (fsutil ProgressCb)
+	OnReceiveProgress  func(bytes int, done bool) // earthly-specific: cumulative received-bytes callback (fsutil ProgressCb)
 }
 
 type CacheOptionsEntry struct {
