@@ -272,7 +272,7 @@ type earthlySyncTarget struct {
 	outdir     string
 	outdirFunc func(map[string]string) (string, error)
 	f          func(map[string]string) (io.WriteCloser, error)
-	progressFn func(int, bool)
+	progressFn func(bytes int, done bool)
 }
 
 func (sp *earthlySyncTarget) Register(server *grpc.Server) {
