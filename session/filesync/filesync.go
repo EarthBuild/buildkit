@@ -258,7 +258,7 @@ func NewFSSyncTargetDir(outdir string, progressFn func(bytes int, done bool)) se
 }
 
 // NewFSSyncMultiTarget allows writing into an io.WriteCloser; it is earthly-specific
-func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progressFn func(int, bool)) session.Attachable {
+func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progressFn func(bytes int, done bool)) session.Attachable {
 	p := &earthlySyncTarget{
 		f:          f,
 		outdirFunc: outdirFunc,
