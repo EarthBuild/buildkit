@@ -13616,15 +13616,15 @@ func testListenBuildHistoryExcludesSoftDeletedRecords(t *testing.T, sb integrati
 	}
 }
 
-func parseFSMetadata(t *testing.T, dt []byte) []fsutiltypes.Stat {
-	var m []fsutiltypes.Stat
+func parseFSMetadata(t *testing.T, dt []byte) []*fsutiltypes.Stat {
+	var m []*fsutiltypes.Stat
 	for len(dt) > 0 {
-		var s fsutiltypes.Stat
+		s := &fsutiltypes.Stat{}
 		n := binary.LittleEndian.Uint32(dt[:4])
 		dt = dt[4:]
 		err := s.Unmarshal(dt[:n])
 		require.NoError(t, err)
-		m = append(m, *s.CloneVT())
+		m = append(m, s)
 		dt = dt[n:]
 	}
 	return m

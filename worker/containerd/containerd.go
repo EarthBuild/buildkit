@@ -19,16 +19,17 @@ import (
 	"github.com/moby/buildkit/solver/llbsolver/cdidevices"
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/network/netproviders"
+	"github.com/moby/buildkit/util/semutil"
 	"github.com/moby/buildkit/util/winlayers"
 	"github.com/moby/buildkit/worker/base"
 	wlabel "github.com/moby/buildkit/worker/label"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	"golang.org/x/sync/semaphore"
 )
 
 type RuntimeInfo = containerdexecutor.RuntimeInfo
 
+// earthly-specific use semutil.Weighted instead of semaphore
 type WorkerOptions struct {
 	Root            string
 	Address         string
@@ -41,7 +42,7 @@ type WorkerOptions struct {
 	NetworkOpt      netproviders.Opt
 	ApparmorProfile string
 	Selinux         bool
-	ParallelismSem  *semaphore.Weighted
+	ParallelismSem  *semutil.Weighted
 	TraceSocket     string
 	Runtime         *RuntimeInfo
 	CDIManager      *cdidevices.Manager

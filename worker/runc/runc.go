@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/containerd/containerd/v2/core/diff/apply"
 	ctdmetadata "github.com/containerd/containerd/v2/core/metadata"
@@ -23,13 +24,13 @@ import (
 	"github.com/moby/buildkit/solver/llbsolver/cdidevices"
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/network/netproviders"
+	"github.com/moby/buildkit/util/semutil"
 	"github.com/moby/buildkit/util/winlayers"
 	"github.com/moby/buildkit/worker/base"
 	wlabel "github.com/moby/buildkit/worker/label"
 	"github.com/moby/sys/user"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	bolt "go.etcd.io/bbolt"
-	"golang.org/x/sync/semaphore"
 )
 
 // SnapshotterFactory instantiates a snapshotter
@@ -39,7 +40,7 @@ type SnapshotterFactory struct {
 }
 
 // NewWorkerOpt creates a WorkerOpt.
-func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, processMode oci.ProcessMode, labels map[string]string, idmap *user.IdentityMapping, nopt netproviders.Opt, dns *oci.DNSConfig, binary, apparmorProfile string, selinux bool, parallelismSem *semaphore.Weighted, traceSocket, defaultCgroupParent string, cdiManager *cdidevices.Manager) (base.WorkerOpt, error) {
+func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, processMode oci.ProcessMode, labels map[string]string, idmap *user.IdentityMapping, nopt netproviders.Opt, dns *oci.DNSConfig, binary, apparmorProfile string, selinux bool, parallelismSem *semutil.Weighted, traceSocket, defaultCgroupParent string, hooks []oci.OciHook, sampleFrequency time.Duration, cdiManager *cdidevices.Manager) (base.WorkerOpt, error) {
 	var opt base.WorkerOpt
 	name := "runc-" + snFactory.Name
 	root = filepath.Join(root, name)
@@ -78,7 +79,9 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 		SELinux:             selinux,
 		TracingSocket:       traceSocket,
 		DefaultCgroupParent: defaultCgroupParent,
+		Hooks:               hooks, // earthly-specific
 		ResourceMonitor:     rm,
+		SampleFrequency:     sampleFrequency, // earthly-specific
 		CDIManager:          cdiManager,
 	}, np)
 	if err != nil {

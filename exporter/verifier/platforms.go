@@ -10,7 +10,6 @@ import (
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/solver/result"
-	"github.com/pkg/errors"
 )
 
 func CheckInvalidPlatforms[T comparable](ctx context.Context, res *result.Result[T]) ([]client.VertexWarning, error) {
@@ -21,7 +20,11 @@ func CheckInvalidPlatforms[T comparable](ctx context.Context, res *result.Result
 
 	if _, ok := res.Metadata[exptypes.ExporterPlatformsKey]; !ok {
 		if len(res.Refs) > 0 {
-			return nil, errors.Errorf("build result contains multiple refs without platforms mapping")
+			// Earthly's multi-BUILD pattern legitimately produces multiple
+			// refs without platform mapping.  Downgrade to warning.
+			return []client.VertexWarning{{
+				Short: []byte("build result contains multiple refs without platforms mapping"),
+			}}, nil
 		} else if res.IsEmpty() {
 			// No results and no exporter key. Don't run this check.
 			return nil, nil

@@ -43,7 +43,7 @@ jobs:
       -
         name: Platforms matrix
         id: platforms
-        uses: docker/bake-action/subaction/matrix@82490499d2e5613fcead7e128237ef0b0ea210f7 # v7.0.0
+        uses: docker/bake-action/subaction/matrix@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
         with:
           target: release
           fields: platforms
@@ -153,7 +153,7 @@ jobs:
           buildkitd-flags: --debug
       -
         name: Run
-        uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7 # v7.0.0
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
         with:
           targets: govulncheck
         env:
@@ -183,7 +183,7 @@ jobs:
             const defaultBase = core.getInput('default-base');
             const ref = core.getInput('ref');
             const imageName = core.getInput('image-name');
-            
+
             function getTagSuffixAndLatest(base, target) {
               let tagSuffix = '';
               if (target) {
@@ -204,20 +204,20 @@ jobs:
               }
               return { tagSuffix, tagLatest };
             }
-            
+
             const matrix = [
               { base: 'alpine' },
               { base: 'alpine', target: 'rootless'},
               { base: 'ubuntu', buildTags: 'nvidia venus' }
             ]
-            
+
             for (const entry of matrix) {
               const { tagSuffix, tagLatest } = getTagSuffixAndLatest(entry.base, entry.target);
               entry.imageName = imageName;
               entry.tagSuffix = tagSuffix;
               entry.tagLatest = tagLatest;
             }
-            
+
             core.info(JSON.stringify(matrix, null, 2));
             core.setOutput('includes', JSON.stringify(matrix));
 
@@ -311,7 +311,7 @@ jobs:
         name: Login to DockerHub
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
         name: Scout

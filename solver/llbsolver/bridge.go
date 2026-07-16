@@ -3,16 +3,19 @@ package llbsolver
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/containerd/platforms"
 	"github.com/mitchellh/hashstructure/v2"
+	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/executor"
 	resourcestypes "github.com/moby/buildkit/executor/resources/types"
+	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/frontend"
 	gw "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/identity"
@@ -28,6 +31,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
 type llbBridge struct {
@@ -77,6 +81,12 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	if err != nil {
 		return nil, err
 	}
+
+	// TODO FIXME earthly-specific wait group is required to ensure the remotecache/registry's ResolveCacheImporterFunc can run
+	// which requires the session to remain open in order to get dockerhub (or any other registry) credentials.
+	// It seems like the cleaner approach is to bake this in somewhere into the edge or Load
+	eg, _ := errgroup.WithContext(ctx)
+
 	srcPol, err := loadSourcePolicy(b.builder)
 	if err != nil {
 		return nil, err
@@ -129,6 +139,14 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 					}
 					return cmNew, nil
 				})
+
+				cmInst := cm
+				eg.Go(func() error {
+					if lcm, ok := cmInst.(*lazyCacheManager); ok {
+						lcm.wait()
+					}
+					return nil
+				})
 			}(cmID, im)
 			b.cms[cmID] = cm
 		} else {
@@ -136,6 +154,10 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 		}
 		cms = append(cms, cm)
 		b.cmsMu.Unlock()
+	}
+	err = eg.Wait()
+	if err != nil {
+		return nil, err
 	}
 	dpc := &detectPrunedCacheID{}
 
@@ -157,6 +179,55 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 		return nil, err
 	}
 	return res, nil
+}
+
+// getExporter is earthly specific code which extracts the configured exporter
+// from the job's metadata
+func (b *llbBridge) getExporter(_ context.Context) (*ExporterRequest, error) {
+	var exp *ExporterRequest
+	numExporters := 0
+	b.builder.EachValue(context.TODO(), keyEarthlyExporterInstance, func(v any) error {
+		numExporters++
+		exp = v.(*ExporterRequest)
+		return nil
+	})
+	if numExporters != 1 {
+		return nil, errors.Errorf("Export found %d exporters (should have been 1)", numExporters) // shouldn't happen
+	}
+	return exp, nil
+}
+
+func (b *llbBridge) Export(ctx context.Context, refs map[string]cache.ImmutableRef, metadata map[string][]byte) error {
+	// generate an ID that's consistent for the refs
+	refKeys := []string{}
+	for k := range refs {
+		refKeys = append(refKeys, k)
+	}
+	id := strings.Join(refKeys, "-")
+
+	inp := &exporter.Source{
+		Refs:     refs,
+		Metadata: metadata,
+	}
+
+	exp, err := b.getExporter(ctx)
+	if err != nil {
+		return err
+	}
+	if len(exp.Exporters) == 0 {
+		return errors.Errorf("Export had no exporter configured")
+	}
+
+	e := exp.Exporters[0]
+	return inBuilderContext(ctx, b.builder, e.Name(), id, func(ctx context.Context, jobCtx solver.JobContext) error {
+		sessionIDs := session.AllSessionIDs(jobCtx.Session())
+		if len(sessionIDs) == 0 {
+			return errors.Errorf("group has no session IDs") // shouldnt happen
+		}
+		sessionID := sessionIDs[0]
+		_, _, _, err := e.Export(ctx, inp, exporter.ExportBuildInfo{SessionID: sessionID})
+		return err
+	})
 }
 
 func (b *llbBridge) policy(engine *sourcepolicy.Engine) SourcePolicyEvaluator {
@@ -210,6 +281,11 @@ func (b *llbBridge) loadExecutor() error {
 		b.executor = w.Executor()
 	})
 	return b.executorErr
+}
+
+func (b *llbBridge) ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (string, digest.Digest, []byte, error) {
+	imr := sourceresolver.NewImageMetaResolver(b)
+	return imr.ResolveImageConfig(ctx, ref, opt)
 }
 
 func (b *llbBridge) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt) (resp *sourceresolver.MetaResponse, err error) {

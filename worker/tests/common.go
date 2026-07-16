@@ -65,7 +65,11 @@ func NewCtx(s string) context.Context {
 func TestWorkerExec(t *testing.T, w *base.Worker) {
 	ctx := NewCtx("buildkit-test")
 	ctx, cancel := context.WithCancelCause(ctx)
-	sm, err := session.NewManager()
+	sm, err := session.NewManager(&session.ManagerOpt{
+		HealthFrequency:       1 * time.Second,
+		HealthTimeout:         10 * time.Second,
+		HealthAllowedFailures: 1,
+	})
 	require.NoError(t, err)
 
 	snap := NewBusyboxSourceSnapshot(ctx, t, w, sm)
@@ -190,7 +194,11 @@ func TestWorkerExec(t *testing.T, w *base.Worker) {
 
 func TestWorkerExecFailures(t *testing.T, w *base.Worker) {
 	ctx := NewCtx("buildkit-test")
-	sm, err := session.NewManager()
+	sm, err := session.NewManager(&session.ManagerOpt{
+		HealthFrequency:       1 * time.Second,
+		HealthTimeout:         10 * time.Second,
+		HealthAllowedFailures: 1,
+	})
 	require.NoError(t, err)
 
 	snap := NewBusyboxSourceSnapshot(ctx, t, w, sm)
@@ -264,7 +272,11 @@ func TestWorkerExecFailures(t *testing.T, w *base.Worker) {
 
 func TestWorkerCancel(t *testing.T, w *base.Worker) {
 	ctx := NewCtx("buildkit-test")
-	sm, err := session.NewManager()
+	sm, err := session.NewManager(&session.ManagerOpt{
+		HealthFrequency:       1 * time.Second,
+		HealthTimeout:         10 * time.Second,
+		HealthAllowedFailures: 1,
+	})
 	require.NoError(t, err)
 
 	snap := NewBusyboxSourceSnapshot(ctx, t, w, sm)

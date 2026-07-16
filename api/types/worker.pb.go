@@ -30,8 +30,13 @@ type WorkerRecord struct {
 	GCPolicy        []*GCPolicy            `protobuf:"bytes,4,rep,name=GCPolicy,proto3" json:"GCPolicy,omitempty"`
 	BuildkitVersion *BuildkitVersion       `protobuf:"bytes,5,opt,name=BuildkitVersion,proto3" json:"BuildkitVersion,omitempty"`
 	CDIDevices      []*CDIDevice           `protobuf:"bytes,6,rep,name=CDIDevices,proto3" json:"CDIDevices,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Earthly-specific.
+	ParallelismCurrent int64        `protobuf:"varint,101,opt,name=parallelismCurrent,proto3" json:"parallelismCurrent,omitempty"`
+	ParallelismMax     int64        `protobuf:"varint,102,opt,name=parallelismMax,proto3" json:"parallelismMax,omitempty"`
+	ParallelismWaiting int64        `protobuf:"varint,103,opt,name=parallelismWaiting,proto3" json:"parallelismWaiting,omitempty"`
+	GCAnalytics        *GCAnalytics `protobuf:"bytes,104,opt,name=GCAnalytics,proto3" json:"GCAnalytics,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *WorkerRecord) Reset() {
@@ -106,6 +111,234 @@ func (x *WorkerRecord) GetCDIDevices() []*CDIDevice {
 	return nil
 }
 
+func (x *WorkerRecord) GetParallelismCurrent() int64 {
+	if x != nil {
+		return x.ParallelismCurrent
+	}
+	return 0
+}
+
+func (x *WorkerRecord) GetParallelismMax() int64 {
+	if x != nil {
+		return x.ParallelismMax
+	}
+	return 0
+}
+
+func (x *WorkerRecord) GetParallelismWaiting() int64 {
+	if x != nil {
+		return x.ParallelismWaiting
+	}
+	return 0
+}
+
+func (x *WorkerRecord) GetGCAnalytics() *GCAnalytics {
+	if x != nil {
+		return x.GCAnalytics
+	}
+	return nil
+}
+
+type GCAnalytics struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Summary of last numRuns.
+	NumRuns           int64 `protobuf:"varint,1,opt,name=numRuns,proto3" json:"numRuns,omitempty"`
+	NumFailures       int64 `protobuf:"varint,2,opt,name=numFailures,proto3" json:"numFailures,omitempty"`
+	AvgDurationMs     int64 `protobuf:"varint,3,opt,name=avgDurationMs,proto3" json:"avgDurationMs,omitempty"`
+	AvgRecordsCleared int64 `protobuf:"varint,4,opt,name=avgRecordsCleared,proto3" json:"avgRecordsCleared,omitempty"`
+	AvgSizeCleared    int64 `protobuf:"varint,5,opt,name=avgSizeCleared,proto3" json:"avgSizeCleared,omitempty"`
+	AvgRecordsBefore  int64 `protobuf:"varint,6,opt,name=avgRecordsBefore,proto3" json:"avgRecordsBefore,omitempty"`
+	AvgSizeBefore     int64 `protobuf:"varint,7,opt,name=avgSizeBefore,proto3" json:"avgSizeBefore,omitempty"`
+	// All-time summary.
+	AllTimeRuns          int64 `protobuf:"varint,8,opt,name=allTimeRuns,proto3" json:"allTimeRuns,omitempty"`
+	AllTimeMaxDurationMs int64 `protobuf:"varint,9,opt,name=allTimeMaxDurationMs,proto3" json:"allTimeMaxDurationMs,omitempty"`
+	AllTimeDurationMs    int64 `protobuf:"varint,10,opt,name=allTimeDurationMs,proto3" json:"allTimeDurationMs,omitempty"`
+	// Current run (if one is ongoing).
+	CurrentStartTimeSecEpoch int64 `protobuf:"varint,11,opt,name=currentStartTimeSecEpoch,proto3" json:"currentStartTimeSecEpoch,omitempty"`
+	CurrentNumRecordsBefore  int64 `protobuf:"varint,12,opt,name=currentNumRecordsBefore,proto3" json:"currentNumRecordsBefore,omitempty"`
+	CurrentSizeBefore        int64 `protobuf:"varint,13,opt,name=currentSizeBefore,proto3" json:"currentSizeBefore,omitempty"`
+	// Last run.
+	LastStartTimeSecEpoch int64 `protobuf:"varint,14,opt,name=lastStartTimeSecEpoch,proto3" json:"lastStartTimeSecEpoch,omitempty"`
+	LastEndTimeSecEpoch   int64 `protobuf:"varint,15,opt,name=lastEndTimeSecEpoch,proto3" json:"lastEndTimeSecEpoch,omitempty"`
+	LastNumRecordsBefore  int64 `protobuf:"varint,16,opt,name=lastNumRecordsBefore,proto3" json:"lastNumRecordsBefore,omitempty"`
+	LastSizeBefore        int64 `protobuf:"varint,17,opt,name=lastSizeBefore,proto3" json:"lastSizeBefore,omitempty"`
+	LastNumRecordsCleared int64 `protobuf:"varint,18,opt,name=lastNumRecordsCleared,proto3" json:"lastNumRecordsCleared,omitempty"`
+	LastSizeCleared       int64 `protobuf:"varint,19,opt,name=lastSizeCleared,proto3" json:"lastSizeCleared,omitempty"`
+	LastSuccess           bool  `protobuf:"varint,20,opt,name=lastSuccess,proto3" json:"lastSuccess,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *GCAnalytics) Reset() {
+	*x = GCAnalytics{}
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GCAnalytics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GCAnalytics) ProtoMessage() {}
+
+func (x *GCAnalytics) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GCAnalytics.ProtoReflect.Descriptor instead.
+func (*GCAnalytics) Descriptor() ([]byte, []int) {
+	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *GCAnalytics) GetNumRuns() int64 {
+	if x != nil {
+		return x.NumRuns
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetNumFailures() int64 {
+	if x != nil {
+		return x.NumFailures
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetAvgDurationMs() int64 {
+	if x != nil {
+		return x.AvgDurationMs
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetAvgRecordsCleared() int64 {
+	if x != nil {
+		return x.AvgRecordsCleared
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetAvgSizeCleared() int64 {
+	if x != nil {
+		return x.AvgSizeCleared
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetAvgRecordsBefore() int64 {
+	if x != nil {
+		return x.AvgRecordsBefore
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetAvgSizeBefore() int64 {
+	if x != nil {
+		return x.AvgSizeBefore
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetAllTimeRuns() int64 {
+	if x != nil {
+		return x.AllTimeRuns
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetAllTimeMaxDurationMs() int64 {
+	if x != nil {
+		return x.AllTimeMaxDurationMs
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetAllTimeDurationMs() int64 {
+	if x != nil {
+		return x.AllTimeDurationMs
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetCurrentStartTimeSecEpoch() int64 {
+	if x != nil {
+		return x.CurrentStartTimeSecEpoch
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetCurrentNumRecordsBefore() int64 {
+	if x != nil {
+		return x.CurrentNumRecordsBefore
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetCurrentSizeBefore() int64 {
+	if x != nil {
+		return x.CurrentSizeBefore
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetLastStartTimeSecEpoch() int64 {
+	if x != nil {
+		return x.LastStartTimeSecEpoch
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetLastEndTimeSecEpoch() int64 {
+	if x != nil {
+		return x.LastEndTimeSecEpoch
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetLastNumRecordsBefore() int64 {
+	if x != nil {
+		return x.LastNumRecordsBefore
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetLastSizeBefore() int64 {
+	if x != nil {
+		return x.LastSizeBefore
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetLastNumRecordsCleared() int64 {
+	if x != nil {
+		return x.LastNumRecordsCleared
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetLastSizeCleared() int64 {
+	if x != nil {
+		return x.LastSizeCleared
+	}
+	return 0
+}
+
+func (x *GCAnalytics) GetLastSuccess() bool {
+	if x != nil {
+		return x.LastSuccess
+	}
+	return false
+}
+
 type GCPolicy struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	All          bool                   `protobuf:"varint,1,opt,name=all,proto3" json:"all,omitempty"`
@@ -121,7 +354,7 @@ type GCPolicy struct {
 
 func (x *GCPolicy) Reset() {
 	*x = GCPolicy{}
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[1]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -133,7 +366,7 @@ func (x *GCPolicy) String() string {
 func (*GCPolicy) ProtoMessage() {}
 
 func (x *GCPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[1]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -146,7 +379,7 @@ func (x *GCPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GCPolicy.ProtoReflect.Descriptor instead.
 func (*GCPolicy) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{1}
+	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GCPolicy) GetAll() bool {
@@ -202,7 +435,7 @@ type BuildkitVersion struct {
 
 func (x *BuildkitVersion) Reset() {
 	*x = BuildkitVersion{}
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[2]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -214,7 +447,7 @@ func (x *BuildkitVersion) String() string {
 func (*BuildkitVersion) ProtoMessage() {}
 
 func (x *BuildkitVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[2]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -227,7 +460,7 @@ func (x *BuildkitVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildkitVersion.ProtoReflect.Descriptor instead.
 func (*BuildkitVersion) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{2}
+	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *BuildkitVersion) GetPackage() string {
@@ -263,7 +496,7 @@ type CDIDevice struct {
 
 func (x *CDIDevice) Reset() {
 	*x = CDIDevice{}
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[3]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -275,7 +508,7 @@ func (x *CDIDevice) String() string {
 func (*CDIDevice) ProtoMessage() {}
 
 func (x *CDIDevice) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[3]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -288,7 +521,7 @@ func (x *CDIDevice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CDIDevice.ProtoReflect.Descriptor instead.
 func (*CDIDevice) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{3}
+	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CDIDevice) GetName() string {
@@ -323,7 +556,7 @@ var File_github_com_moby_buildkit_api_types_worker_proto protoreflect.FileDescri
 
 const file_github_com_moby_buildkit_api_types_worker_proto_rawDesc = "" +
 	"\n" +
-	"/github.com/moby/buildkit/api/types/worker.proto\x12\x16moby.buildkit.v1.types\x1a,github.com/moby/buildkit/solver/pb/ops.proto\"\xa3\x03\n" +
+	"/github.com/moby/buildkit/api/types/worker.proto\x12\x16moby.buildkit.v1.types\x1a,github.com/moby/buildkit/solver/pb/ops.proto\"\xf2\x04\n" +
 	"\fWorkerRecord\x12\x0e\n" +
 	"\x02ID\x18\x01 \x01(\tR\x02ID\x12H\n" +
 	"\x06Labels\x18\x02 \x03(\v20.moby.buildkit.v1.types.WorkerRecord.LabelsEntryR\x06Labels\x12*\n" +
@@ -332,10 +565,36 @@ const file_github_com_moby_buildkit_api_types_worker_proto_rawDesc = "" +
 	"\x0fBuildkitVersion\x18\x05 \x01(\v2'.moby.buildkit.v1.types.BuildkitVersionR\x0fBuildkitVersion\x12A\n" +
 	"\n" +
 	"CDIDevices\x18\x06 \x03(\v2!.moby.buildkit.v1.types.CDIDeviceR\n" +
-	"CDIDevices\x1a9\n" +
+	"CDIDevices\x12.\n" +
+	"\x12parallelismCurrent\x18e \x01(\x03R\x12parallelismCurrent\x12&\n" +
+	"\x0eparallelismMax\x18f \x01(\x03R\x0eparallelismMax\x12.\n" +
+	"\x12parallelismWaiting\x18g \x01(\x03R\x12parallelismWaiting\x12E\n" +
+	"\vGCAnalytics\x18h \x01(\v2#.moby.buildkit.v1.types.GCAnalyticsR\vGCAnalytics\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc8\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x85\a\n" +
+	"\vGCAnalytics\x12\x18\n" +
+	"\anumRuns\x18\x01 \x01(\x03R\anumRuns\x12 \n" +
+	"\vnumFailures\x18\x02 \x01(\x03R\vnumFailures\x12$\n" +
+	"\ravgDurationMs\x18\x03 \x01(\x03R\ravgDurationMs\x12,\n" +
+	"\x11avgRecordsCleared\x18\x04 \x01(\x03R\x11avgRecordsCleared\x12&\n" +
+	"\x0eavgSizeCleared\x18\x05 \x01(\x03R\x0eavgSizeCleared\x12*\n" +
+	"\x10avgRecordsBefore\x18\x06 \x01(\x03R\x10avgRecordsBefore\x12$\n" +
+	"\ravgSizeBefore\x18\a \x01(\x03R\ravgSizeBefore\x12 \n" +
+	"\vallTimeRuns\x18\b \x01(\x03R\vallTimeRuns\x122\n" +
+	"\x14allTimeMaxDurationMs\x18\t \x01(\x03R\x14allTimeMaxDurationMs\x12,\n" +
+	"\x11allTimeDurationMs\x18\n" +
+	" \x01(\x03R\x11allTimeDurationMs\x12:\n" +
+	"\x18currentStartTimeSecEpoch\x18\v \x01(\x03R\x18currentStartTimeSecEpoch\x128\n" +
+	"\x17currentNumRecordsBefore\x18\f \x01(\x03R\x17currentNumRecordsBefore\x12,\n" +
+	"\x11currentSizeBefore\x18\r \x01(\x03R\x11currentSizeBefore\x124\n" +
+	"\x15lastStartTimeSecEpoch\x18\x0e \x01(\x03R\x15lastStartTimeSecEpoch\x120\n" +
+	"\x13lastEndTimeSecEpoch\x18\x0f \x01(\x03R\x13lastEndTimeSecEpoch\x122\n" +
+	"\x14lastNumRecordsBefore\x18\x10 \x01(\x03R\x14lastNumRecordsBefore\x12&\n" +
+	"\x0elastSizeBefore\x18\x11 \x01(\x03R\x0elastSizeBefore\x124\n" +
+	"\x15lastNumRecordsCleared\x18\x12 \x01(\x03R\x15lastNumRecordsCleared\x12(\n" +
+	"\x0flastSizeCleared\x18\x13 \x01(\x03R\x0flastSizeCleared\x12 \n" +
+	"\vlastSuccess\x18\x14 \x01(\bR\vlastSuccess\"\xc8\x01\n" +
 	"\bGCPolicy\x12\x10\n" +
 	"\x03all\x18\x01 \x01(\bR\x03all\x12\"\n" +
 	"\fkeepDuration\x18\x02 \x01(\x03R\fkeepDuration\x12\x18\n" +
@@ -368,28 +627,30 @@ func file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP() []byte {
 	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescData
 }
 
-var file_github_com_moby_buildkit_api_types_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_github_com_moby_buildkit_api_types_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_github_com_moby_buildkit_api_types_worker_proto_goTypes = []any{
 	(*WorkerRecord)(nil),    // 0: moby.buildkit.v1.types.WorkerRecord
-	(*GCPolicy)(nil),        // 1: moby.buildkit.v1.types.GCPolicy
-	(*BuildkitVersion)(nil), // 2: moby.buildkit.v1.types.BuildkitVersion
-	(*CDIDevice)(nil),       // 3: moby.buildkit.v1.types.CDIDevice
-	nil,                     // 4: moby.buildkit.v1.types.WorkerRecord.LabelsEntry
-	nil,                     // 5: moby.buildkit.v1.types.CDIDevice.AnnotationsEntry
-	(*pb.Platform)(nil),     // 6: pb.Platform
+	(*GCAnalytics)(nil),     // 1: moby.buildkit.v1.types.GCAnalytics
+	(*GCPolicy)(nil),        // 2: moby.buildkit.v1.types.GCPolicy
+	(*BuildkitVersion)(nil), // 3: moby.buildkit.v1.types.BuildkitVersion
+	(*CDIDevice)(nil),       // 4: moby.buildkit.v1.types.CDIDevice
+	nil,                     // 5: moby.buildkit.v1.types.WorkerRecord.LabelsEntry
+	nil,                     // 6: moby.buildkit.v1.types.CDIDevice.AnnotationsEntry
+	(*pb.Platform)(nil),     // 7: pb.Platform
 }
 var file_github_com_moby_buildkit_api_types_worker_proto_depIdxs = []int32{
-	4, // 0: moby.buildkit.v1.types.WorkerRecord.Labels:type_name -> moby.buildkit.v1.types.WorkerRecord.LabelsEntry
-	6, // 1: moby.buildkit.v1.types.WorkerRecord.platforms:type_name -> pb.Platform
-	1, // 2: moby.buildkit.v1.types.WorkerRecord.GCPolicy:type_name -> moby.buildkit.v1.types.GCPolicy
-	2, // 3: moby.buildkit.v1.types.WorkerRecord.BuildkitVersion:type_name -> moby.buildkit.v1.types.BuildkitVersion
-	3, // 4: moby.buildkit.v1.types.WorkerRecord.CDIDevices:type_name -> moby.buildkit.v1.types.CDIDevice
-	5, // 5: moby.buildkit.v1.types.CDIDevice.Annotations:type_name -> moby.buildkit.v1.types.CDIDevice.AnnotationsEntry
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	5, // 0: moby.buildkit.v1.types.WorkerRecord.Labels:type_name -> moby.buildkit.v1.types.WorkerRecord.LabelsEntry
+	7, // 1: moby.buildkit.v1.types.WorkerRecord.platforms:type_name -> pb.Platform
+	2, // 2: moby.buildkit.v1.types.WorkerRecord.GCPolicy:type_name -> moby.buildkit.v1.types.GCPolicy
+	3, // 3: moby.buildkit.v1.types.WorkerRecord.BuildkitVersion:type_name -> moby.buildkit.v1.types.BuildkitVersion
+	4, // 4: moby.buildkit.v1.types.WorkerRecord.CDIDevices:type_name -> moby.buildkit.v1.types.CDIDevice
+	1, // 5: moby.buildkit.v1.types.WorkerRecord.GCAnalytics:type_name -> moby.buildkit.v1.types.GCAnalytics
+	6, // 6: moby.buildkit.v1.types.CDIDevice.Annotations:type_name -> moby.buildkit.v1.types.CDIDevice.AnnotationsEntry
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_github_com_moby_buildkit_api_types_worker_proto_init() }
@@ -403,7 +664,7 @@ func file_github_com_moby_buildkit_api_types_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_github_com_moby_buildkit_api_types_worker_proto_rawDesc), len(file_github_com_moby_buildkit_api_types_worker_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

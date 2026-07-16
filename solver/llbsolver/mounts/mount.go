@@ -15,6 +15,7 @@ import (
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/secrets"
+	"github.com/moby/buildkit/session/socketforward"
 	"github.com/moby/buildkit/session/sshforward"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver/pb"
@@ -239,6 +240,85 @@ func (sm *sshMountInstance) Mount() ([]mount.Mount, func() error, error) {
 	}}, release, nil
 }
 
+// getMountableSocket is earthly-specific
+func (mm *MountManager) getMountableSocket(ctx context.Context, m *pb.Mount, g session.Group) (cache.Mountable, error) {
+	var caller session.Caller
+	err := mm.sm.Any(ctx, g, func(ctx context.Context, _ string, c session.Caller) error {
+		caller = c
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if caller == nil {
+		return nil, nil
+	}
+	// because forwarded socket remains active, to actually handle session disconnecting error
+	// should restart the whole exec with new session
+	return &sockMount{mount: m, caller: caller, idmap: mm.cm.IdentityMapping()}, nil
+}
+
+type sockMount struct {
+	mount  *pb.Mount
+	caller session.Caller
+	idmap  *user.IdentityMapping
+}
+
+func (sm *sockMount) Mount(ctx context.Context, readonly bool, g session.Group) (snapshot.Mountable, error) {
+	return &sockMountInstance{sm: sm, idmap: sm.idmap}, nil
+}
+
+// sockMountInstance is earthly-specific
+type sockMountInstance struct {
+	sm    *sockMount
+	idmap *user.IdentityMapping
+}
+
+func (sm *sockMountInstance) Mount() ([]mount.Mount, func() error, error) {
+	ctx, cancel := context.WithCancelCause(context.TODO())
+
+	uid := int(sm.sm.mount.SockOpt.Uid)
+	gid := int(sm.sm.mount.SockOpt.Gid)
+
+	if sm.idmap != nil {
+		var err error
+		uid, gid, err = sm.idmap.ToHost(uid, gid)
+		if err != nil {
+			cancel(err)
+			return nil, nil, err
+		}
+	}
+
+	sock, cleanup, err := socketforward.MountSocket(ctx, sm.sm.caller, socketforward.SocketOpt{
+		ID:   sm.sm.mount.SockOpt.ID,
+		UID:  uid,
+		GID:  gid,
+		Mode: int(sm.sm.mount.SockOpt.Mode & 0777),
+	})
+	if err != nil {
+		cancel(err)
+		return nil, nil, err
+	}
+	release := func() error {
+		var err error
+		if cleanup != nil {
+			err = cleanup()
+		}
+		cancel(err)
+		return err
+	}
+
+	return []mount.Mount{{
+		Type:    "bind",
+		Source:  sock,
+		Options: []string{"rbind"},
+	}}, release, nil
+}
+
+func (sm *sockMountInstance) IdentityMapping() *user.IdentityMapping {
+	return sm.idmap
+}
+
 func (sm *sshMountInstance) IdentityMapping() *user.IdentityMapping {
 	return sm.idmap
 }
@@ -378,12 +458,26 @@ func (mm *MountManager) MountableTmpFS(m *pb.Mount) cache.Mountable {
 	return newTmpfs(mm.cm.IdentityMapping(), m.TmpfsOpt)
 }
 
+func (mm *MountManager) MountableHostBind(ctx context.Context, m *pb.Mount) cache.Mountable { // earthly-specific
+	// In the API, the SourcePath ends up as m.Selector. We want to use this as
+	// the source path instead, so that in unprivileged mode, FixUp[OCI] can
+	// correctly read the path.
+	source := m.Selector
+	m.Selector = ""
+	return newHostBind(source, mm.cm.IdentityMapping())
+}
+
 func (mm *MountManager) MountableSecret(ctx context.Context, m *pb.Mount, g session.Group) (cache.Mountable, error) {
 	return mm.getSecretMountable(ctx, m, g)
 }
 
 func (mm *MountManager) MountableSSH(ctx context.Context, m *pb.Mount, g session.Group) (cache.Mountable, error) {
 	return mm.getSSHMountable(ctx, m, g)
+}
+
+// earthly-specific
+func (mm *MountManager) MountableSocket(ctx context.Context, m *pb.Mount, g session.Group) (cache.Mountable, error) {
+	return mm.getMountableSocket(ctx, m, g)
 }
 
 func newTmpfs(idmap *user.IdentityMapping, opt *pb.TmpfsOpt) cache.Mountable {
@@ -423,6 +517,44 @@ func (m *tmpfsMount) Mount() ([]mount.Mount, func() error, error) {
 }
 
 func (m *tmpfsMount) IdentityMapping() *user.IdentityMapping {
+	return m.idmap
+}
+
+// earthly-specific hostbind functions
+func newHostBind(source string, idmap *user.IdentityMapping) cache.Mountable {
+	return &hostBind{source: source, idmap: idmap}
+}
+
+type hostBind struct {
+	source string
+	idmap  *user.IdentityMapping
+}
+
+func (f *hostBind) Mount(ctx context.Context, readonly bool, g session.Group) (snapshot.Mountable, error) {
+	return &hostBindMount{source: f.source, readonly: readonly, idmap: f.idmap}, nil
+}
+
+type hostBindMount struct {
+	source   string
+	readonly bool
+	idmap    *user.IdentityMapping
+}
+
+func (m *hostBindMount) Mount() ([]mount.Mount, func() error, error) {
+	opt := []string{"rbind"}
+	if m.readonly {
+		opt = append(opt, "ro")
+	} else {
+		opt = append(opt, "rw")
+	}
+	return []mount.Mount{{
+		Type:    "bind",
+		Source:  m.source,
+		Options: opt,
+	}}, func() error { return nil }, nil
+}
+
+func (m *hostBindMount) IdentityMapping() *user.IdentityMapping {
 	return m.idmap
 }
 

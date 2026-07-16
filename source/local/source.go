@@ -297,6 +297,11 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 			}
 			stat.Uid = uint32(uid)
 			stat.Gid = uint32(gid)
+			// earthly-specific
+			// whatever permissions the user has, give them to group and others as well
+			// this matches behavior of gitsource, given that umask is 0
+			umode := (stat.Mode & 0700) >> 6
+			stat.Mode = (stat.Mode ^ (stat.Mode & 0777)) | umode | (umode << 3) | (umode << 6)
 			return true
 		}
 	}

@@ -56,6 +56,7 @@ type ProcessInfo struct {
 	Meta           Meta
 	Stdin          io.ReadCloser
 	Stdout, Stderr io.WriteCloser
+	StatsStream    io.WriteCloser // earthly-specific
 	Resize         <-chan WinSize
 	Signal         <-chan syscall.Signal
 }

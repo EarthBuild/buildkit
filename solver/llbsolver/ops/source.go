@@ -11,9 +11,9 @@ import (
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/source"
 	"github.com/moby/buildkit/util/cachedigest"
+	"github.com/moby/buildkit/util/semutil"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
-	"golang.org/x/sync/semaphore"
 )
 
 const sourceCacheType = "buildkit.source.v0"
@@ -27,14 +27,14 @@ type SourceOp struct {
 	sessM       *session.Manager
 	w           worker.Worker
 	vtx         solver.Vertex
-	parallelism *semaphore.Weighted
+	parallelism *semutil.Weighted
 	pin         string
 	id          source.Identifier
 }
 
 var _ solver.Op = &SourceOp{}
 
-func NewSourceOp(vtx solver.Vertex, op *pb.Op_Source, platform *pb.Platform, sm *source.Manager, parallelism *semaphore.Weighted, sessM *session.Manager, w worker.Worker) (*SourceOp, error) {
+func NewSourceOp(vtx solver.Vertex, op *pb.Op_Source, platform *pb.Platform, sm *source.Manager, parallelism *semutil.Weighted, sessM *session.Manager, w worker.Worker) (*SourceOp, error) {
 	if err := opsutils.Validate(&pb.Op{Op: op}); err != nil {
 		return nil, err
 	}

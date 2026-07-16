@@ -31,6 +31,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const keyEarthlyExporterInstance = "earthly-hack-exporter-instance"
+
 type ExporterRequest struct {
 	Exporters             []exporter.ExporterInstance
 	CacheExporters        []RemoteCacheExporter
@@ -191,6 +193,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		return nil, err
 	}
 	j.SetValue(keyEntitlements, set)
+	j.SetValue(keyEarthlyExporterInstance, &exp)
 
 	if srcPol != nil {
 		if err := validateSourcePolicy(srcPol); err != nil {
@@ -395,7 +398,7 @@ func (s *Solver) leaseManager() (*leaseutil.Manager, error) {
 	return w.LeaseManager(), nil
 }
 
-func (s *Solver) Status(ctx context.Context, id string, statusChan chan *client.SolveStatus) error {
+func (s *Solver) Status(ctx context.Context, id string, statsStream bool, statusChan chan *client.SolveStatus) error {
 	if err := s.history.Status(ctx, id, statusChan); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			close(statusChan)
@@ -410,7 +413,7 @@ func (s *Solver) Status(ctx context.Context, id string, statusChan chan *client.
 		close(statusChan)
 		return err
 	}
-	return j.Status(ctx, statusChan)
+	return j.Status(ctx, statsStream, statusChan)
 }
 
 func defaultResolver(wc *worker.Controller) ResolveWorkerFunc {

@@ -3,6 +3,7 @@ package content
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/plugins/content/local"
@@ -43,7 +44,11 @@ func TestContentAttachable(t *testing.T) {
 	s, err := session.NewSession(ctx, "bar")
 	require.NoError(t, err)
 
-	m, err := session.NewManager()
+	m, err := session.NewManager(&session.ManagerOpt{
+		HealthFrequency:       1 * time.Second,
+		HealthTimeout:         10 * time.Second,
+		HealthAllowedFailures: 1,
+	})
 	require.NoError(t, err)
 
 	a := NewAttachable(attachableStores)

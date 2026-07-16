@@ -4,8 +4,10 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
@@ -25,20 +27,138 @@ type client struct {
 	supported map[string]struct{}
 }
 
+type History struct {
+	Start time.Time
+	End   time.Time
+}
+
 // Manager is a controller for accessing currently active sessions
 type Manager struct {
 	sessions        map[string]*client
 	mu              sync.Mutex
 	updateCondition *sync.Cond
+	healthCfg       ManagerHealthCfg
+
+	stop            bool // Earthly-specific.
+	shutdownCh      chan struct{}
+	idleAt          time.Time           // Earthly-specific
+	history         map[string]*History // Earthly-specific
+	historyDuration time.Duration       // Earthly-specific
+}
+
+// ManagerHealthCfg is the healthcheck configuration for gRPC healthchecks
+type ManagerHealthCfg struct {
+	frequency       time.Duration
+	timeout         time.Duration
+	allowedFailures int
+}
+
+// ManagerOpt is earthly-specific, and required for custom health-check overrides
+type ManagerOpt struct {
+	HealthFrequency       time.Duration
+	HealthTimeout         time.Duration
+	HealthAllowedFailures int
+	ShutdownCh            chan struct{}
 }
 
 // NewManager returns a new Manager
-func NewManager() (*Manager, error) {
+// earthly-specific: opt param is required for our custom health config
+func NewManager(opt *ManagerOpt) (*Manager, error) {
+	var historyDuration time.Duration
+	if dur, ok := os.LookupEnv("BUILDKIT_SESSION_HISTORY_DURATION"); ok {
+		var err error
+		historyDuration, err = time.ParseDuration(dur)
+		if err != nil {
+			return nil, errors.Wrapf(err, "could not parse session history duration value of '%s'", dur)
+		}
+	}
 	sm := &Manager{
 		sessions: make(map[string]*client),
+		healthCfg: ManagerHealthCfg{
+			frequency:       opt.HealthFrequency,
+			timeout:         opt.HealthTimeout,
+			allowedFailures: opt.HealthAllowedFailures,
+		},
+		shutdownCh:      opt.ShutdownCh,
+		idleAt:          time.Now(),
+		history:         make(map[string]*History),
+		historyDuration: historyDuration,
 	}
 	sm.updateCondition = sync.NewCond(&sm.mu)
 	return sm, nil
+}
+
+// NumSessions returns the number of active sessions.
+// earthly-specific
+func (sm *Manager) NumSessions() (sessions int, durationIdle time.Duration) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sessions = len(sm.sessions)
+	if sessions == 0 {
+		durationIdle = time.Since(sm.idleAt)
+	}
+	return sessions, durationIdle
+}
+
+// StopIfIdle stops the manager if there are no active sessions.
+// earthly-specific
+func (sm *Manager) StopIfIdle() (bool, int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	isIdle := sm.idleAt.Add(time.Minute).Before(time.Now())
+	if isIdle && len(sm.sessions) == 0 {
+		close(sm.shutdownCh)
+		sm.stop = true
+		return true, 0
+	}
+	return false, len(sm.sessions)
+}
+
+// Reserve signals intent to start a build.
+// It resets the idleAt counter so that the buildkit will not shutdown.
+// earthly-specific
+func (sm *Manager) Reserve() error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.stop {
+		return errors.New("already shutting down")
+	}
+	sm.idleAt = time.Now()
+	return nil
+}
+
+// earthly-specific
+func (sm *Manager) recordSessionStart(sessionID string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.history[sessionID] = &History{Start: time.Now()}
+}
+
+// earthly-specific
+func (sm *Manager) recordSessionEnd(sessionID string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if h := sm.history[sessionID]; h != nil {
+		h.End = time.Now()
+	}
+	for id, history := range sm.history {
+		if time.Since(history.Start) > sm.historyDuration {
+			delete(sm.history, id)
+		}
+	}
+}
+
+// GetSessionHistory returns a map of session ID to History entries
+// earthly-specific
+func (sm *Manager) GetSessionHistory() map[string]*History {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	historyCopy := make(map[string]*History)
+	for id, h := range sm.history {
+		history := *h
+		historyCopy[id] = &history
+	}
+	return historyCopy
 }
 
 // HandleHTTPRequest handles an incoming HTTP request
@@ -98,6 +218,11 @@ func (sm *Manager) HandleConn(ctx context.Context, conn net.Conn, opts map[strin
 
 // caller needs to take lock, this function will release it
 func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[string][]string) error {
+	if sm.stop {
+		sm.mu.Unlock()
+		return errors.New("shutting down")
+	}
+
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
@@ -107,7 +232,7 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 	id := h.Get(headerSessionID)
 	sharedKey := h.Get(headerSessionSharedKey)
 
-	ctx, cc, err := grpcClientConn(ctx, conn)
+	ctx, cc, err := grpcClientConn(ctx, conn, sm.healthCfg)
 	if err != nil {
 		sm.mu.Unlock()
 		return err
@@ -131,11 +256,16 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 	sm.sessions[id] = c
 	sm.updateCondition.Broadcast()
 	sm.mu.Unlock()
+	sm.recordSessionStart(id) // earthly-specific
 
 	defer func() {
 		sm.mu.Lock()
 		delete(sm.sessions, id)
+		if len(sm.sessions) == 0 {
+			sm.idleAt = time.Now() // earthly-specific
+		}
 		sm.mu.Unlock()
+		sm.recordSessionEnd(id) // earthly-specific
 	}()
 
 	<-c.ctx.Done()

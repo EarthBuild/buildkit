@@ -137,6 +137,11 @@ func (b *provenanceBridge) findByResult(rp solver.ResultProxy) (*resultWithBridg
 	return nil, false
 }
 
+func (b *provenanceBridge) ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (string, digest.Digest, []byte, error) {
+	imr := sourceresolver.NewImageMetaResolver(b)
+	return imr.ResolveImageConfig(ctx, ref, opt)
+}
+
 func (b *provenanceBridge) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt) (*sourceresolver.MetaResponse, error) {
 	resp, err := b.llbBridge.ResolveSourceMetadata(ctx, op, opt)
 	if err != nil {

@@ -109,6 +109,16 @@ func (gs *Source) Identifier(scheme, ref string, attrs map[string]string, platfo
 			id.KnownSSHHosts = v
 		case pb.AttrMountSSHSock:
 			id.MountSSHSock = v
+		case pb.AttrGitLFSInclude: // earthly-specific
+			id.LFSInclude = v
+		case pb.AttrGitLogLevel: // earthly-specific
+			l, err := strconv.Atoi(v)
+			if err != nil {
+				return nil, errors.Wrapf(err, "invalid git log level %s", v)
+			}
+			id.LogLevel = gitutil.GitLogLevel(l)
+		case pb.AttrGitSSHCommand: // earthly-specific
+			id.SSHCommand = v
 		case pb.AttrGitChecksum:
 			id.Checksum = v
 		case pb.AttrGitSkipSubmodules:
@@ -266,6 +276,9 @@ func (gs *gitSourceHandler) shaToCacheKey(sha, ref string) string {
 	}
 	if gs.src.Subdir != "" {
 		key += ":" + gs.src.Subdir
+	}
+	if gs.src.LFSInclude != "" { // earthly-specific
+		key += ";lfsinclude:" + gs.src.LFSInclude
 	}
 	if gs.src.SkipSubmodules {
 		key += "(skip-submodules)"
@@ -487,6 +500,7 @@ func (gs *gitSourceHandler) remoteKey() string {
 }
 
 func (gs *gitSourceHandler) resolveMetadata(ctx context.Context, jobCtx solver.JobContext) (md *Metadata, retErr error) {
+	ctx = context.WithValue(ctx, gitutil.EarthlyCtxDebugLevelKey, gs.src.LogLevel) // earthly-specific
 	remote := gs.src.Remote
 	gs.locker.Lock(remote)
 	defer gs.locker.Unlock(remote)
@@ -711,6 +725,7 @@ func (gs *gitSourceHandler) CacheKey(ctx context.Context, jobCtx solver.JobConte
 }
 
 func (gs *gitSourceHandler) remoteFetch(ctx context.Context, jobCtx solver.JobContext) (_ *gitRepo, retErr error) {
+	ctx = context.WithValue(ctx, gitutil.EarthlyCtxDebugLevelKey, gs.src.LogLevel) // earthly-specific
 	gs.locker.Lock(gs.src.Remote)
 	cleanup := func() error { return gs.locker.Unlock(gs.src.Remote) }
 
@@ -775,6 +790,7 @@ func (gs *gitSourceHandler) remoteFetch(ctx context.Context, jobCtx solver.JobCo
 }
 
 func (gs *gitSourceHandler) Snapshot(ctx context.Context, jobCtx solver.JobContext) (cache.ImmutableRef, error) {
+	ctx = context.WithValue(ctx, gitutil.EarthlyCtxDebugLevelKey, gs.src.LogLevel) // earthly-specific
 	cacheKey := gs.cacheKey
 	if cacheKey == "" {
 		var err error
@@ -1148,6 +1164,13 @@ func (gs *gitSourceHandler) checkout(ctx context.Context, repo *gitRepo, g sessi
 		}
 	}
 
+	if gs.src.LFSInclude != "" { // earthly-specific
+		_, err = git.Run(ctx, "lfs", "pull", "--include", gs.src.LFSInclude)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to perform lfs pull %s", urlutil.RedactCredentials(gs.src.Remote))
+		}
+	}
+
 	if idmap := mount.IdentityMapping(); idmap != nil {
 		uid, gid := idmap.RootPair()
 		err := filepath.WalkDir(gitDir, func(p string, _ os.DirEntry, _ error) error {
@@ -1291,10 +1314,16 @@ func (gs *gitSourceHandler) emptyGitCli(ctx context.Context, g session.Group, op
 		cleanups = append(cleanups, unmountKnownHosts)
 	}
 
+	var sshCommand string
+	if gs.src.SSHCommand != "" {
+		sshCommand = gs.src.SSHCommand
+	}
+
 	opts = append([]gitutil.Option{
 		gitutil.WithArgs(gs.authArgs...),
 		gitutil.WithSSHAuthSock(sock),
 		gitutil.WithSSHKnownHosts(knownHosts),
+		gitutil.WithSSHCommand(sshCommand),
 	}, opts...)
 	return gitCLI(opts...), cleanup, err
 }

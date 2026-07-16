@@ -202,7 +202,7 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 			return nil
 		})
 		eg.Go(func() error {
-			return j.Status(ctx2, ch)
+			return j.Status(ctx2, false, ch)
 		})
 
 		setDeprecated := true

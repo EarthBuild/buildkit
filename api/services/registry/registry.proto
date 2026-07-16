@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package earthly.registry.v1;
+
+option go_package = "github.com/moby/buildkit/api/services/registry;earthly_registry_v1";
+
+message ByteMessage {
+	bytes data = 1;
+}
+
+service Registry {
+	rpc Proxy(stream ByteMessage) returns (stream ByteMessage);
+}

@@ -19,6 +19,39 @@ type WorkerInfo struct {
 	GCPolicy        []PruneInfo         `json:"gcPolicy"`
 	BuildkitVersion BuildkitVersion     `json:"buildkitVersion"`
 	CDIDevices      []CDIDevice         `json:"cdiDevices"`
+
+	// Earthly-specific.
+	ParallelismCurrent int `json:"parallelismCurrent"`
+	ParallelismMax     int `json:"parallelismMax"`
+	ParallelismWaiting int `json:"parallelismWaiting"`
+	GCAnalytics        GCAnalytics
+}
+
+type GCAnalytics struct {
+	// Summary of last numRuns.
+	NumRuns           int
+	NumFailures       int
+	AvgDuration       time.Duration
+	AvgRecordsCleared int64
+	AvgSizeCleared    int64
+	AvgRecordsBefore  int64
+	AvgSizeBefore     int64
+	// All-time summary.
+	AllTimeRuns        int64
+	AllTimeMaxDuration time.Duration
+	AllTimeDuration    time.Duration
+	// Current run (if one is ongoing).
+	CurrentStartTime        *time.Time
+	CurrentNumRecordsBefore int64
+	CurrentSizeBefore       int64
+	// Last run.
+	LastStartTime         *time.Time
+	LastEndTime           *time.Time
+	LastNumRecordsBefore  int64
+	LastSizeBefore        int64
+	LastNumRecordsCleared int64
+	LastSizeCleared       int64
+	LastSuccess           bool
 }
 
 // ListWorkers lists all active workers
@@ -37,6 +70,21 @@ func (c *Client) ListWorkers(ctx context.Context, opts ...ListWorkersOption) ([]
 	var wi []*WorkerInfo
 
 	for _, w := range resp.Record {
+		var currentStartTime *time.Time
+		if w.GetGCAnalytics().GetCurrentStartTimeSecEpoch() != 0 {
+			t := time.Unix(w.GetGCAnalytics().GetCurrentStartTimeSecEpoch(), 0)
+			currentStartTime = &t
+		}
+		var lastStartTime *time.Time
+		if w.GetGCAnalytics().GetLastStartTimeSecEpoch() != 0 {
+			t := time.Unix(w.GetGCAnalytics().GetLastStartTimeSecEpoch(), 0)
+			lastStartTime = &t
+		}
+		var lastEndTime *time.Time
+		if w.GetGCAnalytics().GetLastEndTimeSecEpoch() != 0 {
+			t := time.Unix(w.GetGCAnalytics().GetLastEndTimeSecEpoch(), 0)
+			lastEndTime = &t
+		}
 		wi = append(wi, &WorkerInfo{
 			ID:              w.ID,
 			Labels:          w.Labels,
@@ -44,6 +92,33 @@ func (c *Client) ListWorkers(ctx context.Context, opts ...ListWorkersOption) ([]
 			GCPolicy:        fromAPIGCPolicy(w.GCPolicy),
 			BuildkitVersion: fromAPIBuildkitVersion(w.BuildkitVersion),
 			CDIDevices:      fromAPICDIDevices(w.CDIDevices),
+
+			ParallelismCurrent: int(w.ParallelismCurrent),
+			ParallelismMax:     int(w.ParallelismMax),
+			ParallelismWaiting: int(w.ParallelismWaiting),
+
+			GCAnalytics: GCAnalytics{
+				NumRuns:                 int(w.GetGCAnalytics().GetNumRuns()),
+				NumFailures:             int(w.GetGCAnalytics().GetNumFailures()),
+				AvgDuration:             time.Duration(w.GetGCAnalytics().GetAvgDurationMs()) * time.Millisecond,
+				AvgRecordsCleared:       w.GetGCAnalytics().GetAvgRecordsCleared(),
+				AvgSizeCleared:          w.GetGCAnalytics().GetAvgSizeCleared(),
+				AvgRecordsBefore:        w.GetGCAnalytics().GetAvgRecordsBefore(),
+				AvgSizeBefore:           w.GetGCAnalytics().GetAvgSizeBefore(),
+				AllTimeRuns:             w.GetGCAnalytics().GetAllTimeRuns(),
+				AllTimeMaxDuration:      time.Duration(w.GetGCAnalytics().GetAllTimeMaxDurationMs()) * time.Millisecond,
+				AllTimeDuration:         time.Duration(w.GetGCAnalytics().GetAllTimeDurationMs()) * time.Millisecond,
+				CurrentStartTime:        currentStartTime,
+				CurrentNumRecordsBefore: w.GetGCAnalytics().GetCurrentNumRecordsBefore(),
+				CurrentSizeBefore:       w.GetGCAnalytics().GetCurrentSizeBefore(),
+				LastStartTime:           lastStartTime,
+				LastEndTime:             lastEndTime,
+				LastNumRecordsBefore:    w.GetGCAnalytics().GetLastNumRecordsBefore(),
+				LastSizeBefore:          w.GetGCAnalytics().GetLastSizeBefore(),
+				LastNumRecordsCleared:   w.GetGCAnalytics().GetLastNumRecordsCleared(),
+				LastSizeCleared:         w.GetGCAnalytics().GetLastSizeCleared(),
+				LastSuccess:             w.GetGCAnalytics().GetLastSuccess(),
+			},
 		})
 	}
 

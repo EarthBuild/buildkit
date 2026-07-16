@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/containerd/containerd/v2/defaults"
 	distreference "github.com/distribution/reference"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/client/llb/sourceresolver"
@@ -469,6 +470,26 @@ func (c *grpcClient) Solve(ctx context.Context, creq client.SolveRequest) (res *
 	}
 
 	return res, nil
+}
+
+// Export is earthly-specific
+func (c *grpcClient) Export(ctx context.Context, req client.ExportRequest) error {
+	m := map[string]*pb.Ref{}
+	for k, r := range req.Refs {
+		pbRef, err := convertRef(r)
+		if err != nil {
+			return err
+		}
+		m[k] = pbRef
+	}
+	_, err := c.client.Export(ctx, &pb.ExportRequest{
+		Refs:     &pb.RefMap{Refs: m},
+		Metadata: req.Metadata,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *grpcClient) ResolveSourceMetadata(ctx context.Context, op *opspb.SourceOp, opt sourceresolver.Opt) (*sourceresolver.MetaResponse, error) {
@@ -1451,8 +1472,10 @@ func grpcClientConn(ctx context.Context) (context.Context, *grpc.ClientConn, err
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor),
 		grpc.WithStreamInterceptor(grpcerrors.StreamClientInterceptor),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(16 << 20)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(16 << 20)),
+		grpc.WithInitialWindowSize(65535 * 32),     // earthly-specific
+		grpc.WithInitialConnWindowSize(65535 * 16), // earthly-specific
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
+		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
 	}
 
 	//nolint:staticcheck // ignore SA1019 NewClient has different behavior and needs to be tested

@@ -20,6 +20,11 @@ service Control {
 	rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
 	rpc Info(InfoRequest) returns (InfoResponse);
 
+	// Earthly-specific.
+	rpc ShutdownIfIdle(ShutdownIfIdleRequest) returns (ShutdownIfIdleResponse);
+	rpc Reserve(ReserveRequest) returns (ReserveResponse);
+	rpc SessionHistory(SessionHistoryRequest) returns (SessionHistoryResponse);
+
 	rpc ListenBuildHistory(BuildHistoryRequest) returns (stream BuildHistoryEvent);
 	rpc UpdateBuildHistory(UpdateBuildHistoryRequest) returns (UpdateBuildHistoryResponse);
 }
@@ -35,7 +40,7 @@ message PruneRequest {
 }
 
 message DiskUsageRequest {
-	repeated string filter = 1; 
+	repeated string filter = 1;
 	int64 ageLimit = 2;
 }
 
@@ -113,6 +118,8 @@ message SolveResponse {
 
 message StatusRequest {
 	string Ref = 1;
+
+	bool statsStream = 99; // earthly
 }
 
 message StatusResponse {
@@ -177,6 +184,32 @@ message InfoRequest {}
 
 message InfoResponse {
 	moby.buildkit.v1.types.BuildkitVersion buildkitVersion = 1;
+
+	// Earthly-specific.
+	uint64 numSessions = 101;
+	uint64 secondsIdle = 102;
+}
+
+message ShutdownIfIdleRequest {}
+
+message ShutdownIfIdleResponse {
+	bool willShutdown = 1;
+	uint64 numSessions = 2;
+}
+
+message ReserveRequest {}
+
+message ReserveResponse {}
+
+message SessionHistoryRequest {}
+
+message SessionHistoryResponse {
+	message History {
+		string sessionID = 1;
+		google.protobuf.Timestamp start = 2;
+		google.protobuf.Timestamp end = 3;
+	}
+	repeated History history = 1;
 }
 
 message BuildHistoryRequest {

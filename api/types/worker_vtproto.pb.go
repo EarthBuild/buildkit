@@ -27,6 +27,10 @@ func (m *WorkerRecord) CloneVT() *WorkerRecord {
 	r := new(WorkerRecord)
 	r.ID = m.ID
 	r.BuildkitVersion = m.BuildkitVersion.CloneVT()
+	r.ParallelismCurrent = m.ParallelismCurrent
+	r.ParallelismMax = m.ParallelismMax
+	r.ParallelismWaiting = m.ParallelismWaiting
+	r.GCAnalytics = m.GCAnalytics.CloneVT()
 	if rhs := m.Labels; rhs != nil {
 		tmpContainer := make(map[string]string, len(rhs))
 		for k, v := range rhs {
@@ -63,6 +67,42 @@ func (m *WorkerRecord) CloneVT() *WorkerRecord {
 }
 
 func (m *WorkerRecord) CloneMessageVT() proto.Message {
+	return m.CloneVT()
+}
+
+func (m *GCAnalytics) CloneVT() *GCAnalytics {
+	if m == nil {
+		return (*GCAnalytics)(nil)
+	}
+	r := new(GCAnalytics)
+	r.NumRuns = m.NumRuns
+	r.NumFailures = m.NumFailures
+	r.AvgDurationMs = m.AvgDurationMs
+	r.AvgRecordsCleared = m.AvgRecordsCleared
+	r.AvgSizeCleared = m.AvgSizeCleared
+	r.AvgRecordsBefore = m.AvgRecordsBefore
+	r.AvgSizeBefore = m.AvgSizeBefore
+	r.AllTimeRuns = m.AllTimeRuns
+	r.AllTimeMaxDurationMs = m.AllTimeMaxDurationMs
+	r.AllTimeDurationMs = m.AllTimeDurationMs
+	r.CurrentStartTimeSecEpoch = m.CurrentStartTimeSecEpoch
+	r.CurrentNumRecordsBefore = m.CurrentNumRecordsBefore
+	r.CurrentSizeBefore = m.CurrentSizeBefore
+	r.LastStartTimeSecEpoch = m.LastStartTimeSecEpoch
+	r.LastEndTimeSecEpoch = m.LastEndTimeSecEpoch
+	r.LastNumRecordsBefore = m.LastNumRecordsBefore
+	r.LastSizeBefore = m.LastSizeBefore
+	r.LastNumRecordsCleared = m.LastNumRecordsCleared
+	r.LastSizeCleared = m.LastSizeCleared
+	r.LastSuccess = m.LastSuccess
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = make([]byte, len(m.unknownFields))
+		copy(r.unknownFields, m.unknownFields)
+	}
+	return r
+}
+
+func (m *GCAnalytics) CloneMessageVT() proto.Message {
 	return m.CloneVT()
 }
 
@@ -212,11 +252,99 @@ func (this *WorkerRecord) EqualVT(that *WorkerRecord) bool {
 			}
 		}
 	}
+	if this.ParallelismCurrent != that.ParallelismCurrent {
+		return false
+	}
+	if this.ParallelismMax != that.ParallelismMax {
+		return false
+	}
+	if this.ParallelismWaiting != that.ParallelismWaiting {
+		return false
+	}
+	if !this.GCAnalytics.EqualVT(that.GCAnalytics) {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
 func (this *WorkerRecord) EqualMessageVT(thatMsg proto.Message) bool {
 	that, ok := thatMsg.(*WorkerRecord)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *GCAnalytics) EqualVT(that *GCAnalytics) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.NumRuns != that.NumRuns {
+		return false
+	}
+	if this.NumFailures != that.NumFailures {
+		return false
+	}
+	if this.AvgDurationMs != that.AvgDurationMs {
+		return false
+	}
+	if this.AvgRecordsCleared != that.AvgRecordsCleared {
+		return false
+	}
+	if this.AvgSizeCleared != that.AvgSizeCleared {
+		return false
+	}
+	if this.AvgRecordsBefore != that.AvgRecordsBefore {
+		return false
+	}
+	if this.AvgSizeBefore != that.AvgSizeBefore {
+		return false
+	}
+	if this.AllTimeRuns != that.AllTimeRuns {
+		return false
+	}
+	if this.AllTimeMaxDurationMs != that.AllTimeMaxDurationMs {
+		return false
+	}
+	if this.AllTimeDurationMs != that.AllTimeDurationMs {
+		return false
+	}
+	if this.CurrentStartTimeSecEpoch != that.CurrentStartTimeSecEpoch {
+		return false
+	}
+	if this.CurrentNumRecordsBefore != that.CurrentNumRecordsBefore {
+		return false
+	}
+	if this.CurrentSizeBefore != that.CurrentSizeBefore {
+		return false
+	}
+	if this.LastStartTimeSecEpoch != that.LastStartTimeSecEpoch {
+		return false
+	}
+	if this.LastEndTimeSecEpoch != that.LastEndTimeSecEpoch {
+		return false
+	}
+	if this.LastNumRecordsBefore != that.LastNumRecordsBefore {
+		return false
+	}
+	if this.LastSizeBefore != that.LastSizeBefore {
+		return false
+	}
+	if this.LastNumRecordsCleared != that.LastNumRecordsCleared {
+		return false
+	}
+	if this.LastSizeCleared != that.LastSizeCleared {
+		return false
+	}
+	if this.LastSuccess != that.LastSuccess {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *GCAnalytics) EqualMessageVT(thatMsg proto.Message) bool {
+	that, ok := thatMsg.(*GCAnalytics)
 	if !ok {
 		return false
 	}
@@ -354,6 +482,39 @@ func (m *WorkerRecord) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
 	}
+	if m.GCAnalytics != nil {
+		size, err := m.GCAnalytics.MarshalToSizedBufferVT(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xc2
+	}
+	if m.ParallelismWaiting != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.ParallelismWaiting))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb8
+	}
+	if m.ParallelismMax != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.ParallelismMax))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb0
+	}
+	if m.ParallelismCurrent != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.ParallelismCurrent))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
 	if len(m.CDIDevices) > 0 {
 		for iNdEx := len(m.CDIDevices) - 1; iNdEx >= 0; iNdEx-- {
 			size, err := m.CDIDevices[iNdEx].MarshalToSizedBufferVT(dAtA[:i])
@@ -425,6 +586,154 @@ func (m *WorkerRecord) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		i = protohelpers.EncodeVarint(dAtA, i, uint64(len(m.ID)))
 		i--
 		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GCAnalytics) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GCAnalytics) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *GCAnalytics) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i -= len(m.unknownFields)
+		copy(dAtA[i:], m.unknownFields)
+	}
+	if m.LastSuccess {
+		i--
+		if m.LastSuccess {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xa0
+	}
+	if m.LastSizeCleared != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.LastSizeCleared))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x98
+	}
+	if m.LastNumRecordsCleared != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.LastNumRecordsCleared))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x90
+	}
+	if m.LastSizeBefore != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.LastSizeBefore))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x88
+	}
+	if m.LastNumRecordsBefore != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.LastNumRecordsBefore))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0x80
+	}
+	if m.LastEndTimeSecEpoch != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.LastEndTimeSecEpoch))
+		i--
+		dAtA[i] = 0x78
+	}
+	if m.LastStartTimeSecEpoch != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.LastStartTimeSecEpoch))
+		i--
+		dAtA[i] = 0x70
+	}
+	if m.CurrentSizeBefore != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.CurrentSizeBefore))
+		i--
+		dAtA[i] = 0x68
+	}
+	if m.CurrentNumRecordsBefore != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.CurrentNumRecordsBefore))
+		i--
+		dAtA[i] = 0x60
+	}
+	if m.CurrentStartTimeSecEpoch != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.CurrentStartTimeSecEpoch))
+		i--
+		dAtA[i] = 0x58
+	}
+	if m.AllTimeDurationMs != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.AllTimeDurationMs))
+		i--
+		dAtA[i] = 0x50
+	}
+	if m.AllTimeMaxDurationMs != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.AllTimeMaxDurationMs))
+		i--
+		dAtA[i] = 0x48
+	}
+	if m.AllTimeRuns != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.AllTimeRuns))
+		i--
+		dAtA[i] = 0x40
+	}
+	if m.AvgSizeBefore != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.AvgSizeBefore))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.AvgRecordsBefore != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.AvgRecordsBefore))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.AvgSizeCleared != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.AvgSizeCleared))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.AvgRecordsCleared != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.AvgRecordsCleared))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.AvgDurationMs != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.AvgDurationMs))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.NumFailures != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.NumFailures))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.NumRuns != 0 {
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.NumRuns))
+		i--
+		dAtA[i] = 0x8
 	}
 	return len(dAtA) - i, nil
 }
@@ -673,6 +982,89 @@ func (m *WorkerRecord) SizeVT() (n int) {
 			l = e.SizeVT()
 			n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 		}
+	}
+	if m.ParallelismCurrent != 0 {
+		n += 2 + protohelpers.SizeOfVarint(uint64(m.ParallelismCurrent))
+	}
+	if m.ParallelismMax != 0 {
+		n += 2 + protohelpers.SizeOfVarint(uint64(m.ParallelismMax))
+	}
+	if m.ParallelismWaiting != 0 {
+		n += 2 + protohelpers.SizeOfVarint(uint64(m.ParallelismWaiting))
+	}
+	if m.GCAnalytics != nil {
+		l = m.GCAnalytics.SizeVT()
+		n += 2 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *GCAnalytics) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.NumRuns != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.NumRuns))
+	}
+	if m.NumFailures != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.NumFailures))
+	}
+	if m.AvgDurationMs != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.AvgDurationMs))
+	}
+	if m.AvgRecordsCleared != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.AvgRecordsCleared))
+	}
+	if m.AvgSizeCleared != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.AvgSizeCleared))
+	}
+	if m.AvgRecordsBefore != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.AvgRecordsBefore))
+	}
+	if m.AvgSizeBefore != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.AvgSizeBefore))
+	}
+	if m.AllTimeRuns != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.AllTimeRuns))
+	}
+	if m.AllTimeMaxDurationMs != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.AllTimeMaxDurationMs))
+	}
+	if m.AllTimeDurationMs != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.AllTimeDurationMs))
+	}
+	if m.CurrentStartTimeSecEpoch != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.CurrentStartTimeSecEpoch))
+	}
+	if m.CurrentNumRecordsBefore != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.CurrentNumRecordsBefore))
+	}
+	if m.CurrentSizeBefore != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.CurrentSizeBefore))
+	}
+	if m.LastStartTimeSecEpoch != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.LastStartTimeSecEpoch))
+	}
+	if m.LastEndTimeSecEpoch != 0 {
+		n += 1 + protohelpers.SizeOfVarint(uint64(m.LastEndTimeSecEpoch))
+	}
+	if m.LastNumRecordsBefore != 0 {
+		n += 2 + protohelpers.SizeOfVarint(uint64(m.LastNumRecordsBefore))
+	}
+	if m.LastSizeBefore != 0 {
+		n += 2 + protohelpers.SizeOfVarint(uint64(m.LastSizeBefore))
+	}
+	if m.LastNumRecordsCleared != 0 {
+		n += 2 + protohelpers.SizeOfVarint(uint64(m.LastNumRecordsCleared))
+	}
+	if m.LastSizeCleared != 0 {
+		n += 2 + protohelpers.SizeOfVarint(uint64(m.LastSizeCleared))
+	}
+	if m.LastSuccess {
+		n += 3
 	}
 	n += len(m.unknownFields)
 	return n
@@ -1085,6 +1477,531 @@ func (m *WorkerRecord) UnmarshalVT(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ParallelismCurrent", wireType)
+			}
+			m.ParallelismCurrent = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.ParallelismCurrent |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ParallelismMax", wireType)
+			}
+			m.ParallelismMax = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.ParallelismMax |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 103:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ParallelismWaiting", wireType)
+			}
+			m.ParallelismWaiting = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.ParallelismWaiting |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 104:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field GCAnalytics", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.GCAnalytics == nil {
+				m.GCAnalytics = &GCAnalytics{}
+			}
+			if err := m.GCAnalytics.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := protohelpers.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GCAnalytics) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return protohelpers.ErrIntOverflow
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GCAnalytics: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GCAnalytics: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NumRuns", wireType)
+			}
+			m.NumRuns = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.NumRuns |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NumFailures", wireType)
+			}
+			m.NumFailures = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.NumFailures |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AvgDurationMs", wireType)
+			}
+			m.AvgDurationMs = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AvgDurationMs |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AvgRecordsCleared", wireType)
+			}
+			m.AvgRecordsCleared = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AvgRecordsCleared |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AvgSizeCleared", wireType)
+			}
+			m.AvgSizeCleared = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AvgSizeCleared |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AvgRecordsBefore", wireType)
+			}
+			m.AvgRecordsBefore = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AvgRecordsBefore |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AvgSizeBefore", wireType)
+			}
+			m.AvgSizeBefore = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AvgSizeBefore |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 8:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AllTimeRuns", wireType)
+			}
+			m.AllTimeRuns = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AllTimeRuns |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 9:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AllTimeMaxDurationMs", wireType)
+			}
+			m.AllTimeMaxDurationMs = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AllTimeMaxDurationMs |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AllTimeDurationMs", wireType)
+			}
+			m.AllTimeDurationMs = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AllTimeDurationMs |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 11:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CurrentStartTimeSecEpoch", wireType)
+			}
+			m.CurrentStartTimeSecEpoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CurrentStartTimeSecEpoch |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 12:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CurrentNumRecordsBefore", wireType)
+			}
+			m.CurrentNumRecordsBefore = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CurrentNumRecordsBefore |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 13:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CurrentSizeBefore", wireType)
+			}
+			m.CurrentSizeBefore = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CurrentSizeBefore |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 14:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LastStartTimeSecEpoch", wireType)
+			}
+			m.LastStartTimeSecEpoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LastStartTimeSecEpoch |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 15:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LastEndTimeSecEpoch", wireType)
+			}
+			m.LastEndTimeSecEpoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LastEndTimeSecEpoch |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 16:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LastNumRecordsBefore", wireType)
+			}
+			m.LastNumRecordsBefore = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LastNumRecordsBefore |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 17:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LastSizeBefore", wireType)
+			}
+			m.LastSizeBefore = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LastSizeBefore |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 18:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LastNumRecordsCleared", wireType)
+			}
+			m.LastNumRecordsCleared = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LastNumRecordsCleared |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 19:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LastSizeCleared", wireType)
+			}
+			m.LastSizeCleared = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LastSizeCleared |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 20:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LastSuccess", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.LastSuccess = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := protohelpers.Skip(dAtA[iNdEx:])

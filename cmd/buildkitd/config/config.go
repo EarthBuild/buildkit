@@ -1,6 +1,8 @@
 package config
 
 import (
+	"time"
+
 	"github.com/moby/buildkit/cache/remotecache/gha/ghatypes"
 	resolverconfig "github.com/moby/buildkit/util/resolver/config"
 )
@@ -35,6 +37,7 @@ type Config struct {
 
 	DNS *DNSConfig `toml:"dns"`
 
+	Health  HealthConfig   `toml:"health"`
 	History *HistoryConfig `toml:"history"`
 
 	Frontends struct {
@@ -75,6 +78,12 @@ type GRPCConfig struct {
 	TLS TLSConfig `toml:"tls"`
 	// MaxRecvMsgSize int    `toml:"max_recv_message_size"`
 	// MaxSendMsgSize int    `toml:"max_send_message_size"`
+}
+
+type HealthConfig struct {
+	Frequency       time.Duration `toml:"frequency"`
+	Timeout         time.Duration `toml:"timeout"`
+	AllowedFailures int           `toml:"allowedFailures"`
 }
 
 type TLSConfig struct {
@@ -143,6 +152,12 @@ type OCIConfig struct {
 
 	// MaxParallelism is the maximum number of parallel build steps that can be run at the same time.
 	MaxParallelism int `toml:"max-parallelism"`
+
+	// earthly-specific: Hooks are things you can run during any phase of the OCI container runtime lifecycle.
+	Hooks []Hook `toml:"hook"`
+
+	// SampleFrequency is the frequency between sampling runc processes for stats
+	SampleFrequency time.Duration `toml:"sample-frequency"`
 }
 
 type ContainerdConfig struct {
@@ -206,6 +221,14 @@ type DNSConfig struct {
 	Nameservers   []string `toml:"nameservers"`
 	Options       []string `toml:"options"`
 	SearchDomains []string `toml:"searchDomains"`
+}
+
+type Hook struct {
+	Phase   string
+	Path    string
+	Args    []string
+	Env     []string
+	Timeout *int
 }
 
 type HistoryConfig struct {

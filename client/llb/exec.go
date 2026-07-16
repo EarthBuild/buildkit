@@ -45,6 +45,7 @@ type mount struct {
 	cacheID      string
 	tmpfs        bool
 	tmpfsOpt     TmpfsInfo
+	hostBind     bool // earthly-specific
 	cacheSharing CacheMountSharingMode
 	noOutput     bool
 	contentCache MountContentCache
@@ -60,6 +61,7 @@ type ExecOp struct {
 	isValidated bool
 	secrets     []SecretInfo
 	ssh         []SSHInfo
+	socket      []SocketInfo // earthly-specific
 	cdiDevices  []CDIDeviceInfo
 }
 
@@ -325,6 +327,9 @@ func (e *ExecOp) Marshal(ctx context.Context, c *Constraints) (digest.Digest, []
 	if len(e.ssh) > 0 {
 		addCap(&e.constraints, pb.CapExecMountSSH)
 	}
+	if len(e.socket) > 0 {
+		addCap(&e.constraints, pb.CapExecMountSock)
+	}
 
 	if len(e.cdiDevices) > 0 {
 		addCap(&e.constraints, pb.CapExecMetaCDI)
@@ -421,6 +426,9 @@ func (e *ExecOp) Marshal(ctx context.Context, c *Constraints) (digest.Digest, []
 				Size: m.tmpfsOpt.Size,
 			}
 		}
+		if m.hostBind { // earthly
+			pm.MountType = pb.MountType_HOST_BIND
+		}
 		peo.Mounts = append(peo.Mounts, pm)
 	}
 
@@ -463,6 +471,19 @@ func (e *ExecOp) Marshal(ctx context.Context, c *Constraints) (digest.Digest, []
 			},
 		}
 		peo.Mounts = append(peo.Mounts, pm)
+	}
+
+	for _, s := range e.socket {
+		peo.Mounts = append(peo.Mounts, &pb.Mount{
+			Dest:      s.Target,
+			MountType: pb.MountType_SOCKET,
+			SockOpt: &pb.SockOpt{
+				ID:   s.ID,
+				Uid:  uint32(s.UID),
+				Gid:  uint32(s.GID),
+				Mode: uint32(s.Mode),
+			},
+		})
 	}
 
 	dt, err := deterministicMarshal(pop)
@@ -592,6 +613,12 @@ func TmpfsSize(b int64) TmpfsOption {
 
 type TmpfsInfo struct {
 	Size int64
+}
+
+func HostBind() MountOption { // earthly-specific
+	return func(m *mount) {
+		m.hostBind = true
+	}
 }
 
 type RunOption interface {
@@ -755,6 +782,27 @@ type SSHInfo struct {
 	Optional bool
 }
 
+// SocketTarget mounts a unix socket which is forwarded back to a socketpriver session attachable; earthly-specific
+func SocketTarget(id, target string, mode, uid, gid int) RunOption {
+	return runOptionFunc(func(ei *ExecInfo) {
+		ei.Socket = append(ei.Socket, SocketInfo{
+			ID:     id,
+			Target: target,
+			Mode:   mode,
+			UID:    uid,
+			GID:    gid,
+		})
+	})
+}
+
+type SocketInfo struct {
+	ID     string
+	Target string
+	Mode   int
+	UID    int
+	GID    int
+}
+
 // AddSecret is a RunOption that adds a secret to the exec.
 func AddSecret(dest string, opts ...SecretOption) RunOption {
 	return runOptionFunc(func(ei *ExecInfo) {
@@ -866,6 +914,7 @@ type ExecInfo struct {
 	ProxyEnv       *ProxyEnv
 	Secrets        []SecretInfo
 	SSH            []SSHInfo
+	Socket         []SocketInfo // earthly-specific
 	CDIDevices     []CDIDeviceInfo
 }
 

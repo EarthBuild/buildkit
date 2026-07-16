@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/cache"
@@ -17,7 +20,9 @@ import (
 	resourcestypes "github.com/moby/buildkit/executor/resources/types"
 	"github.com/moby/buildkit/frontend/gateway/container"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/session/localhost"
 	"github.com/moby/buildkit/session/secrets"
+	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/llbsolver/errdefs"
 	"github.com/moby/buildkit/solver/llbsolver/mounts"
@@ -25,13 +30,13 @@ import (
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/cachedigest"
 	"github.com/moby/buildkit/util/progress/logs"
+	"github.com/moby/buildkit/util/semutil"
 	utilsystem "github.com/moby/buildkit/util/system"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sync/semaphore"
 )
 
 const execCacheType = "buildkit.exec.v0"
@@ -45,14 +50,31 @@ type ExecOp struct {
 	w           worker.Worker
 	platform    *pb.Platform
 	numInputs   int
-	parallelism *semaphore.Weighted
+	parallelism *semutil.Weighted // earthly-specific: use *semutil.Weighted instead of *semaphore.Weighted
 	rec         resourcestypes.Recorder
 	digest      digest.Digest
 }
 
 var _ solver.Op = &ExecOp{}
 
-func NewExecOp(v solver.Vertex, op *pb.Op_Exec, platform *pb.Platform, cm cache.Manager, parallelism *semaphore.Weighted, sm *session.Manager, exec executor.Executor, w worker.Worker) (*ExecOp, error) {
+// earthly-specific: a custom exec limit for certain customers.
+
+var errExecTimeoutExceeded = errors.New("max execution time exceeded")
+var execTimeout time.Duration
+
+func init() {
+	env, ok := os.LookupEnv("BUILDKIT_EXEC_TIMEOUT")
+	if !ok {
+		return
+	}
+	var err error
+	execTimeout, err = time.ParseDuration(env)
+	if err != nil {
+		panic(fmt.Sprintf("invalid value for 'BUILDKIT_EXEC_TIMEOUT': %s", env))
+	}
+}
+
+func NewExecOp(v solver.Vertex, op *pb.Op_Exec, platform *pb.Platform, cm cache.Manager, parallelism *semutil.Weighted, sm *session.Manager, exec executor.Executor, w worker.Worker) (*ExecOp, error) {
 	if err := opsutils.Validate(&pb.Op{Op: op}); err != nil {
 		return nil, err
 	}
@@ -495,12 +517,38 @@ func (e *ExecOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []so
 		}
 	}()
 
-	rec, execErr := e.exec.Run(ctx, "", p.Root, p.Mounts, executor.ProcessInfo{
-		Meta:   meta,
-		Stdin:  nil,
-		Stdout: stdout,
-		Stderr: stderr,
-	}, nil)
+	// earthly-specific
+	statsStream, statsFlush := logs.NewStatsStreams(ctx, os.Getenv("BUILDKIT_DEBUG_EXEC_OUTPUT") == "1")
+	defer func() {
+		if err != nil {
+			statsFlush()
+		}
+	}()
+
+	isLocal, err := e.doFromLocalHack(ctx, p.Root, p.Mounts, g, meta, stdout, stderr)
+	if err != nil {
+		return nil, err
+	}
+	// earthly-specific TODO: should the rec be set to a nopRecord, or can nil be safely used instead?
+
+	// earthly-specific: enforce a time limit for certain customers.
+	if execTimeout > 0 {
+		var cancel func()
+		ctx, cancel = context.WithTimeoutCause(ctx, execTimeout, errExecTimeoutExceeded)
+		defer cancel()
+	}
+
+	var execErr error
+	var rec resourcestypes.Recorder
+	if !isLocal {
+		rec, execErr = e.exec.Run(ctx, "", p.Root, p.Mounts, executor.ProcessInfo{
+			Meta:        meta,
+			Stdin:       nil,
+			Stdout:      stdout,
+			Stderr:      stderr,
+			StatsStream: statsStream, // earthly-specific
+		}, nil)
+	}
 
 	for i, out := range p.OutputRefs {
 		if mutable, ok := out.Ref.(cache.MutableRef); ok {
@@ -516,7 +564,184 @@ func (e *ExecOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []so
 		p.OutputRefs[i].Ref = nil
 	}
 	e.rec = rec
-	return results, errors.Wrapf(execErr, "process %q did not complete successfully", strings.Join(e.op.Meta.Args, " "))
+
+	// earthly-specific: customize error message on exec timeout.
+	retErr := errors.Wrapf(execErr, "process %q did not complete successfully", strings.Join(e.op.Meta.Args, " "))
+	if cause := context.Cause(ctx); errors.Is(cause, errExecTimeoutExceeded) {
+		retErr = errors.Errorf("max execution time of %s exceeded", execTimeout)
+	}
+
+	return results, retErr
+}
+
+// earthly-specific
+func (e *ExecOp) doFromLocalHack(ctx context.Context, root executor.Mount, mounts []executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) (bool, error) {
+	var cmd string
+	if len(meta.Args) > 0 {
+		cmd = meta.Args[0]
+	}
+	switch cmd {
+	case localhost.CopyFileMagicStr:
+		return true, e.copyLocally(ctx, root, g, meta, stdout, stderr)
+	case localhost.RunOnLocalHostMagicStr:
+		return true, e.execLocally(ctx, root, g, meta, stdout, stderr)
+	case localhost.SendFileMagicStr:
+		return true, e.sendLocally(ctx, root, mounts, g, meta, stdout, stderr)
+	default:
+		return false, nil
+	}
+}
+
+func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session.Group, meta executor.Meta, _, _ io.WriteCloser) error {
+	if len(meta.Args) != 3 {
+		return errors.Errorf("CopyFileMagicStr takes exactly 2 args")
+	}
+	if meta.Args[0] != localhost.CopyFileMagicStr {
+		panic("arg[0] must be CopyFileMagicStr; this should not have happened")
+	}
+	src := meta.Args[1]
+	if !strings.HasPrefix(src, "/") && meta.Cwd != "" {
+		src = filepath.Join(meta.Cwd, src)
+	}
+	src = filepath.Clean(src)
+	dst := meta.Args[2]
+
+	if src == "/" {
+		return errors.Errorf("copyLocally does not support copying the entire root filesystem")
+	}
+
+	if strings.HasSuffix(dst, ".") || strings.HasSuffix(dst, "/") {
+		dst = filepath.Join(dst, filepath.Base(src))
+	}
+
+	return e.sm.Any(ctx, g, func(ctx context.Context, _ string, caller session.Caller) error {
+		mountable, err := root.Src.Mount(ctx, false)
+		if err != nil {
+			return err
+		}
+
+		rootMounts, release, err := mountable.Mount()
+		if err != nil {
+			return err
+		}
+		if release != nil {
+			defer release()
+		}
+
+		lm := snapshot.LocalMounterWithMounts(rootMounts)
+		rootfsPath, err := lm.Mount()
+		if err != nil {
+			return err
+		}
+		defer lm.Unmount()
+
+		finalDest := rootfsPath + "/" + dst
+		err = localhost.LocalhostGet(ctx, caller, src, finalDest, mountable)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+var errSendFileMagicStrMissingArgs = errors.Errorf("SendFileMagicStr args missing; should be SendFileMagicStr [--dir] [--] <src> [<src> ...] <dst>")
+
+func (e *ExecOp) sendLocally(ctx context.Context, _ executor.Mount, mounts []executor.Mount, g session.Group, meta executor.Meta, _, _ io.WriteCloser) error {
+	i := 0
+	nArgs := len(meta.Args)
+
+	if i >= nArgs || meta.Args[i] != localhost.SendFileMagicStr {
+		return errSendFileMagicStrMissingArgs
+	}
+	i++
+
+	// check for --dir
+	copyDir := false
+	if i >= nArgs {
+		return errSendFileMagicStrMissingArgs
+	}
+	if meta.Args[i] == "--dir" {
+		copyDir = true
+		i++
+	}
+
+	// check for -
+	if i >= nArgs {
+		return errSendFileMagicStrMissingArgs
+	}
+	if meta.Args[i] == "-" {
+		i++
+	}
+
+	dstIndex := len(meta.Args) - 1
+	numFiles := dstIndex - i
+	if numFiles <= 0 {
+		return errors.Errorf("SendFileMagicStr args missing; should be SendFileMagicStr [--dir] [--] <src> [<src> ...] <dst>")
+	}
+	files := meta.Args[i:dstIndex]
+	dst := meta.Args[dstIndex]
+
+	if len(mounts) != 1 {
+		return errors.Errorf("SendFileMagicStr must be given a mount with the artifacts to copy from")
+	}
+
+	return e.sm.Any(ctx, g, func(ctx context.Context, _ string, caller session.Caller) error {
+		mnt := mounts[0]
+
+		mountable2, err := mnt.Src.Mount(ctx, false)
+		if err != nil {
+			return err
+		}
+
+		mounts, release, err := mountable2.Mount()
+		if err != nil {
+			return err
+		}
+		if release != nil {
+			defer release()
+		}
+
+		lm := snapshot.LocalMounterWithMounts(mounts)
+		hackfsPath, err := lm.Mount()
+		if err != nil {
+			return err
+		}
+		defer lm.Unmount()
+
+		for _, f := range files {
+			finalSrc := hackfsPath + "/" + f
+			var finalDst string
+			if dst == "." || strings.HasSuffix(dst, "/") || strings.HasSuffix(dst, "/.") || copyDir {
+				finalDst = path.Join(dst, path.Base(f))
+			} else {
+				finalDst = dst
+			}
+			if !strings.HasPrefix(dst, "/") && meta.Cwd != "" {
+				finalDst = path.Join(meta.Cwd, finalDst)
+			}
+			err = localhost.LocalhostPut(ctx, caller, finalSrc, finalDst)
+			if err != nil {
+				return errors.Wrap(err, "error calling LocalhostExec")
+			}
+		}
+		return nil
+	})
+}
+
+func (e *ExecOp) execLocally(ctx context.Context, _ executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
+	if len(meta.Args) == 0 || meta.Args[0] != localhost.RunOnLocalHostMagicStr {
+		panic("first arg should be RunOnLocalHostMagicStr; this should not happen")
+	}
+	args := meta.Args[1:] // remove magic uuid from command prefix; the rest that follows is the actual command to run
+	cwd := meta.Cwd
+
+	return e.sm.Any(ctx, g, func(ctx context.Context, _ string, caller session.Caller) error {
+		err := localhost.LocalhostExec(ctx, caller, args, cwd, stdout, stderr)
+		if err != nil {
+			return errors.Wrap(err, "error calling LocalhostExec")
+		}
+		return nil
+	})
 }
 
 func proxyEnvList(p *pb.ProxyEnv) []string {

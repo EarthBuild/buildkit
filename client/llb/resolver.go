@@ -5,6 +5,10 @@ import (
 	digest "github.com/opencontainers/go-digest"
 )
 
+// ResolveImageConfigOpt is an earthly-specific type alias for backward compatibility.
+// Upstream refactored this into sourceresolver.Opt.
+type ResolveImageConfigOpt = sourceresolver.Opt
+
 // WithMetaResolver adds a metadata resolver to an image
 func WithMetaResolver(mr ImageMetaResolver) ImageOption {
 	return imageOptionFunc(func(ii *ImageInfo) {

@@ -31,6 +31,9 @@ const (
 	CapSourceGitKnownSSHHosts   apicaps.CapID = "source.git.knownsshhosts"
 	CapSourceGitMountSSHSock    apicaps.CapID = "source.git.mountsshsock"
 	CapSourceGitSubdir          apicaps.CapID = "source.git.subdir"
+	CapSourceGitLFSInclude      apicaps.CapID = "source.git.lfsinclude" // earthly-specific
+	CapSourceGitLogLevel        apicaps.CapID = "source.git.logLevel"   // earthly-specific
+	CapSourceGitSSHCommand      apicaps.CapID = "source.git.sshCommand" // earthly-specific
 	CapSourceGitChecksum        apicaps.CapID = "source.git.checksum"
 	CapSourceGitSkipSubmodules  apicaps.CapID = "source.git.skipsubmodules"
 	CapSourceGitSignatureVerify apicaps.CapID = "source.git.signatureverify"
@@ -70,6 +73,7 @@ const (
 	CapExecMountTmpfsSize                apicaps.CapID = "exec.mount.tmpfs.size"
 	CapExecMountSecret                   apicaps.CapID = "exec.mount.secret"
 	CapExecMountSSH                      apicaps.CapID = "exec.mount.ssh"
+	CapExecMountSock                     apicaps.CapID = "exec.mount.sock"
 	CapExecMountContentCache             apicaps.CapID = "exec.mount.cache.content"
 	CapExecCgroupsMounted                apicaps.CapID = "exec.cgroup"
 	CapExecSecretEnv                     apicaps.CapID = "exec.secretenv"
@@ -115,6 +119,8 @@ const (
 
 	// ListenBuildHistory requests support server-side filters
 	CapHistoryFilters apicaps.CapID = "history.filter"
+
+	CapEarthlyRegistryProxy apicaps.CapID = "earthly.regproxy" // earthly-specific
 )
 
 func init() {
@@ -234,6 +240,24 @@ func init() {
 
 	Caps.Init(apicaps.Cap{
 		ID:      CapSourceGitSubdir,
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
+		ID:      CapSourceGitLFSInclude,
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
+		ID:      CapSourceGitLogLevel,
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
+		ID:      CapSourceGitSSHCommand,
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
 	})
@@ -431,6 +455,12 @@ func init() {
 	})
 
 	Caps.Init(apicaps.Cap{
+		ID:      CapExecMountSock,
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
 		ID:      CapExecMountContentCache,
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
@@ -611,6 +641,12 @@ func init() {
 
 	Caps.Init(apicaps.Cap{
 		ID:      CapHistoryFilters,
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
+		ID:      CapEarthlyRegistryProxy,
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
 	})

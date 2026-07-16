@@ -78,6 +78,7 @@ type Controller interface {
 type Manager interface {
 	Accessor
 	Controller
+	GetGCAnalytics() (GCSummary, *GCRunAnalytics, *GCRunAnalytics)
 	Close() error
 }
 
@@ -103,8 +104,9 @@ type cacheManager struct {
 
 	mountPool sharableMountPool
 
-	muPrune sync.Mutex // make sure parallel prune is not allowed so there will not be inconsistent results
-	unlazyG flightcontrol.Group[struct{}]
+	muPrune     sync.Mutex  // make sure parallel prune is not allowed so there will not be inconsistent results
+	GCAnalytics GCAnalytics // earthly-specific.
+	unlazyG     flightcontrol.Group[struct{}]
 }
 
 func NewManager(opt ManagerOpt) (Manager, error) {
@@ -134,6 +136,10 @@ func NewManager(opt ManagerOpt) (Manager, error) {
 	// cm.scheduleGC(5 * time.Minute)
 
 	return cm, nil
+}
+
+func (cm *cacheManager) GetGCAnalytics() (GCSummary, *GCRunAnalytics, *GCRunAnalytics) {
+	return cm.GCAnalytics.GetStats()
 }
 
 func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor, parent ImmutableRef, opts ...RefOption) (ir ImmutableRef, rerr error) {
@@ -1048,8 +1054,15 @@ func (cm *cacheManager) prune(ctx context.Context, ch chan client.UsageInfo, opt
 		check = c
 	}
 
+	// earthly-specific: create an intermediate channel which is used to
+	// collect GC-related metrics.
+	interCh := ch
 	totalSize := int64(0)
-	if opt.MaxUsedSpace != 0 || opt.ReservedSpace != 0 || opt.MinFreeSpace != 0 {
+	success := true
+	gcMode := (opt.MaxUsedSpace != 0 || opt.ReservedSpace != 0 || opt.MinFreeSpace != 0)
+	doneCh := make(chan struct{})
+	if gcMode {
+		totalRecords := int64(0)
 		du, err := cm.DiskUsage(ctx, client.DiskUsageInfo{})
 		if err != nil {
 			return err
@@ -1060,6 +1073,31 @@ func (cm *cacheManager) prune(ctx context.Context, ch chan client.UsageInfo, opt
 			}
 			totalSize += ui.Size
 		}
+		totalRecords = int64(len(du))
+
+		cm.GCAnalytics.Start(totalRecords, totalSize)
+		interCh = make(chan client.UsageInfo, 1)
+		go func() {
+			clearedRecords := int64(0)
+			clearedSize := int64(0)
+			defer func() {
+				cm.GCAnalytics.End(success, clearedRecords, clearedSize)
+				close(doneCh)
+			}()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case ui, ok := <-interCh:
+					if !ok {
+						return
+					}
+					ch <- ui
+					clearedRecords++
+					clearedSize += ui.Size
+				}
+			}
+		}()
 	}
 
 	var dstat disk.DiskStat
@@ -1078,13 +1116,23 @@ func (cm *cacheManager) prune(ctx context.Context, ch chan client.UsageInfo, opt
 		keepBytes:    calculateKeepBytes(totalSize, dstat, opt),
 		totalSize:    totalSize,
 	}
+	var retErr error
 	for {
-		releasedSize, releasedCount, err := cm.pruneOnce(ctx, ch, popt)
+		releasedSize, releasedCount, err := cm.pruneOnce(ctx, interCh, popt)
 		if err != nil || releasedCount == 0 {
-			return err
+			retErr = err
+			break
 		}
 		popt.totalSize -= releasedSize
 	}
+	if retErr != nil {
+		success = false
+	}
+	if gcMode {
+		close(interCh)
+		<-doneCh
+	}
+	return retErr
 }
 
 func calculateKeepBytes(totalSize int64, dstat disk.DiskStat, opt client.PruneInfo) int64 {

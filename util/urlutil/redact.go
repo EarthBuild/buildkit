@@ -2,6 +2,8 @@ package urlutil
 
 import (
 	"net/url"
+	"regexp"
+	"strings"
 )
 
 const mask = "xxxxx"
@@ -30,4 +32,20 @@ func RedactCredentials(s string) string {
 		ru.User = url.UserPassword(ru.User.Username(), mask)
 	}
 	return ru.String()
+}
+
+var urlRegexp = regexp.MustCompile(`(https?://\S+)`)
+
+// RedactAllCredentials is earthly-specific
+func RedactAllCredentials(s string) string {
+	var sb strings.Builder
+	matches := urlRegexp.FindAllStringIndex(s, -1)
+	i := 0
+	for _, m := range matches {
+		sb.WriteString(s[i:m[0]])
+		sb.WriteString(RedactCredentials(s[m[0]:m[1]]))
+		i = m[1]
+	}
+	sb.WriteString(s[i:])
+	return sb.String()
 }

@@ -22,6 +22,7 @@ import (
 	sessioncontent "github.com/moby/buildkit/session/content"
 	"github.com/moby/buildkit/session/filesync"
 	"github.com/moby/buildkit/session/grpchijack"
+	"github.com/moby/buildkit/session/pullping"
 	"github.com/moby/buildkit/solver/pb"
 	spb "github.com/moby/buildkit/sourcepolicy/pb"
 	"github.com/moby/buildkit/util/bklog"
@@ -57,11 +58,14 @@ type SolveOpt struct {
 }
 
 type ExportEntry struct {
-	Type        string
-	Attrs       map[string]string
-	Output      filesync.FileOutputFunc // for ExporterOCI and ExporterDocker
-	OutputDir   string                  // for ExporterLocal
-	OutputStore content.Store
+	Type               string
+	Attrs              map[string]string
+	Output             func(map[string]string) (io.WriteCloser, error) // for ExporterOCI, ExporterDocker and ExporterEarthly
+	OutputDir          string                                          // for ExporterLocal
+	OutputDirFunc      func(map[string]string) (string, error)         // for ExporterEarthly
+	OutputPullCallback pullping.PullCallback                           // for ExporterEarthly
+	OutputStore        content.Store
+	OnReceiveProgress  func(bytes int, done bool) // earthly-specific: cumulative received-bytes callback (fsutil ProgressCb)
 }
 
 type CacheOptionsEntry struct {
@@ -169,6 +173,8 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 				if supportFile && supportStore {
 					return nil, errors.Errorf("both file and store output is not supported by %s exporter", ex.Type)
 				}
+			case ExporterEarthly: // earthly-specific
+				supportFile = true
 			}
 			if !supportFile && ex.Output != nil {
 				return nil, errors.Errorf("output file writer is not supported by %s exporter", ex.Type)
@@ -183,7 +189,15 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 				if ex.Output == nil {
 					return nil, errors.Errorf("output file writer is required for %s exporter", ex.Type)
 				}
-				syncTargets = append(syncTargets, filesync.WithFSSync(exID, ex.Output))
+				// earthly-specific: ExporterEarthly uses multi-target with pull callback
+				if ex.Type == ExporterEarthly {
+					if ex.OutputPullCallback != nil {
+						s.Allow(pullping.NewPullPing(ex.OutputPullCallback))
+					}
+					s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.OnReceiveProgress))
+				} else {
+					syncTargets = append(syncTargets, filesync.WithFSSync(exID, ex.Output))
+				}
 			}
 			if supportDir {
 				if ex.OutputDir == "" {
@@ -235,6 +249,9 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 	}
 
 	frontendAttrs := maps.Clone(opt.FrontendAttrs)
+	if frontendAttrs == nil {
+		frontendAttrs = map[string]string{}
+	}
 	maps.Copy(frontendAttrs, cacheOpt.frontendAttrs)
 
 	const statusInactivityTimeout = 5 * time.Second
@@ -351,7 +368,8 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 
 	eg.Go(func() error {
 		stream, err := c.ControlClient().Status(statusContext, &controlapi.StatusRequest{
-			Ref: ref,
+			Ref:         ref,
+			StatsStream: true, // earthly-specific request stats be streamed back
 		})
 		if err != nil {
 			return errors.Wrap(err, "failed to get status")
@@ -591,6 +609,15 @@ func prepareMounts(opt *SolveOpt) (map[string]fsutil.FS, error) {
 	// merge local mounts and fallback local directories together
 	mounts := make(map[string]fsutil.FS)
 	maps.Copy(mounts, opt.LocalMounts)
+
+	// TODO: earthly-specific hack used to do:
+	//	if localDirs == nil {
+	//		// Earthly specific - skip resolving local dirs found in the definition.
+	//		return nil, nil
+	//	}
+	// inside prepareSyncedDirs, which has been renamed to prepareSyncedFiles, and that code
+	// was moved into prepareMounts, which now also has a LocalMounts above
+
 	for k, dir := range opt.LocalDirs {
 		mount, err := fsutil.NewFS(dir)
 		if err != nil {

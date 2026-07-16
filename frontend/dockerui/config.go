@@ -81,6 +81,7 @@ type Client struct {
 	Config
 	client           client.Client
 	ignoreCache      []string
+	bctx             *buildContext // earthly-specific
 	g                flightcontrol.CachedGroup[*buildContext]
 	bopts            client.BuildOpts
 	localsSessionIDs map[string]string
@@ -308,9 +309,24 @@ func (bc *Client) init() error {
 	return nil
 }
 
+// Earthly specific
+func (bc *Client) SetBuildContext(context *llb.State, contextName string) {
+	bc.bctx = &buildContext{
+		context:          context,
+		contextLocalName: contextName,
+	}
+}
+
 func (bc *Client) buildContext(ctx context.Context) (*buildContext, error) {
 	return bc.g.Do(ctx, "initcontext", func(ctx context.Context) (*buildContext, error) {
-		return bc.initContext(ctx)
+		if bc.bctx != nil {
+			return bc.bctx, nil
+		}
+		bctx, err := bc.initContext(ctx)
+		if err == nil {
+			bc.bctx = bctx
+		}
+		return bctx, err
 	})
 }
 

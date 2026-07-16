@@ -7,10 +7,12 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
 	"github.com/containerd/containerd/v2/defaults"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client/connhelper"
 	"github.com/moby/buildkit/session"
@@ -43,15 +45,21 @@ type ClientOpt interface {
 // New returns a new buildkit client. Address can be empty for the system-default address.
 func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error) {
 	gopts := []grpc.DialOption{
+		grpc.WithInitialWindowSize(65535 * 32),     // earthly
+		grpc.WithInitialConnWindowSize(65535 * 16), // earthly
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
+		grpc.WithDefaultCallOptions(grpc_retry.WithMax(8)),                                                                     // earthly
+		grpc.WithDefaultCallOptions(grpc_retry.WithBackoff(grpc_retry.BackoffExponentialWithJitter(10*time.Millisecond, 0.1))), // earthly
 	}
 	needDialer := true
+	useDefaultDialer := false // earthly-specific
 
 	var customTracer bool // allows manually setting disabling tracing even if tracer in context
 	var tracerProvider trace.TracerProvider
 	var tracerDelegate TracerDelegate
 	var sessionDialer func(context.Context, string, map[string][]string) (net.Conn, error)
+	var headersKV []string // earthly-specific
 	var customDialOptions []grpc.DialOption
 	var creds *withCredentials
 
@@ -76,6 +84,17 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		if sd, ok := o.(*withSessionDialer); ok {
 			sessionDialer = sd.dialer
 		}
+
+		// earthly-specific
+		if h, ok := o.(*withAdditionalHeaders); ok {
+			headersKV = h.kv
+		}
+
+		// earthly-specific
+		if _, ok := o.(*withDefaultGRPCDialer); ok {
+			useDefaultDialer = true
+		}
+
 		if opt, ok := o.(*withGRPCDialOption); ok {
 			customDialOptions = append(customDialOptions, opt.opt)
 		}
@@ -108,7 +127,7 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		))
 	}
 
-	if needDialer {
+	if needDialer && !useDefaultDialer {
 		dialFn, err := resolveDialer(address)
 		if err != nil {
 			return nil, err
@@ -147,9 +166,24 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 	}
 
 	gopts = append(gopts, grpc.WithAuthority(authority))
+
+	// earthly-specific: chain headers interceptors when additional headers are configured
+	if len(headersKV) > 0 {
+		gopts = append(gopts, grpc.WithChainUnaryInterceptor(headersUnaryInterceptor(headersKV...)))
+		gopts = append(gopts, grpc.WithChainStreamInterceptor(headersStreamInterceptor(headersKV...)))
+	}
+
 	gopts = append(gopts, grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor))
 	gopts = append(gopts, grpc.WithStreamInterceptor(grpcerrors.StreamClientInterceptor))
 	gopts = append(gopts, customDialOptions...)
+
+	// earthly-specific
+	if useDefaultDialer {
+		split := strings.Split(address, "://")
+		if len(split) > 0 {
+			address = split[1]
+		}
+	}
 
 	// ignore SA1019 NewClient has different behavior and needs to be tested
 	//nolint:staticcheck

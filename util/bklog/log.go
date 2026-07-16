@@ -5,6 +5,7 @@ import (
 	"runtime/debug"
 
 	"github.com/containerd/log"
+	"github.com/moby/buildkit/version"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -19,6 +20,14 @@ var (
 	G = GetLogger
 	L = logrus.NewEntry(logrus.StandardLogger())
 )
+
+var (
+	logWithTraceID = false
+)
+
+func EnableLogWithTraceID(b bool) {
+	logWithTraceID = b
+}
 
 type (
 	loggerKey struct{}
@@ -43,11 +52,19 @@ func GetLogger(ctx context.Context) (l *logrus.Entry) {
 		l = L
 	}
 
-	if spanContext := trace.SpanFromContext(ctx).SpanContext(); spanContext.IsValid() {
-		return l.WithFields(logrus.Fields{
-			"traceID": spanContext.TraceID(),
-			"spanID":  spanContext.SpanID(),
-		})
+	// earthly-specific
+	l = l.WithFields(logrus.Fields{
+		"version":  version.Version,
+		"revision": version.Revision,
+	})
+
+	if logWithTraceID {
+		if spanContext := trace.SpanFromContext(ctx).SpanContext(); spanContext.IsValid() {
+			return l.WithFields(logrus.Fields{
+				"traceID": spanContext.TraceID(),
+				"spanID":  spanContext.SpanID(),
+			})
+		}
 	}
 
 	return l

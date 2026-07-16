@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/containerd/containerd/v2/defaults"
@@ -22,6 +23,8 @@ import (
 	"github.com/containerd/platforms"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/gofrs/flock"
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	regproxy "github.com/moby/buildkit/api/services/registry"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/cache/remotecache/azblob"
 	"github.com/moby/buildkit/cache/remotecache/gha"
@@ -33,6 +36,7 @@ import (
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	"github.com/moby/buildkit/control"
 	"github.com/moby/buildkit/executor/oci"
+	"github.com/moby/buildkit/exporter/earthlyoutputs/registry"
 	"github.com/moby/buildkit/frontend"
 	dockerfile "github.com/moby/buildkit/frontend/dockerfile/builder"
 	"github.com/moby/buildkit/frontend/gateway"
@@ -117,6 +121,11 @@ func registerWorkerInitializer(wi workerInitializer, flags ...cli.Flag) {
 }
 
 func main() {
+	// Disable gRPC ALPN enforcement to allow mixed grpc-go versions
+	// between earthly client and buildkitd during the upgrade transition.
+	// TODO: remove once all released earthly binaries use grpc-go >= 1.67
+	os.Setenv("GRPC_ENFORCE_ALPN_ENABLED", "false")
+
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Println(c.App.Name, version.Package, c.App.Version, version.Revision)
 	}
@@ -273,6 +282,8 @@ func main() {
 			logrus.SetLevel(logrus.TraceLevel)
 		}
 
+		logrus.SetOutput(os.Stderr) // earthly-specific: force logs to show up under earthly-buildkitd container logs
+
 		if sc := cfg.System; sc != nil {
 			if v := sc.PlatformsCacheMaxAge; v != nil {
 				archutil.CacheMaxAge = v.Duration
@@ -302,12 +313,21 @@ func main() {
 			otelgrpc.WithMeterProvider(mp),
 			otelgrpc.WithPropagators(propagators),
 		)
+
+		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor, grpcerrors.UnaryServerInterceptor,
+			unaryTimeoutInterceptor(), // earthly-specific
+		)
+		stream := grpc_middleware.ChainStreamServer(grpcerrors.StreamServerInterceptor,
+			streamTimeoutInterceptor(), // earthly-specific
+		)
+
 		opts := []grpc.ServerOption{
 			grpc.StatsHandler(statsHandler),
-			grpc.ChainUnaryInterceptor(unaryInterceptor, grpcerrors.UnaryServerInterceptor),
-			grpc.StreamInterceptor(grpcerrors.StreamServerInterceptor),
+			grpc.UnaryInterceptor(unary), grpc.StreamInterceptor(stream),
 			grpc.MaxRecvMsgSize(defaults.DefaultMaxRecvMsgSize),
 			grpc.MaxSendMsgSize(defaults.DefaultMaxSendMsgSize),
+			grpc.InitialWindowSize(65535 * 32),
+			grpc.InitialConnWindowSize(65535 * 16),
 		}
 		server := grpc.NewServer(opts...)
 
@@ -345,6 +365,8 @@ func main() {
 			os.RemoveAll(lockPath)
 		}()
 
+		shutdownCh := make(chan struct{})
+
 		// listeners have to be initialized before the controller
 		// https://github.com/moby/buildkit/issues/4618
 		listeners, err := newGRPCListeners(cfg.GRPC)
@@ -361,7 +383,7 @@ func main() {
 			defer db.Close()
 		}
 
-		controller, err := newController(ctx, c, &cfg)
+		controller, err := newController(ctx, c, &cfg, shutdownCh)
 		if err != nil {
 			return err
 		}
@@ -370,6 +392,35 @@ func main() {
 		healthv1.RegisterHealthServer(server, health.NewServer())
 		controller.Register(server)
 		reflection.Register(server)
+
+		// Earthly specific.
+		ctxReg, cancelReg := context.WithCancelCause(ctx)
+		defer cancelReg(nil)
+		lrPort, ok := os.LookupEnv("BUILDKIT_LOCAL_REGISTRY_LISTEN_PORT")
+		lrAddr := fmt.Sprintf("0.0.0.0:%s", lrPort)
+		if ok {
+			bklog.G(ctx).Infof("Starting local registry for outputs on port %s", lrPort)
+			serveErr := registry.Serve(ctxReg, lrAddr)
+			go func() {
+				for {
+					select {
+					case <-shutdownCh:
+						cancelReg(nil)
+					case err := <-serveErr:
+						if err != nil {
+							bklog.G(ctx).Errorf("Registry serve error: %s\n", err.Error())
+						}
+						return
+					case <-ctxReg.Done():
+						return
+					}
+				}
+			}()
+		}
+
+		// Earthly specific.
+		reg := regproxy.NewServer(lrAddr)
+		regproxy.RegisterRegistryServer(server, reg)
 
 		ents := c.GlobalStringSlice("allow-insecure-entitlement")
 		if len(ents) > 0 {
@@ -404,6 +455,9 @@ func main() {
 			cancel(err)
 		case <-ctx.Done():
 			err = context.Cause(ctx)
+		case <-shutdownCh:
+			cancelReg(nil)
+			err = nil
 		}
 
 		bklog.G(ctx).Infof("stopping server")
@@ -542,6 +596,18 @@ func setDefaultConfig(cfg *config.Config) {
 		cfg.GRPC.Address = []string{appdefaults.Address}
 	}
 
+	if cfg.Health.Frequency == 0 {
+		cfg.Health.Frequency = appdefaults.HealthFrequency
+	}
+
+	if cfg.Health.Timeout == 0 {
+		cfg.Health.Timeout = appdefaults.HealthTimeout
+	}
+
+	if cfg.Health.AllowedFailures == 0 {
+		cfg.Health.AllowedFailures = appdefaults.HealthAllowedFailures
+	}
+
 	if cfg.Workers.OCI.Platforms == nil {
 		cfg.Workers.OCI.Platforms = formatPlatforms(archutil.SupportedPlatforms(false))
 	}
@@ -560,6 +626,10 @@ func setDefaultConfig(cfg *config.Config) {
 			cfg.GRPC.Address = []string{appdefaults.UserAddress()}
 		}
 		appdefaults.EnsureUserAddressDir()
+	}
+
+	if cfg.Workers.OCI.SampleFrequency == 0 {
+		cfg.Workers.OCI.SampleFrequency = time.Second
 	}
 
 	if cfg.OTEL.SocketPath == "" {
@@ -779,8 +849,13 @@ func serverCredentials(cfg config.TLSConfig) (*tls.Config, error) {
 	return tlsConf, nil
 }
 
-func newController(ctx context.Context, c *cli.Context, cfg *config.Config) (*control.Controller, error) {
-	sessionManager, err := session.NewManager()
+func newController(ctx context.Context, c *cli.Context, cfg *config.Config, shutdownCh chan struct{}) (*control.Controller, error) {
+	sessionManager, err := session.NewManager(&session.ManagerOpt{
+		HealthFrequency:       cfg.Health.Frequency,
+		HealthAllowedFailures: cfg.Health.AllowedFailures,
+		HealthTimeout:         cfg.Health.Timeout,
+		ShutdownCh:            shutdownCh,
+	})
 	if err != nil {
 		return nil, err
 	}

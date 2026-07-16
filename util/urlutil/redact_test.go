@@ -42,3 +42,35 @@ func TestRedactCredentials(t *testing.T) {
 		})
 	}
 }
+
+// TestRedactAllCredentials is earthly specific
+func TestRedactAllCredentials(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{
+			name: "zero urls",
+			url:  "one two three",
+			want: "one two three",
+		},
+		{
+			name: "two urls",
+			url:  "one two https://user:password@host.tld/this:that three http://abc@earthly.dev four",
+			want: "one two https://xxxxx:xxxxx@host.tld/this:that three http://xxxxx@earthly.dev four",
+		},
+		{
+			name: "two urls at edges",
+			url:  "https://user:password@host.tld/this:that middle http://abc@earthly.dev",
+			want: "https://xxxxx:xxxxx@host.tld/this:that middle http://xxxxx@earthly.dev",
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if g, w := RedactAllCredentials(tt.url), tt.want; g != w {
+				t.Fatalf("got: %q\nwant: %q", g, w)
+			}
+		})
+	}
+}

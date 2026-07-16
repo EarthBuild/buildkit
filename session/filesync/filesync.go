@@ -247,6 +247,75 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 	return pr.recvFn(stream, opt.DestDir, opt.CacheUpdater, opt.ProgressCb, opt.Differ, opt.Filter, metadataOnlyFilter)
 }
 
+// NewFSSyncTargetDir allows writing into a directory
+// earthly-specific: progressFn reports cumulative received bytes (fsutil ProgressCb)
+func NewFSSyncTargetDir(outdir string, progressFn func(bytes int, done bool)) session.Attachable {
+	p := &earthlySyncTarget{
+		outdir:     outdir,
+		progressFn: progressFn,
+	}
+	return p
+}
+
+// NewFSSyncMultiTarget allows writing into an io.WriteCloser; it is earthly-specific
+func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progressFn func(bytes int, done bool)) session.Attachable {
+	p := &earthlySyncTarget{
+		f:          f,
+		outdirFunc: outdirFunc,
+		progressFn: progressFn,
+	}
+	return p
+}
+
+// earthlySyncTarget is earthly-specific: a byte-progress callback plus outdirFunc
+type earthlySyncTarget struct {
+	outdir     string
+	outdirFunc func(map[string]string) (string, error)
+	f          func(map[string]string) (io.WriteCloser, error)
+	progressFn func(bytes int, done bool)
+}
+
+func (sp *earthlySyncTarget) Register(server *grpc.Server) {
+	RegisterFileSendServer(server, sp)
+}
+
+func (sp *earthlySyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
+	if sp.outdir != "" {
+		return syncTargetDiffCopy(stream, sp.outdir, sp.progressFn)
+	}
+
+	opts, _ := metadata.FromIncomingContext(stream.Context())
+	md := map[string]string{}
+	for k, v := range opts {
+		if after, ok0 := strings.CutPrefix(k, keyExporterMetaPrefix); ok0 {
+			md[after] = strings.Join(v, ",")
+		}
+	}
+	if sp.outdirFunc != nil {
+		outdir, err := sp.outdirFunc(md)
+		if err != nil {
+			return err
+		}
+		if outdir != "" {
+			return syncTargetDiffCopy(stream, outdir, sp.progressFn)
+		}
+	}
+	wc, err := sp.f(md)
+	if err != nil {
+		return err
+	}
+	if wc == nil {
+		return status.Errorf(codes.AlreadyExists, "target already exists")
+	}
+	defer func() {
+		err1 := wc.Close()
+		if err == nil {
+			err = err1
+		}
+	}()
+	return writeTargetFile(stream, wc)
+}
+
 type FSSyncTarget interface {
 	target() *fsSyncTarget
 }
@@ -326,7 +395,7 @@ func (sp *SyncTarget) chooser(ctx context.Context) int {
 func (sp *SyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 	id := sp.chooser(stream.Context())
 	if outdir, ok := sp.outdirs[id]; ok {
-		return syncTargetDiffCopy(stream, outdir)
+		return syncTargetDiffCopy(stream, outdir, nil)
 	}
 	f, ok := sp.fs[id]
 	if !ok {
@@ -372,6 +441,30 @@ func CopyToCaller(ctx context.Context, fs fsutil.FS, id int, c session.Caller, p
 		bklog.G(ctx).Warnf("overwriting grpc metadata key %q from value %+v to %+v", keyExporterID, existingVal, id)
 	}
 	opts[keyExporterID] = []string{fmt.Sprint(id)}
+	ctx = metadata.NewOutgoingContext(ctx, opts)
+
+	cc, err := client.DiffCopy(ctx)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	return sendDiffCopy(cc, fs, progress)
+}
+
+// CopyToCallerWithMeta is earthly specific
+func CopyToCallerWithMeta(ctx context.Context, md map[string]string, fs fsutil.FS, c session.Caller, progress func(int, bool)) error {
+	method := session.MethodURL(FileSend_ServiceDesc.ServiceName, "diffcopy")
+	if !c.Supports(method) {
+		return errors.Errorf("method %s not supported by the client", method)
+	}
+
+	client := NewFileSendClient(c.Conn())
+
+	opts := make(map[string][]string, len(md))
+	for k, v := range md {
+		opts[keyExporterMetaPrefix+k] = []string{v}
+	}
+
 	ctx = metadata.NewOutgoingContext(ctx, opts)
 
 	cc, err := client.DiffCopy(ctx)

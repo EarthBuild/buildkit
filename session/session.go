@@ -51,7 +51,11 @@ type Session struct {
 func NewSession(ctx context.Context, sharedKey string) (*Session, error) {
 	id := identity.NewID()
 
+	maxMsgSize := 67108864 // 64MB
 	serverOpts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(maxMsgSize), grpc.MaxSendMsgSize(maxMsgSize),
+		grpc.InitialWindowSize(65535 * 32),
+		grpc.InitialConnWindowSize(65535 * 16),
 		grpc.UnaryInterceptor(grpcerrors.UnaryServerInterceptor),
 		grpc.StreamInterceptor(grpcerrors.StreamServerInterceptor),
 	}

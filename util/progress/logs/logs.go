@@ -23,11 +23,20 @@ var defaultMaxLogSize = 2 * 1024 * 1024
 var defaultMaxLogSpeed = 200 * 1024 // per second
 
 const (
-	stdout = 1
-	stderr = 2
+	stdout      = 1
+	stderr      = 2
+	StatsStream = 99 // earthly-specific
 )
 
 var configCheckOnce sync.Once
+
+// NewStatsStreams is earthly-specific
+func NewStatsStreams(ctx context.Context, printOutput bool) (io.WriteCloser, func()) {
+	statsStream := newStreamWriter(ctx, StatsStream, printOutput)
+	return statsStream, func() {
+		statsStream.flushBuffer()
+	}
+}
 
 func NewLogStreams(ctx context.Context, printOutput bool) (io.WriteCloser, io.WriteCloser, func()) {
 	stdout := newStreamWriter(ctx, stdout, printOutput)
@@ -147,6 +156,8 @@ func (sw *streamWriter) write(dt []byte) (int, error) {
 		case 1:
 			return os.Stdout.Write(dt)
 		case 2:
+			return os.Stderr.Write(dt)
+		case StatsStream: // earthly-specific
 			return os.Stderr.Write(dt)
 		default:
 			return 0, errors.Errorf("invalid stream %d", sw.stream)

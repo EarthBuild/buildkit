@@ -107,14 +107,14 @@ func recvDiffCopy(ds grpc.ClientStream, dest string, cu CacheUpdater, progress p
 		ProgressCb:    progress,
 		Filter:        fsutil.FilterFunc(filter),
 		Differ:        differ,
-		MetadataOnly:  metadataOnlyFilter,
 	}))
 }
 
-func syncTargetDiffCopy(ds grpc.ServerStream, dest string) error {
+func syncTargetDiffCopy(ds grpc.ServerStream, dest string, progressFn func(bytes int, done bool)) error {
 	if err := os.MkdirAll(dest, 0700); err != nil {
 		return errors.Wrapf(err, "failed to create synctarget dest dir %s", dest)
 	}
+	modTime := time.Now().UnixNano() // earthly-specific
 	return errors.WithStack(fsutil.Receive(ds.Context(), ds, dest, fsutil.ReceiveOpt{
 		Merge: true,
 		Filter: func() func(string, *fstypes.Stat) bool {
@@ -123,9 +123,20 @@ func syncTargetDiffCopy(ds grpc.ServerStream, dest string) error {
 			return func(p string, st *fstypes.Stat) bool {
 				st.Uid = uint32(uid)
 				st.Gid = uint32(gid)
+				if st.ModTime == 0 {
+					st.ModTime = modTime
+				}
 				return true
 			}
 		}(),
+		// earthly-specific: byte-level received progress (cumulative), the
+		// non-hashing hook. The obvious per-file hook, NotifyHashed, forces a
+		// ContentHasher and MultiWriters every received byte through it for a
+		// digest nobody reads on this path - and left nil it is a nil-pointer
+		// panic, not a no-op (fsutil newHashWriter), which crashed
+		// SAVE ARTIFACT ... AS LOCAL. ProgressCb needs no hasher and gives live
+		// transfer feedback, which is what an output copy actually wants.
+		ProgressCb: progressFn,
 	}))
 }
 

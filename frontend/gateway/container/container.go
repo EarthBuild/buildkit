@@ -190,6 +190,9 @@ func PrepareMounts(ctx context.Context, mm *mounts.MountManager, cm cache.Manage
 		}
 
 		switch m.MountType {
+		case opspb.MountType_HOST_BIND: // earthly
+			mountable = mm.MountableHostBind(ctx, m)
+
 		case opspb.MountType_BIND:
 			// if mount creates an output
 			if m.Output != int64(opspb.SkipOutput) {
@@ -256,6 +259,15 @@ func PrepareMounts(ctx context.Context, mm *mounts.MountManager, cm cache.Manage
 		case opspb.MountType_SSH:
 			var err error
 			mountable, err = mm.MountableSSH(ctx, m, g)
+			if err != nil {
+				return p, err
+			}
+			if mountable == nil {
+				continue
+			}
+		case opspb.MountType_SOCKET: // earthly-specific
+			var err error
+			mountable, err = mm.MountableSocket(ctx, m, g)
 			if err != nil {
 				return p, err
 			}

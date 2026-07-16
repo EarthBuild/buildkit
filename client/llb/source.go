@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "crypto/sha256" // for opencontainers/go-digest
 	"encoding/json"
+	"fmt"
 	"os"
 	"path"
 	"slices"
@@ -431,6 +432,18 @@ func Git(url, fragment string, opts ...GitOption) State {
 		attrs[pb.AttrKeepGitDir] = "true"
 		addCap(&gi.Constraints, pb.CapSourceGitKeepDir)
 	}
+	if gi.LFSInclude != "" { // earthly-specific
+		attrs[pb.AttrGitLFSInclude] = gi.LFSInclude
+		addCap(&gi.Constraints, pb.CapSourceGitLFSInclude)
+	}
+	if gi.LogLevel > 0 { // earthly-specific
+		attrs[pb.AttrGitLogLevel] = fmt.Sprintf("%d", gi.LogLevel)
+		addCap(&gi.Constraints, pb.CapSourceGitLogLevel)
+	}
+	if gi.SSHCommand != "" { // earthly-specific
+		attrs[pb.AttrGitSSHCommand] = gi.SSHCommand
+		addCap(&gi.Constraints, pb.CapSourceGitSSHCommand)
+	}
 	if url != "" {
 		attrs[pb.AttrFullRemoteURL] = url
 		addCap(&gi.Constraints, pb.CapSourceGitFullURL)
@@ -455,7 +468,11 @@ func Git(url, fragment string, opts ...GitOption) State {
 			if err == nil {
 				// best effort
 				attrs[pb.AttrKnownSSHHosts] = keyscan
+			} else {
+				// earthly-specific: panic in order to raise errors (should be caught by earthly cli)
+				panic(fmt.Sprintf("Git(%s,%s) failed to scan ssh keys: %v", url, ref, err))
 			}
+			attrs[pb.AttrKnownSSHHosts] = keyscan
 		}
 		addCap(&gi.Constraints, pb.CapSourceGitKnownSSHHosts)
 
@@ -506,6 +523,9 @@ type GitInfo struct {
 	addAuthCap       bool
 	KnownSSHHosts    string
 	MountSSHSock     string
+	SSHCommand       string              // earthly-specific
+	LFSInclude       string              // earthly-specific
+	LogLevel         gitutil.GitLogLevel // earthly-specific
 	Checksum         string
 	Ref              string
 	SubDir           string
@@ -551,6 +571,20 @@ func KeepGitDir() GitOption {
 	})
 }
 
+// LFSInclude is earthly-specific and passes an include string to git lfs pull --include=path; multiple values can be separate by commas (as supported by git lfs)
+func LFSInclude(path string) GitOption {
+	return gitOptionFunc(func(gi *GitInfo) {
+		gi.LFSInclude = path
+	})
+}
+
+// LogLevel is earthly-specific and dynamically controls git logging levels without restarting buildkit
+func LogLevel(level gitutil.GitLogLevel) GitOption {
+	return gitOptionFunc(func(gi *GitInfo) {
+		gi.LogLevel = level
+	})
+}
+
 func AuthTokenSecret(v string) GitOption {
 	return gitOptionFunc(func(gi *GitInfo) {
 		gi.AuthTokenSecret = v
@@ -568,6 +602,12 @@ func KnownSSHHosts(key string) GitOption {
 func MountSSHSock(sshID string) GitOption {
 	return gitOptionFunc(func(gi *GitInfo) {
 		gi.MountSSHSock = sshID
+	})
+}
+
+func SSHCommand(sshCommand string) GitOption {
+	return gitOptionFunc(func(gi *GitInfo) {
+		gi.SSHCommand = sshCommand
 	})
 }
 

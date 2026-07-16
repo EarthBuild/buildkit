@@ -3,13 +3,31 @@ package gitutil
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"slices"
 	"strings"
 
+	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/urlutil"
 	"github.com/pkg/errors"
+)
+
+type ctxEarthlyDebugLevelKey string // earthly-specific
+
+// earthlyCtxDebugLevelKey is earthly-specific and is used to pass along the debug level
+const EarthlyCtxDebugLevelKey ctxEarthlyDebugLevelKey = "EARTHLY_DEBUG_LEVEL" // earthly-specific
+
+// GitLogLevel is earthly-specific
+type GitLogLevel int
+
+const (
+	GitLogLevelDefault GitLogLevel = iota
+	GitLogLevelDebug
+	GitLogLevelTrace
 )
 
 // GitCLI carries config to pass to the git cli to make running multiple
@@ -27,6 +45,7 @@ type GitCLI struct {
 
 	sshAuthSock   string
 	sshKnownHosts string
+	sshCommand    string
 	hostGitConfig bool
 }
 
@@ -98,6 +117,13 @@ func WithSSHKnownHosts(sshKnownHosts string) Option {
 	}
 }
 
+// WithSSHCommand sets the GIT_SSH_COMMAND environment variable
+func WithSSHCommand(sshCommand string) Option {
+	return func(b *GitCLI) {
+		b.sshCommand = sshCommand
+	}
+}
+
 // WithHostGitConfig allows git to read the host system and user git config.
 // This is intended for client-side local git inspection. The default remains
 // isolated so daemon-side callers do not leak host configuration into git.
@@ -139,6 +165,10 @@ func (cli *GitCLI) New(opts ...Option) *GitCLI {
 	return &clone
 }
 
+func gitDebug() bool {
+	return os.Getenv("BUILDKIT_DEBUG_GIT") == "1"
+}
+
 // Run executes a git command with the given args.
 func (cli *GitCLI) Run(ctx context.Context, args ...string) (_ []byte, err error) {
 	gitBinary := "git"
@@ -148,6 +178,15 @@ func (cli *GitCLI) Run(ctx context.Context, args ...string) (_ []byte, err error
 	proxyEnvVars := [...]string{
 		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
 		"http_proxy", "https_proxy", "no_proxy", "all_proxy",
+	}
+
+	// earthly-specific: smuggle in the logLevel
+	logLevel, ok := ctx.Value(EarthlyCtxDebugLevelKey).(GitLogLevel)
+	if !ok {
+		bklog.G(ctx).Warnf("failed to extract %s", EarthlyCtxDebugLevelKey)
+	}
+	if gitDebug() || logLevel >= GitLogLevelDebug { // earthly-specific
+		bklog.G(ctx).Infof("GitCLI.Run called with %v", args)
 	}
 
 	for {
@@ -198,37 +237,34 @@ func (cli *GitCLI) Run(ctx context.Context, args ...string) (_ []byte, err error
 
 		cmd.Env = []string{
 			"PATH=" + os.Getenv("PATH"),
+
+			// earthly-specific settings
+			"HOME=" + os.Getenv("HOME"), // earthly-specific: we need this for git to read /root/.gitconfig
+			"GIT_LFS_SKIP_SMUDGE=1",     // earthly-specific: dont automatically pull large files
+
 			"GIT_TERMINAL_PROMPT=0",
-			"GIT_SSH_COMMAND=" + getGitSSHCommand(cli.sshKnownHosts),
-			//	"GIT_TRACE=1",
+			"GIT_SSH_COMMAND=" + getGitSSHCommand(cli.sshKnownHosts, logLevel, cli.sshCommand),
+			// "GIT_TRACE=1",
+			// earthly-specific: Commented out. We do not want to disable reading from gitconfig.
+			// "GIT_CONFIG_NOSYSTEM=1", // Disable reading from system gitconfig.
+			// "HOME=/dev/null",        // Disable reading from user gitconfig.
+
 			"LC_ALL=C", // Ensure consistent output.
 		}
-		if cli.hostGitConfig {
-			for _, ev := range [...]string{
-				"HOME",
-				"XDG_CONFIG_HOME",
-				"USERPROFILE",
-				"HOMEDRIVE",
-				"HOMEPATH",
-				"GIT_CONFIG_GLOBAL",
-				"GIT_CONFIG_SYSTEM",
-			} {
-				if v, ok := os.LookupEnv(ev); ok {
-					cmd.Env = append(cmd.Env, ev+"="+v)
-				}
-			}
-		} else {
-			cmd.Env = append(cmd.Env,
-				"GIT_CONFIG_NOSYSTEM=1",         // Disable reading from system gitconfig.
-				"HOME="+os.DevNull,              // Disable reading from user gitconfig.
-				"GIT_CONFIG_GLOBAL="+os.DevNull, // Disable reading from global gitconfig.
-			)
-		}
+		// Note: earthly-specific - we skip the hostGitConfig isolation logic
+		// because earthly always needs HOME set for git to read /root/.gitconfig.
+		// The upstream hostGitConfig option is still available for callers that need it.
 		for _, ev := range proxyEnvVars {
 			if v, ok := os.LookupEnv(ev); ok {
 				cmd.Env = append(cmd.Env, ev+"="+v)
 			}
 		}
+
+		// earthly-specific
+		if logLevel >= GitLogLevelTrace {
+			cmd.Env = append(cmd.Env, "GIT_TRACE=1")
+		}
+
 		if cli.sshAuthSock != "" {
 			cmd.Env = append(cmd.Env, "SSH_AUTH_SOCK="+cli.sshAuthSock)
 		}
@@ -266,18 +302,35 @@ func (cli *GitCLI) Run(ctx context.Context, args ...string) (_ []byte, err error
 				}
 			}
 
-			return buf.Bytes(), errors.Wrapf(err, "git stderr:\n%s", errbuf.String())
+			// earthly-specific
+			if gitDebug() {
+				bklog.G(ctx).Infof("knownHosts: %s", cli.sshKnownHosts)
+				bklog.G(ctx).Infof("git stdout: %s", buf.String())
+				bklog.G(ctx).Infof("git stderr: %s", errbuf.String())
+			}
+			redactedStderr := urlutil.RedactAllCredentials(fmt.Sprintf("git %s\n%s", strings.Join(args, " "), errbuf.String()))
+			err = errors.Wrapf(err, "git stderr:\n%s\nEARTHLY_GIT_STDERR: %s", redactedStderr, base64.StdEncoding.EncodeToString([]byte(redactedStderr))) // earthly-specific
+			return buf.Bytes(), err
 		}
+
 		return buf.Bytes(), nil
 	}
 }
 
-func getGitSSHCommand(knownHosts string) string {
+func getGitSSHCommand(knownHosts string, logLevel GitLogLevel, existingSSHCommand string) string {
 	gitSSHCommand := "ssh -F " + os.DevNull
+	if existingSSHCommand != "" {
+		gitSSHCommand = existingSSHCommand // earthly-specific
+	}
 	if knownHosts != "" {
 		gitSSHCommand += " -o UserKnownHostsFile=" + knownHosts
 	} else {
 		gitSSHCommand += " -o StrictHostKeyChecking=no"
+	}
+	if gitDebug() || logLevel >= GitLogLevelTrace {
+		gitSSHCommand += " -vvvv"
+	} else if logLevel >= GitLogLevelDebug {
+		gitSSHCommand += " -v"
 	}
 	return gitSSHCommand
 }

@@ -92,6 +92,11 @@ func (c *BridgeClient) Solve(ctx context.Context, req client.SolveRequest) (*cli
 	return cRes, nil
 }
 
+// Export is only used by earthly via the grpcclient implementation
+func (c *BridgeClient) Export(ctx context.Context, req client.ExportRequest) error {
+	return errors.Errorf("forwarder.bridgeClient does not support Export")
+}
+
 func (c *BridgeClient) ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (string, digest.Digest, []byte, error) {
 	imr := sourceresolver.NewImageMetaResolver(c)
 	return imr.ResolveImageConfig(ctx, ref, opt)

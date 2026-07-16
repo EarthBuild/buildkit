@@ -205,10 +205,11 @@ func newDefaultTransport() *http.Transport {
 			KeepAlive: 60 * time.Second,
 		}).DialContext,
 		MaxIdleConns:          30,
-		IdleConnTimeout:       120 * time.Second,
+		IdleConnTimeout:       5 * time.Second, // earthly needs this to stay low
 		MaxIdleConnsPerHost:   4,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 5 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second, // earthly needs this; it was reverted by https://github.com/moby/buildkit/pull/3995 but if it's removed we will regress on reusing a connection that's become invalid/corrupt/bad due to hibernation. If we find a better way to detect those dead connections, we can remove that, however the IdleConnTimeout doesn't invalid it.
 		TLSNextProto:          make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
 	}
 }

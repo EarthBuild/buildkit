@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/progress/logs"
 
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/util/progress"
 	digest "github.com/opencontainers/go-digest"
 )
 
-func (j *Job) Status(ctx context.Context, ch chan *client.SolveStatus) error {
+func (j *Job) Status(ctx context.Context, statsStream bool, ch chan *client.SolveStatus) error {
 	vs := &vertexStream{cache: map[digest.Digest]*client.Vertex{}, wasCached: make(map[digest.Digest]struct{})}
 	pr := j.pr.Reader(ctx)
 	defer func() {
@@ -23,6 +24,17 @@ func (j *Job) Status(ctx context.Context, ch chan *client.SolveStatus) error {
 		}
 		close(ch)
 	}()
+
+	if !statsStream { // earthly-specific: don't stream stats back to old clients (which will cause them to print binary data to stderr)
+		pr = progress.NewFilteredReader(pr, func(ctx context.Context, p *progress.Progress) (bool, error) {
+			if vl, ok := p.Sys.(client.VertexLog); ok {
+				if vl.Stream == logs.StatsStream {
+					return true, nil
+				}
+			}
+			return false, nil
+		})
+	}
 
 	for {
 		p, err := pr.Read(ctx)

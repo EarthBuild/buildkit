@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"math"
 	"runtime/trace"
 	"strconv"
 	"sync"
@@ -559,7 +560,7 @@ func (c *Controller) Status(req *controlapi.StatusRequest, stream controlapi.Con
 
 	eg, ctx := errgroup.WithContext(stream.Context())
 	eg.Go(func() error {
-		return c.solver.Status(ctx, req.Ref, ch)
+		return c.solver.Status(ctx, req.Ref, req.StatsStream, ch)
 	})
 
 	eg.Go(func() error {
@@ -608,6 +609,34 @@ func (c *Controller) ListWorkers(ctx context.Context, r *controlapi.ListWorkersR
 		return nil, err
 	}
 	for _, w := range workers {
+		pc, pm, pw := w.ParallelismStatus()
+		gcSummary, gcCurrent, gcLast := w.GCAnalytics()
+		gca := &apitypes.GCAnalytics{
+			NumRuns:              int64(gcSummary.NumRuns),
+			NumFailures:          int64(gcSummary.NumFailures),
+			AvgDurationMs:        gcSummary.AvgDuration.Milliseconds(),
+			AvgRecordsCleared:    gcSummary.AvgRecordsCleared,
+			AvgRecordsBefore:     gcSummary.AvgRecordsBefore,
+			AvgSizeCleared:       gcSummary.AvgSizeCleared,
+			AvgSizeBefore:        gcSummary.AvgSizeBefore,
+			AllTimeRuns:          gcSummary.AllTimeRuns,
+			AllTimeMaxDurationMs: gcSummary.AllTimeMaxDuration.Milliseconds(),
+			AllTimeDurationMs:    gcSummary.AllTimeDuration.Milliseconds(),
+		}
+		if gcCurrent != nil {
+			gca.CurrentStartTimeSecEpoch = gcCurrent.Start.Unix()
+			gca.CurrentNumRecordsBefore = int64(gcCurrent.NumRecordsBefore)
+			gca.CurrentSizeBefore = int64(gcCurrent.SizeBefore)
+		}
+		if gcLast != nil {
+			gca.LastStartTimeSecEpoch = gcLast.Start.Unix()
+			gca.LastEndTimeSecEpoch = gcLast.End.Unix()
+			gca.LastNumRecordsBefore = int64(gcLast.NumRecordsBefore)
+			gca.LastSizeBefore = int64(gcLast.SizeBefore)
+			gca.LastNumRecordsCleared = int64(gcLast.ClearedRecords)
+			gca.LastSizeCleared = int64(gcLast.ClearedSize)
+			gca.LastSuccess = gcLast.Success
+		}
 		resp.Record = append(resp.Record, &apitypes.WorkerRecord{
 			ID:              w.ID(),
 			Labels:          w.Labels(),
@@ -615,19 +644,58 @@ func (c *Controller) ListWorkers(ctx context.Context, r *controlapi.ListWorkersR
 			GCPolicy:        toPBGCPolicy(w.GCPolicy()),
 			BuildkitVersion: toPBBuildkitVersion(w.BuildkitVersion()),
 			CDIDevices:      toPBCDIDevices(w.CDIManager()),
+
+			ParallelismCurrent: pc,
+			ParallelismMax:     pm,
+			ParallelismWaiting: pw,
+
+			GCAnalytics: gca,
 		})
 	}
 	return resp, nil
 }
 
 func (c *Controller) Info(ctx context.Context, r *controlapi.InfoRequest) (*controlapi.InfoResponse, error) {
+	numSessions, durationIdle := c.opt.SessionManager.NumSessions()
+	secondsIdle := math.Round(durationIdle.Seconds())
 	return &controlapi.InfoResponse{
 		BuildkitVersion: &apitypes.BuildkitVersion{
 			Package:  version.Package,
 			Version:  version.Version,
 			Revision: version.Revision,
 		},
+		NumSessions: uint64(numSessions),
+		SecondsIdle: uint64(secondsIdle),
 	}, nil
+}
+
+func (c *Controller) ShutdownIfIdle(ctx context.Context, r *controlapi.ShutdownIfIdleRequest) (*controlapi.ShutdownIfIdleResponse, error) {
+	ok, numSessions := c.opt.SessionManager.StopIfIdle()
+	return &controlapi.ShutdownIfIdleResponse{
+		WillShutdown: ok,
+		NumSessions:  uint64(numSessions),
+	}, nil
+}
+
+func (c *Controller) Reserve(ctx context.Context, r *controlapi.ReserveRequest) (*controlapi.ReserveResponse, error) {
+	err := c.opt.SessionManager.Reserve()
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "buildkit is shutting down")
+	}
+	return &controlapi.ReserveResponse{}, nil
+}
+
+func (c *Controller) SessionHistory(ctx context.Context, r *controlapi.SessionHistoryRequest) (*controlapi.SessionHistoryResponse, error) {
+	history := c.opt.SessionManager.GetSessionHistory()
+	var resp []*controlapi.SessionHistoryResponse_History
+	for id, h := range history {
+		resp = append(resp, &controlapi.SessionHistoryResponse_History{
+			SessionID: id,
+			Start:     timestamppb.New(h.Start),
+			End:       timestamppb.New(h.End),
+		})
+	}
+	return &controlapi.SessionHistoryResponse{History: resp}, nil
 }
 
 func (c *Controller) gc() {

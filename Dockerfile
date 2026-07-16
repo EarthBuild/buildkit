@@ -72,6 +72,7 @@ ENV GOFLAGS=-mod=vendor
 # buildkit-version builds stage with version/revision info
 FROM buildkit-base AS buildkit-version
 # TODO: PKG should be inferred from go modules
+ARG RELEASE_VERSION=v0.0.0+earthlyunknown
 RUN --mount=target=. <<'EOT'
   # if git is worktree (file starting with gitdir:) then skip verions check
   if [ -f .git ] && head -1 .git | grep -q "^gitdir:"; then
@@ -87,9 +88,9 @@ RUN --mount=target=. <<'EOT'
     exit 1
   fi
   set -ex
-  export PKG=github.com/moby/buildkit VERSION=$(git describe --match 'v[0-9]*' --dirty='.m' --always --tags) REVISION=$(git rev-parse HEAD)$(if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi) COMMIT_DATE=$(git show -s --format=%cI HEAD);
-  echo "-X ${PKG}/version.Version=${VERSION} -X ${PKG}/version.Revision=${REVISION} -X ${PKG}/version.Package=${PKG}" > /tmp/.ldflags;
-  echo -n "${VERSION}" > /tmp/.version;
+  export PKG=github.com/moby/buildkit EARTHLY_PKG=github.com/EarthBuild/buildkit VERSION=$(git describe --match 'v[0-9]*' --dirty='.m' --always --tags) REVISION=$(git rev-parse HEAD)$(if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi) COMMIT_DATE=$(git show -s --format=%cI HEAD);
+  echo "-X ${PKG}/version.Version=${RELEASE_VERSION} -X ${PKG}/version.Revision=${REVISION} -X ${PKG}/version.Package=${EARTHLY_PKG}" > /tmp/.ldflags;
+  echo -n "${RELEASE_VERSION}" > /tmp/.version;
   echo -n "${COMMIT_DATE}" > /tmp/.commit_date;
 EOT
 

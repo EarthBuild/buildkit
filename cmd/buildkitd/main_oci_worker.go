@@ -37,6 +37,7 @@ import (
 	"github.com/moby/buildkit/util/network/cniprovider"
 	"github.com/moby/buildkit/util/network/netproviders"
 	"github.com/moby/buildkit/util/resolver"
+	"github.com/moby/buildkit/util/semutil"
 	"github.com/moby/buildkit/worker"
 	"github.com/moby/buildkit/worker/base"
 	"github.com/moby/buildkit/worker/runc"
@@ -45,7 +46,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
@@ -322,12 +322,23 @@ func ociWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([]worker
 		},
 	}
 
-	var parallelismSem *semaphore.Weighted
+	var parallelismSem *semutil.Weighted
 	if cfg.MaxParallelism > 0 {
-		parallelismSem = semaphore.NewWeighted(int64(cfg.MaxParallelism))
+		parallelismSem = semutil.NewWeighted(int64(cfg.MaxParallelism))
 	}
 
-	opt, err := runc.NewWorkerOpt(common.config.Root, snFactory, cfg.Rootless, processMode, cfg.Labels, idmapping, nc, dns, cfg.Binary, cfg.ApparmorProfile, cfg.SELinux, parallelismSem, common.traceSocket, cfg.DefaultCgroupParent, cdiManager)
+	ociHooks := []oci.OciHook{}
+	for _, h := range cfg.Hooks {
+		ociHooks = append(ociHooks, oci.OciHook{
+			Phase:   h.Phase,
+			Path:    h.Path,
+			Args:    h.Args,
+			Env:     h.Env,
+			Timeout: h.Timeout,
+		})
+	}
+
+	opt, err := runc.NewWorkerOpt(common.config.Root, snFactory, cfg.Rootless, processMode, cfg.Labels, idmapping, nc, dns, cfg.Binary, cfg.ApparmorProfile, cfg.SELinux, parallelismSem, common.traceSocket, cfg.DefaultCgroupParent, ociHooks, cfg.SampleFrequency, cdiManager)
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +382,8 @@ func snapshotterFactory(commonRoot string, cfg config.OCIConfig, sm *session.Man
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
 				grpc.WithConnectParams(connParams),
 				grpc.WithContextDialer(dialer.ContextDialer),
+				grpc.WithInitialWindowSize(65535 * 32),
+				grpc.WithInitialConnWindowSize(65535 * 16),
 				grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 				grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
 			}

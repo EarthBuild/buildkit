@@ -3,6 +3,8 @@ package frontend
 import (
 	"context"
 
+	"github.com/moby/buildkit/cache" // earthly-specific this import breaks the mips64 frontend tests due to incorrect types on inode
+	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/executor"
 	gw "github.com/moby/buildkit/frontend/gateway/client"
@@ -32,6 +34,8 @@ type Frontend interface {
 type FrontendLLBBridge interface {
 	sourceresolver.MetaResolver
 	Solve(ctx context.Context, req SolveRequest, sid string) (*Result, error)
+	Export(ctx context.Context, refs map[string]cache.ImmutableRef, metadata map[string][]byte) error // earthly-specific
+	ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt) (string, digest.Digest, []byte, error)
 	Warn(ctx context.Context, dgst digest.Digest, msg string, opts WarnOpts) error
 }
 
