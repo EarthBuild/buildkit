@@ -4,24 +4,34 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strconv"
+	"time"
 
-	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
-	"github.com/moby/buildkit/exporter/containerimage/image"
+	commonexptypes "github.com/moby/buildkit/exporter/exptypes"
 	"github.com/moby/buildkit/frontend/gateway/client"
+	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
 
-type BuildFunc func(ctx context.Context, platform *ocispecs.Platform, idx int) (client.Reference, *image.Image, error)
+type BuildResult struct {
+	Reference client.Reference
+	Image     *dockerspec.DockerOCIImage
+	BaseImage *dockerspec.DockerOCIImage
+	Epoch     *time.Time
+}
+
+type BuildFunc func(ctx context.Context, platform *ocispecs.Platform, idx int) (*BuildResult, error)
 
 func (bc *Client) Build(ctx context.Context, fn BuildFunc) (*ResultBuilder, error) {
 	res := client.NewResult()
 
 	targets := make([]*ocispecs.Platform, 0, len(bc.TargetPlatforms))
 	for _, p := range bc.TargetPlatforms {
-		p := p
 		targets = append(targets, &p)
 	}
 	if len(targets) == 0 {
@@ -34,47 +44,53 @@ func (bc *Client) Build(ctx context.Context, fn BuildFunc) (*ResultBuilder, erro
 	eg, ctx := errgroup.WithContext(ctx)
 
 	for i, tp := range targets {
-		i, tp := i, tp
 		eg.Go(func() error {
-			ref, img, err := fn(ctx, tp, i)
+			buildRes, err := fn(ctx, tp, i)
 			if err != nil {
 				return err
 			}
+			ref, img, baseImg := buildRes.Reference, buildRes.Image, buildRes.BaseImage
 
 			config, err := json.Marshal(img)
 			if err != nil {
 				return errors.Wrapf(err, "failed to marshal image config")
 			}
 
-			p := platforms.DefaultSpec()
+			var baseConfig []byte
+			if baseImg != nil {
+				baseConfig, err = json.Marshal(baseImg)
+				if err != nil {
+					return errors.Wrapf(err, "failed to marshal source image config")
+				}
+			}
+
+			var p ocispecs.Platform
 			if tp != nil {
 				p = *tp
+			} else {
+				p = platforms.DefaultSpec()
 			}
-
-			// in certain conditions we allow input platform to be extended from base image
-			if p.OS == "windows" && img.OS == p.OS {
-				if p.OSVersion == "" && img.OSVersion != "" {
-					p.OSVersion = img.OSVersion
-				}
-				if p.OSFeatures == nil && len(img.OSFeatures) > 0 {
-					p.OSFeatures = img.OSFeatures
-				}
-			}
-
-			p = platforms.Normalize(p)
-			k := platforms.Format(p)
-
+			expPlat := makeExportPlatform(p, img.Platform)
 			if bc.MultiPlatformRequested {
-				res.AddRef(k, ref)
-				res.AddMeta(fmt.Sprintf("%s/%s", exptypes.ExporterImageConfigKey, k), config)
+				res.AddRef(expPlat.ID, ref)
+				res.AddMeta(fmt.Sprintf("%s/%s", exptypes.ExporterImageConfigKey, expPlat.ID), config)
+				if len(baseConfig) > 0 {
+					res.AddMeta(fmt.Sprintf("%s/%s", exptypes.ExporterImageBaseConfigKey, expPlat.ID), baseConfig)
+				}
+				if buildRes.Epoch != nil {
+					res.AddMeta(fmt.Sprintf("%s/%s", commonexptypes.ExporterEpochKey, expPlat.ID), []byte(strconv.FormatInt(buildRes.Epoch.Unix(), 10)))
+				}
 			} else {
 				res.SetRef(ref)
 				res.AddMeta(exptypes.ExporterImageConfigKey, config)
+				if len(baseConfig) > 0 {
+					res.AddMeta(exptypes.ExporterImageBaseConfigKey, baseConfig)
+				}
+				if buildRes.Epoch != nil {
+					res.AddMeta(commonexptypes.ExporterEpochKey, []byte(strconv.FormatInt(buildRes.Epoch.Unix(), 10)))
+				}
 			}
-			expPlatforms.Platforms[i] = exptypes.Platform{
-				ID:       k,
-				Platform: p,
-			}
+			expPlatforms.Platforms[i] = expPlat
 			return nil
 		})
 	}
@@ -105,10 +121,35 @@ func (rb *ResultBuilder) Finalize() (*client.Result, error) {
 func (rb *ResultBuilder) EachPlatform(ctx context.Context, fn func(ctx context.Context, id string, p ocispecs.Platform) error) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	for _, p := range rb.expPlatforms.Platforms {
-		p := p
 		eg.Go(func() error {
 			return fn(ctx, p.ID, p.Platform)
 		})
 	}
 	return eg.Wait()
+}
+
+func extendWindowsPlatform(p, imgP ocispecs.Platform) ocispecs.Platform {
+	// in certain conditions we allow input platform to be extended from base image
+	if p.OS == "windows" && imgP.OS == p.OS {
+		if p.OSVersion == "" && imgP.OSVersion != "" {
+			p.OSVersion = imgP.OSVersion
+		}
+		if p.OSFeatures == nil && len(imgP.OSFeatures) > 0 {
+			p.OSFeatures = slices.Clone(imgP.OSFeatures)
+		}
+	}
+	return p
+}
+
+func makeExportPlatform(p, imgP ocispecs.Platform) exptypes.Platform {
+	p = platforms.Normalize(p)
+	exp := exptypes.Platform{
+		ID: platforms.FormatAll(p),
+	}
+	if p.OS == "windows" {
+		p = extendWindowsPlatform(p, imgP)
+		p = platforms.Normalize(p)
+	}
+	exp.Platform = p
+	return exp
 }

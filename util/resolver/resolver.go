@@ -10,12 +10,15 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
-	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/pkg/errors"
+
 	"github.com/moby/buildkit/util/resolver/config"
 	"github.com/moby/buildkit/util/tracing"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -46,6 +49,8 @@ func fillInsecureOpts(host string, c config.RegistryConfig, h docker.RegistryHos
 
 		var transport http.RoundTripper = httpsTransport
 		if isHTTP {
+			// TODO: Replace this with [docker.NewHTTPFallback] once
+			// backported to vendored version of containerd
 			transport = &httpFallback{super: transport}
 		}
 		h2.Client = &http.Client{
@@ -76,9 +81,10 @@ func loadTLSConfig(c config.RegistryConfig) (*tls.Config, error) {
 				c.RootCAs = append(c.RootCAs, filepath.Join(d, f.Name()))
 			}
 			if strings.HasSuffix(f.Name(), ".cert") {
+				base, _ := strings.CutSuffix(f.Name(), ".cert")
 				c.KeyPairs = append(c.KeyPairs, config.TLSKeyPair{
 					Certificate: filepath.Join(d, f.Name()),
-					Key:         filepath.Join(d, strings.TrimSuffix(f.Name(), ".cert")+".key"),
+					Key:         filepath.Join(d, base+".key"),
 				})
 			}
 		}
@@ -167,12 +173,11 @@ func NewRegistryConfig(m map[string]config.RegistryConfig) docker.RegistryHosts 
 
 func newMirrorRegistryHost(mirror string) docker.RegistryHost {
 	mirrorHost, mirrorPath := extractMirrorHostAndPath(mirror)
-	path := path.Join(defaultPath, mirrorPath)
 	h := docker.RegistryHost{
 		Scheme:       "https",
 		Client:       newDefaultClient(),
 		Host:         mirrorHost,
-		Path:         path,
+		Path:         path.Join(defaultPath, mirrorPath),
 		Capabilities: docker.HostCapabilityPull | docker.HostCapabilityResolve,
 	}
 
@@ -210,18 +215,20 @@ func newDefaultTransport() *http.Transport {
 }
 
 type httpFallback struct {
-	super    http.RoundTripper
-	fallback bool
+	super   http.RoundTripper
+	host    string
+	hostMut sync.Mutex
 }
 
 func (f *httpFallback) RoundTrip(r *http.Request) (*http.Response, error) {
-	if !f.fallback {
+	f.hostMut.Lock()
+	// Skip the HTTPS call only if the same host had previously fell back
+	tryHTTPSFirst := f.host != r.URL.Host
+	f.hostMut.Unlock()
+
+	if tryHTTPSFirst {
 		resp, err := f.super.RoundTrip(r)
-		var tlsErr tls.RecordHeaderError
-		if errors.As(err, &tlsErr) && string(tlsErr.RecordHeader[:]) == "HTTP/" {
-			// Server gave HTTP response to HTTPS client
-			f.fallback = true
-		} else {
+		if !isTLSError(err) && !isPortError(err, r.URL.Host) {
 			return resp, err
 		}
 	}
@@ -232,5 +239,50 @@ func (f *httpFallback) RoundTrip(r *http.Request) (*http.Response, error) {
 	plainHTTPRequest := *r
 	plainHTTPRequest.URL = &plainHTTPUrl
 
+	// We tried HTTPS first but it failed.
+	// Mark the host so we don't try HTTPS for this host next time
+	// and refresh the request body.
+	if tryHTTPSFirst {
+		f.hostMut.Lock()
+		f.host = r.URL.Host
+		f.hostMut.Unlock()
+
+		// update body on the second attempt
+		if r.Body != nil && r.GetBody != nil {
+			body, err := r.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			plainHTTPRequest.Body = body
+		}
+	}
+
 	return f.super.RoundTrip(&plainHTTPRequest)
+}
+
+func isTLSError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var tlsErr tls.RecordHeaderError
+	if errors.As(err, &tlsErr) && string(tlsErr.RecordHeader[:]) == "HTTP/" {
+		return true
+	}
+	if strings.Contains(err.Error(), "TLS handshake timeout") {
+		return true
+	}
+
+	return false
+}
+
+func isPortError(err error, host string) bool {
+	if errors.Is(err, syscall.ECONNREFUSED) || os.IsTimeout(err) {
+		if _, port, _ := net.SplitHostPort(host); port != "" {
+			// Port is specified, will not retry on different port with scheme change
+			return false
+		}
+		return true
+	}
+
+	return false
 }

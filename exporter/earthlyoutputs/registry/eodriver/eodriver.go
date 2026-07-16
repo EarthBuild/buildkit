@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/v2/core/content"
 	storagedriver "github.com/docker/distribution/registry/storage/driver"
 	"github.com/docker/distribution/registry/storage/driver/base"
 	"github.com/docker/distribution/registry/storage/driver/factory"
@@ -41,7 +41,7 @@ func init() {
 // earthlyOutputDriverFactory implements the factory.StorageDriverFactory interface
 type earthlyOutputDriverFactory struct{}
 
-func (factory *earthlyOutputDriverFactory) Create(parameters map[string]interface{}) (storagedriver.StorageDriver, error) {
+func (factory *earthlyOutputDriverFactory) Create(parameters map[string]any) (storagedriver.StorageDriver, error) {
 	return FromParameters(parameters)
 }
 
@@ -62,7 +62,7 @@ type Driver struct {
 // FromParameters constructs a new Driver with a given parameters map
 // Optional Parameters:
 // - maxthreads
-func FromParameters(parameters map[string]interface{}) (*Driver, error) {
+func FromParameters(parameters map[string]any) (*Driver, error) {
 	params, err := fromParametersImpl(parameters)
 	if err != nil || params == nil {
 		return nil, err
@@ -70,7 +70,7 @@ func FromParameters(parameters map[string]interface{}) (*Driver, error) {
 	return New(*params), nil
 }
 
-func fromParametersImpl(parameters map[string]interface{}) (*DriverParameters, error) {
+func fromParametersImpl(parameters map[string]any) (*DriverParameters, error) {
 	var (
 		err        error
 		maxThreads = defaultMaxThreads
@@ -139,12 +139,11 @@ func (d *driver) Reader(ctx context.Context, path string, offset int64) (io.Read
 }
 
 func (d *driver) get(ctx context.Context, path string, offset int64) (io.ReadCloser, int64, error) {
-	if !strings.HasPrefix(path, "/docker/registry/v2/") {
+	subPath, ok := strings.CutPrefix(path, "/docker/registry/v2/")
+	if !ok {
 		return nil, 0, storagedriver.PathNotFoundError{}
 	}
-	subPath := strings.TrimPrefix(path, "/docker/registry/v2/")
-	if strings.HasPrefix(subPath, "repositories/") {
-		subSubPath := strings.TrimPrefix(subPath, "repositories/")
+	if subSubPath, ok := strings.CutPrefix(subPath, "repositories/"); ok {
 		subSubPathSplit := strings.Split(subSubPath, "/")
 		indexPostImgName := -1
 		for index, part := range subSubPathSplit {
@@ -189,8 +188,7 @@ func (d *driver) get(ctx context.Context, path string, offset int64) (io.ReadClo
 		default:
 			return nil, 0, storagedriver.PathNotFoundError{}
 		}
-	} else if strings.HasPrefix(subPath, "blobs/sha256/") {
-		subSubPath := strings.TrimPrefix(subPath, "blobs/sha256/")
+	} else if subSubPath, ok := strings.CutPrefix(subPath, "blobs/sha256/"); ok {
 		subSubPathSplit := strings.Split(subSubPath, "/")
 		if len(subSubPathSplit) != 3 {
 			return nil, 0, storagedriver.PathNotFoundError{}
@@ -253,7 +251,7 @@ func (d *driver) Delete(ctx context.Context, subPath string) error {
 
 // URLFor returns a URL which may be used to retrieve the content stored at the given path.
 // May return an UnsupportedMethodErr in certain StorageDriver implementations.
-func (d *driver) URLFor(ctx context.Context, path string, options map[string]interface{}) (string, error) {
+func (d *driver) URLFor(ctx context.Context, path string, options map[string]any) (string, error) {
 	return "", storagedriver.ErrUnsupportedMethod{}
 }
 

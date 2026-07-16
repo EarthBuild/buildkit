@@ -1,11 +1,15 @@
 package container
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"io/fs"
+	"os"
+	"path"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,12 +24,11 @@ import (
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver/llbsolver/mounts"
-	"github.com/moby/buildkit/solver/pb"
 	opspb "github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/stack"
-	utilsystem "github.com/moby/buildkit/util/system"
 	"github.com/moby/buildkit/worker"
 	"github.com/pkg/errors"
+	fstypes "github.com/tonistiigi/fsutil/types"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -47,15 +50,15 @@ type Mount struct {
 	WorkerRef *worker.WorkerRef
 }
 
-func NewContainer(ctx context.Context, w worker.Worker, sm *session.Manager, g session.Group, req NewContainerRequest) (client.Container, error) {
-	ctx, cancel := context.WithCancel(ctx)
+func NewContainer(ctx context.Context, cm cache.Manager, exec executor.Executor, sm *session.Manager, g session.Group, req NewContainerRequest) (client.Container, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
 	eg, ctx := errgroup.WithContext(ctx)
-	platform := opspb.Platform{
+	platform := &opspb.Platform{
 		OS:           runtime.GOOS,
 		Architecture: runtime.GOARCH,
 	}
 	if req.Platform != nil {
-		platform = *req.Platform
+		platform = req.Platform
 	}
 	ctr := &gatewayContainer{
 		id:         req.ContainerID,
@@ -63,7 +66,7 @@ func NewContainer(ctx context.Context, w worker.Worker, sm *session.Manager, g s
 		hostname:   req.Hostname,
 		extraHosts: req.ExtraHosts,
 		platform:   platform,
-		executor:   w.Executor(),
+		executor:   exec,
 		sm:         sm,
 		group:      g,
 		errGroup:   eg,
@@ -79,17 +82,16 @@ func NewContainer(ctx context.Context, w worker.Worker, sm *session.Manager, g s
 		mnts = append(mnts, m.Mount)
 		if m.WorkerRef != nil {
 			refs = append(refs, m.WorkerRef)
-			m.Mount.Input = opspb.InputIndex(len(refs) - 1)
+			m.Input = int64(len(refs) - 1)
 		} else {
-			m.Mount.Input = opspb.Empty
+			m.Input = int64(opspb.Empty)
 		}
 	}
 
 	name := fmt.Sprintf("container %s", req.ContainerID)
-	mm := mounts.NewMountManager(name, w.CacheManager(), sm)
-	p, err := PrepareMounts(ctx, mm, w.CacheManager(), g, "", mnts, refs, func(m *opspb.Mount, ref cache.ImmutableRef) (cache.MutableRef, error) {
-		cm := w.CacheManager()
-		if m.Input != opspb.Empty {
+	mm := mounts.NewMountManager(name, cm, sm)
+	p, err := PrepareMounts(ctx, mm, cm, g, "", mnts, refs, func(m *opspb.Mount, ref cache.ImmutableRef) (cache.MutableRef, error) {
+		if m.Input != int64(opspb.Empty) {
 			cm = refs[m.Input].Worker.CacheManager()
 		}
 		return cm.New(ctx, ref, g)
@@ -106,20 +108,43 @@ func NewContainer(ctx context.Context, w worker.Worker, sm *session.Manager, g s
 	ctr.rootFS = p.Root
 	ctr.mounts = p.Mounts
 
+	// Setup the local mounts.
+	ctr.localMounts = setupLocalMounts(mnts, p)
+
 	for _, o := range p.OutputRefs {
-		o := o
 		ctr.cleanup = append(ctr.cleanup, func() error {
 			return o.Ref.Release(context.TODO())
 		})
 	}
 	for _, active := range p.Actives {
-		active := active
 		ctr.cleanup = append(ctr.cleanup, func() error {
 			return active.Ref.Release(context.TODO())
 		})
 	}
 
 	return ctr, nil
+}
+
+// setupLocalMounts will setup the local mounts from the prepared mounts. These need
+// to be in the same order as the original parameters.
+func setupLocalMounts(mnts []*opspb.Mount, p PreparedMounts) []gatewayContainerMount {
+	var mountableByDest map[string]executor.Mountable
+	if len(p.Mounts) > 0 {
+		mountableByDest = make(map[string]executor.Mountable, len(p.Mounts))
+		for _, m := range p.Mounts {
+			mountableByDest[m.Dest] = m.Src
+		}
+	}
+
+	localMounts := make([]gatewayContainerMount, len(mnts))
+	for i, m := range mnts {
+		if m.Dest == "/" {
+			localMounts[i].Src = p.Root.Src
+			continue
+		}
+		localMounts[i].Src = mountableByDest[m.Dest]
+	}
+	return localMounts
 }
 
 type PreparedMounts struct {
@@ -156,7 +181,7 @@ func PrepareMounts(ctx context.Context, mm *mounts.MountManager, cm cache.Manage
 		}
 
 		// if mount is based on input validate and load it
-		if m.Input != opspb.Empty {
+		if m.Input != int64(opspb.Empty) {
 			if int(m.Input) >= len(refs) {
 				return p, errors.Errorf("missing input %d", m.Input)
 			}
@@ -165,12 +190,12 @@ func PrepareMounts(ctx context.Context, mm *mounts.MountManager, cm cache.Manage
 		}
 
 		switch m.MountType {
-		case opspb.MountType_HOST_BIND: //earthly
+		case opspb.MountType_HOST_BIND: // earthly
 			mountable = mm.MountableHostBind(ctx, m)
 
 		case opspb.MountType_BIND:
 			// if mount creates an output
-			if m.Output != opspb.SkipOutput {
+			if m.Output != int64(opspb.SkipOutput) {
 				// if it is readonly and not root then output is the input
 				if m.Readonly && ref != nil && m.Dest != opspb.RootMount {
 					p.OutputRefs = append(p.OutputRefs, MountRef{
@@ -213,7 +238,7 @@ func PrepareMounts(ctx context.Context, mm *mounts.MountManager, cm cache.Manage
 				Ref:        active,
 				NoCommit:   true,
 			})
-			if m.Output != opspb.SkipOutput && ref != nil {
+			if m.Output != int64(opspb.SkipOutput) && ref != nil {
 				p.OutputRefs = append(p.OutputRefs, MountRef{
 					MountIndex: i,
 					Ref:        ref.Clone(),
@@ -263,7 +288,7 @@ func PrepareMounts(ctx context.Context, mm *mounts.MountManager, cm cache.Manage
 		if m.Dest == opspb.RootMount {
 			root := mountable
 			p.ReadonlyRootFS = m.Readonly
-			if m.Output == opspb.SkipOutput && p.ReadonlyRootFS {
+			if m.Output == int64(opspb.SkipOutput) && p.ReadonlyRootFS {
 				active, err := makeMutable(m, ref)
 				if err != nil {
 					return p, err
@@ -289,30 +314,31 @@ func PrepareMounts(ctx context.Context, mm *mounts.MountManager, cm cache.Manage
 	}
 
 	// sort mounts so parents are mounted first
-	sort.Slice(p.Mounts, func(i, j int) bool {
-		return p.Mounts[i].Dest < p.Mounts[j].Dest
+	slices.SortFunc(p.Mounts, func(a, b executor.Mount) int {
+		return cmp.Compare(a.Dest, b.Dest)
 	})
 
 	return p, nil
 }
 
 type gatewayContainer struct {
-	id         string
-	netMode    opspb.NetMode
-	hostname   string
-	extraHosts []executor.HostIP
-	platform   opspb.Platform
-	rootFS     executor.Mount
-	mounts     []executor.Mount
-	executor   executor.Executor
-	sm         *session.Manager
-	group      session.Group
-	started    bool
-	errGroup   *errgroup.Group
-	mu         sync.Mutex
-	cleanup    []func() error
-	ctx        context.Context
-	cancel     func()
+	id          string
+	netMode     opspb.NetMode
+	hostname    string
+	extraHosts  []executor.HostIP
+	platform    *opspb.Platform
+	rootFS      executor.Mount
+	mounts      []executor.Mount
+	executor    executor.Executor
+	sm          *session.Manager
+	group       session.Group
+	started     bool
+	errGroup    *errgroup.Group
+	mu          sync.Mutex
+	cleanup     []func() error
+	ctx         context.Context
+	cancel      func(error)
+	localMounts []gatewayContainerMount
 }
 
 func (gwCtr *gatewayContainer) Start(ctx context.Context, req client.StartRequest) (client.ContainerProcess, error) {
@@ -340,7 +366,7 @@ func (gwCtr *gatewayContainer) Start(ctx context.Context, req client.StartReques
 	if procInfo.Meta.Cwd == "" {
 		procInfo.Meta.Cwd = "/"
 	}
-	procInfo.Meta.Env = addDefaultEnvvar(procInfo.Meta.Env, "PATH", utilsystem.DefaultPathEnv(gwCtr.platform.OS))
+	procInfo.Meta.Env = addDefaultEnvvar(procInfo.Meta.Env, "PATH", system.DefaultPathEnv(gwCtr.platform.OS))
 	if req.Tty {
 		procInfo.Meta.Env = addDefaultEnvvar(procInfo.Meta.Env, "TERM", "xterm")
 	}
@@ -390,7 +416,7 @@ func (gwCtr *gatewayContainer) Start(ctx context.Context, req client.StartReques
 	return gwProc, nil
 }
 
-func (gwCtr *gatewayContainer) loadSecretEnv(ctx context.Context, secretEnv []*pb.SecretEnv) ([]string, error) {
+func (gwCtr *gatewayContainer) loadSecretEnv(ctx context.Context, secretEnv []*opspb.SecretEnv) ([]string, error) {
 	out := make([]string, 0, len(secretEnv))
 	for _, sopt := range secretEnv {
 		id := sopt.ID
@@ -402,14 +428,11 @@ func (gwCtr *gatewayContainer) loadSecretEnv(ctx context.Context, secretEnv []*p
 		err = gwCtr.sm.Any(ctx, gwCtr.group, func(ctx context.Context, _ string, caller session.Caller) error {
 			dt, err = secrets.GetSecret(ctx, caller, id)
 			if err != nil {
-				if errors.Is(err, secrets.ErrNotFound) && sopt.Optional {
-					return nil
-				}
 				return err
 			}
 			return nil
 		})
-		if err != nil {
+		if err != nil && (!errors.Is(err, secrets.ErrNotFound) || !sopt.Optional) {
 			return nil, err
 		}
 		out = append(out, fmt.Sprintf("%s=%s", sopt.Name, string(dt)))
@@ -420,7 +443,7 @@ func (gwCtr *gatewayContainer) loadSecretEnv(ctx context.Context, secretEnv []*p
 func (gwCtr *gatewayContainer) Release(ctx context.Context) error {
 	gwCtr.mu.Lock()
 	defer gwCtr.mu.Unlock()
-	gwCtr.cancel()
+	gwCtr.cancel(errors.WithStack(context.Canceled))
 	err1 := gwCtr.errGroup.Wait()
 
 	var err2 error
@@ -436,6 +459,134 @@ func (gwCtr *gatewayContainer) Release(ctx context.Context) error {
 		return stack.Enable(err1)
 	}
 	return stack.Enable(err2)
+}
+
+func (gwCtr *gatewayContainer) ReadFile(ctx context.Context, req client.ReadContainerRequest) ([]byte, error) {
+	fsys, err := gwCtr.mount(ctx, req.MountIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	fpath, err := relpath(req.Filename)
+	if err != nil {
+		return nil, err
+	}
+	return fs.ReadFile(fsys, fpath)
+}
+
+func (gwCtr *gatewayContainer) ReadDir(ctx context.Context, req client.ReadDirContainerRequest) ([]*fstypes.Stat, error) {
+	fsys, err := gwCtr.mount(ctx, req.MountIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	fpath, err := relpath(req.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := fs.ReadDir(fsys, fpath)
+	if err != nil {
+		return nil, err
+	}
+
+	files := make([]*fstypes.Stat, len(entries))
+	for i, e := range entries {
+		fullpath := filepath.Join(req.Path, e.Name())
+		fi, err := e.Info()
+		if err != nil {
+			return nil, err
+		}
+
+		files[i], err = mkstat(fsys, fullpath, e.Name(), fi)
+		if err != nil {
+			return nil, errors.Wrap(err, "mkstat")
+		}
+	}
+	return files, nil
+}
+
+func (gwCtr *gatewayContainer) StatFile(ctx context.Context, req client.StatContainerRequest) (*fstypes.Stat, error) {
+	fsys, err := gwCtr.mount(ctx, req.MountIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	fpath, err := relpath(req.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	// Attempt to stat the file normally. This may error if the symlink attempts to cross
+	// a filesystem boundary.
+	fi, err := fs.Stat(fsys, fpath)
+	if err != nil {
+		// Normal errors should be returned.
+		if !isPathEscapesRootError(err) {
+			return nil, err
+		}
+
+		// Resolving this symlink causes the path to escape.
+		// Attempt to use lstat and allow the client to perform the resolution.
+		fi, err = fs.Lstat(fsys, fpath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return mkstat(fsys, req.Path, path.Base(req.Path), fi)
+}
+
+func (gwCtr *gatewayContainer) mount(ctx context.Context, index int) (fs.FS, error) {
+	// No lock needed for this because the number of mounts does
+	// not change.
+	if index < 0 || index >= len(gwCtr.localMounts) {
+		return nil, errors.Errorf("mount index %d is out of bounds (%d available)", index, len(gwCtr.localMounts))
+	}
+
+	gwCtr.mu.Lock()
+	defer gwCtr.mu.Unlock()
+
+	mount := gwCtr.localMounts[index]
+
+	// Already mounted?
+	if mount.FS != nil {
+		return mount.FS, nil
+	}
+
+	// Defensively check that this mount really exists.
+	if mount.Src == nil {
+		return nil, errors.Errorf("mountable %d not found", index)
+	}
+
+	// Need to mount an instance.
+	ref, err := mount.Src.Mount(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+
+	mounter := snapshot.LocalMounter(ref)
+	dir, err := mounter.Mount()
+	if err != nil {
+		return nil, err
+	}
+
+	// Register cleanup.
+	gwCtr.cleanup = append(gwCtr.cleanup, func() error {
+		return mounter.Unmount()
+	})
+
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	gwCtr.cleanup = append(gwCtr.cleanup, func() error {
+		return root.Close()
+	})
+
+	f := root.FS()
+	gwCtr.localMounts[index].FS = f
+	return f, nil
 }
 
 type gatewayContainerProcess struct {
@@ -529,4 +680,73 @@ type mountable struct {
 
 func (m *mountable) Mount(ctx context.Context, readonly bool) (snapshot.Mountable, error) {
 	return m.m.Mount(ctx, readonly, m.g)
+}
+
+// constructs a Stat object. path is where the path can be found right
+// now, relpath is the desired path to be recorded in the stat (so
+// relative to whatever base dir is relevant). fi is the os.Stat
+// info. inodemap is used to calculate hardlinks over a series of
+// mkstat calls and maps inode to the canonical (aka "first") path for
+// a set of hardlinks to that inode.
+func mkstat(fsys fs.FS, path, relpath string, fi os.FileInfo) (*fstypes.Stat, error) {
+	relpath = filepath.ToSlash(relpath)
+
+	stat := &fstypes.Stat{
+		Path:    filepath.FromSlash(relpath),
+		Mode:    uint32(fi.Mode()),
+		ModTime: fi.ModTime().UnixNano(),
+	}
+
+	if !fi.IsDir() {
+		stat.Size = fi.Size()
+		if fi.Mode()&os.ModeSymlink != 0 {
+			link, err := readlink(fsys, path)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			stat.Linkname = link
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		permPart := stat.Mode & uint32(os.ModePerm)
+		noPermPart := stat.Mode &^ uint32(os.ModePerm)
+		// Add the x bit: make everything +x from windows
+		permPart |= 0o111
+		permPart &= 0o755
+		stat.Mode = noPermPart | permPart
+	}
+
+	// Clear the socket bit since archive/tar.FileInfoHeader does not handle it
+	stat.Mode &^= uint32(os.ModeSocket)
+
+	return stat, nil
+}
+
+func readlink(fsys fs.FS, p string) (string, error) {
+	fpath, err := relpath(p)
+	if err != nil {
+		return "", err
+	}
+	return fs.ReadLink(fsys, fpath)
+}
+
+// relpath converts an absolute path to a relative path for
+// consumption by the fs.FS APIs. It errors if the path isn't
+// an absolute path.
+func relpath(p string) (string, error) {
+	p2 := path.Clean(p)
+	if len(p2) == 0 || p2[0] != '/' {
+		return "", errors.Errorf("can't make %s relative to /", p)
+	}
+
+	if len(p2) == 1 {
+		return ".", nil
+	}
+	return p2[1:], nil
+}
+
+type gatewayContainerMount struct {
+	Src executor.Mountable
+	FS  fs.FS
 }

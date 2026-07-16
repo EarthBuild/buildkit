@@ -32,8 +32,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/v2/pkg/reference"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/estargz/zstdchunked"
@@ -49,7 +49,6 @@ import (
 	fusefs "github.com/hanwen/go-fuse/v2/fs"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -59,6 +58,18 @@ const (
 	defaultPrefetchTimeoutSec       = 10
 	memoryCacheType                 = "memory"
 )
+
+// passThroughConfig contains configuration for FUSE passthrough mode
+type passThroughConfig struct {
+	// enable indicates whether to enable FUSE passthrough mode
+	enable bool
+
+	// mergeBufferSize is the size of the buffer to merge chunks (in bytes)
+	mergeBufferSize int64
+
+	// mergeWorkerCount is the number of workers to merge chunks
+	mergeWorkerCount int
+}
 
 // Layer represents a layer.
 type Layer interface {
@@ -99,6 +110,10 @@ type Layer interface {
 	// Done releases the reference to this layer. The resources related to this layer will be
 	// discarded sooner or later. Queries after calling this function won't be serviced.
 	Done()
+
+	// Close is the same as Done. But this evicts the resources related to this Layer immediately.
+	// This can be used for cleaning up resources on unmount.
+	Close() error
 }
 
 // Info is the current status of a layer.
@@ -108,6 +123,7 @@ type Info struct {
 	FetchedSize  int64     // layer fetched size in bytes
 	PrefetchSize int64     // layer prefetch size in bytes
 	ReadTime     time.Time // last time the layer was read
+	TOCDigest    digest.Digest
 }
 
 // Resolver resolves the layer location and provieds the handler of that layer.
@@ -144,10 +160,10 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	layerCache := cacheutil.NewTTLCache(resolveResultEntryTTL)
 	layerCache.OnEvicted = func(key string, value interface{}) {
 		if err := value.(*layer).close(); err != nil {
-			logrus.WithField("key", key).WithError(err).Warnf("failed to clean up layer")
+			log.L.WithField("key", key).WithError(err).Warnf("failed to clean up layer")
 			return
 		}
-		logrus.WithField("key", key).Debugf("cleaned up layer")
+		log.L.WithField("key", key).Debugf("cleaned up layer")
 	}
 
 	// blobCache caches resolved blobs for futural use. This is especially useful when a layer
@@ -155,10 +171,10 @@ func NewResolver(root string, backgroundTaskManager *task.BackgroundTaskManager,
 	blobCache := cacheutil.NewTTLCache(resolveResultEntryTTL)
 	blobCache.OnEvicted = func(key string, value interface{}) {
 		if err := value.(remote.Blob).Close(); err != nil {
-			logrus.WithField("key", key).WithError(err).Warnf("failed to clean up blob")
+			log.L.WithField("key", key).WithError(err).Warnf("failed to clean up blob")
 			return
 		}
-		logrus.WithField("key", key).Debugf("cleaned up blob")
+		log.L.WithField("key", key).Debugf("cleaned up blob")
 	}
 
 	if err := os.MkdirAll(root, 0700); err != nil {
@@ -219,11 +235,12 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 	return cache.NewDirectoryCache(
 		cachePath,
 		cache.DirectoryCacheConfig{
-			SyncAdd:   dcc.SyncAdd,
-			DataCache: dCache,
-			FdCache:   fCache,
-			BufPool:   bufPool,
-			Direct:    dcc.Direct,
+			SyncAdd:      dcc.SyncAdd,
+			DataCache:    dCache,
+			FdCache:      fCache,
+			BufPool:      bufPool,
+			Direct:       dcc.Direct,
+			FadvDontNeed: dcc.FadvDontNeed,
 		},
 	)
 }
@@ -249,7 +266,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 			return &layerRef{l, done}, nil
 		}
 		// Cached layer is invalid
-		done()
+		done(true)
 		r.layerCacheMu.Lock()
 		r.layerCache.Remove(name)
 		r.layerCacheMu.Unlock()
@@ -264,7 +281,7 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	}
 	defer func() {
 		if retErr != nil {
-			blobR.done()
+			blobR.done(true)
 		}
 	}()
 
@@ -315,7 +332,11 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 	}
 
 	// Combine layer information together and cache it.
-	l := newLayer(r, desc, blobR, vr)
+	l := newLayer(r, desc, blobR, vr, passThroughConfig{
+		enable:           r.config.PassThrough,
+		mergeBufferSize:  r.config.MergeBufferSize,
+		mergeWorkerCount: r.config.MergeWorkerCount,
+	}, r.config.LogFileAccess)
 	r.layerCacheMu.Lock()
 	cachedL, done2, added := r.layerCache.Add(name, l)
 	r.layerCacheMu.Unlock()
@@ -340,7 +361,7 @@ func (r *Resolver) resolveBlob(ctx context.Context, hosts source.RegistryHosts, 
 			return &blobRef{blob, done}, nil
 		}
 		// invalid blob. discard this.
-		done()
+		done(true)
 		r.blobCacheMu.Lock()
 		r.blobCache.Remove(name)
 		r.blobCacheMu.Unlock()
@@ -375,6 +396,8 @@ func newLayer(
 	desc ocispec.Descriptor,
 	blob *blobRef,
 	vr *reader.VerifiableReader,
+	pth passThroughConfig,
+	logFileAccess bool,
 ) *layer {
 	return &layer{
 		resolver:         resolver,
@@ -382,6 +405,8 @@ func newLayer(
 		blob:             blob,
 		verifiableReader: vr,
 		prefetchWaiter:   newWaiter(),
+		passThrough:      pth,
+		logFileAccess:    logFileAccess,
 	}
 }
 
@@ -402,6 +427,8 @@ type layer struct {
 
 	prefetchOnce        sync.Once
 	backgroundFetchOnce sync.Once
+	passThrough         passThroughConfig
+	logFileAccess       bool
 }
 
 func (l *layer) Info() Info {
@@ -415,6 +442,7 @@ func (l *layer) Info() Info {
 		FetchedSize:  l.blob.FetchedSize(),
 		PrefetchSize: l.prefetchedSize(),
 		ReadTime:     readTime,
+		TOCDigest:    l.verifiableReader.Metadata().TOCDigest(),
 	}
 }
 
@@ -499,6 +527,16 @@ func (l *layer) prefetch(ctx context.Context, prefetchSize int64) error {
 		prefetchSize = l.blob.Size()
 	}
 
+	threshold := l.resolver.config.PrefetchAsyncSize
+	if threshold > 0 && prefetchSize > threshold {
+		log.G(ctx).Infof(
+			"prefetch size %d > threshold %d; allow container run while prefetching in background",
+			prefetchSize,
+			threshold,
+		)
+		l.prefetchWaiter.done()
+	}
+
 	// Fetch the target range
 	downloadStart := time.Now()
 	err := l.blob.Cache(0, prefetchSize)
@@ -572,7 +610,12 @@ func (l *layer) backgroundFetch(ctx context.Context) error {
 }
 
 func (l *layerRef) Done() {
-	l.done()
+	l.done(false) // leave chances to reuse this
+}
+
+func (l *layerRef) Close() error {
+	l.done(true) // evict this from the cache
+	return nil
 }
 
 func (l *layer) RootNode(baseInode uint32) (fusefs.InodeEmbedder, error) {
@@ -582,7 +625,7 @@ func (l *layer) RootNode(baseInode uint32) (fusefs.InodeEmbedder, error) {
 	if l.r == nil {
 		return nil, fmt.Errorf("layer hasn't been verified yet")
 	}
-	return newNode(l.desc.Digest, l.r, l.blob, baseInode, l.resolver.overlayOpaqueType)
+	return newNode(l.desc.Digest, l.r, l.blob, baseInode, l.resolver.overlayOpaqueType, l.passThrough, l.logFileAccess)
 }
 
 func (l *layer) ReadAt(p []byte, offset int64, opts ...remote.Option) (int, error) {
@@ -596,7 +639,7 @@ func (l *layer) close() error {
 		return nil
 	}
 	l.closed = true
-	defer l.blob.done() // Close reader first, then close the blob
+	defer l.blob.done(true) // Close reader first, then close the blob
 	l.verifiableReader.Close()
 	if l.r != nil {
 		return l.r.Close()
@@ -616,7 +659,7 @@ func (l *layer) isClosed() bool {
 // to this blob will be discarded.
 type blobRef struct {
 	remote.Blob
-	done func()
+	done func(bool)
 }
 
 // layerRef is a reference to the layer in the cache. Calling `Done` or `done` decreases the
@@ -624,7 +667,7 @@ type blobRef struct {
 // cache, resources bound to this layer will be discarded.
 type layerRef struct {
 	*layer
-	done func()
+	done func(bool)
 }
 
 func newWaiter() *waiter {

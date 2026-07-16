@@ -1,5 +1,4 @@
 //go:build windows
-// +build windows
 
 package cniprovider
 
@@ -9,7 +8,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func createNetNS(_ *cniProvider, id string) (string, error) {
+func createNetNS(_ *cniProvider, _ string) (string, error) {
 	nsTemplate := hcn.NewNamespace(hcn.NamespaceTypeGuest)
 	ns, err := nsTemplate.Create()
 	if err != nil {
@@ -34,7 +33,7 @@ func setNetNS(s *specs.Spec, nativeID string) error {
 	return nil
 }
 
-func unmountNetNS(nativeID string) error {
+func unmountNetNS(_ string) error {
 	// We don't need to unmount the NS.
 	return nil
 }

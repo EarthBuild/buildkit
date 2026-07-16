@@ -3,9 +3,10 @@
 package common
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/spdx/tools-golang/json/marshal"
 )
 
 type Annotator struct {
@@ -21,14 +22,14 @@ func (a *Annotator) UnmarshalJSON(data []byte) error {
 	annotatorStr := string(data)
 	annotatorStr = strings.Trim(annotatorStr, "\"")
 
-	annotatorFields := strings.SplitN(annotatorStr, ": ", 2)
+	annotatorFields := strings.SplitN(annotatorStr, ":", 2)
 
 	if len(annotatorFields) != 2 {
 		return fmt.Errorf("failed to parse Annotator '%s'", annotatorStr)
 	}
 
-	a.AnnotatorType = annotatorFields[0]
-	a.Annotator = annotatorFields[1]
+	a.AnnotatorType = strings.TrimSpace(annotatorFields[0])
+	a.Annotator = strings.TrimSpace(annotatorFields[1])
 
 	return nil
 }
@@ -37,7 +38,7 @@ func (a *Annotator) UnmarshalJSON(data []byte) error {
 // This function is also used when marshalling to YAML
 func (a Annotator) MarshalJSON() ([]byte, error) {
 	if a.Annotator != "" {
-		return json.Marshal(fmt.Sprintf("%s: %s", a.AnnotatorType, a.Annotator))
+		return marshal.JSON(fmt.Sprintf("%s: %s", a.AnnotatorType, a.Annotator))
 	}
 
 	return []byte{}, nil

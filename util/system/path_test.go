@@ -3,7 +3,6 @@ package system
 import (
 	"testing"
 
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -77,7 +76,7 @@ func TestNormalizeWorkdir(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := NormalizeWorkdir(tc.currentWorkdir, tc.newWorkDir, "linux")
 			if tc.err != "" {
-				require.EqualError(t, errors.Cause(err), tc.err)
+				require.ErrorContains(t, err, tc.err)
 			} else {
 				require.NoError(t, err)
 			}
@@ -88,16 +87,17 @@ func TestNormalizeWorkdir(t *testing.T) {
 
 // TestCheckSystemDriveAndRemoveDriveLetter tests CheckSystemDriveAndRemoveDriveLetter
 func TestCheckSystemDriveAndRemoveDriveLetter(t *testing.T) {
+	keepSlash := false
 	// Fails if not C drive.
-	_, err := CheckSystemDriveAndRemoveDriveLetter(`d:\`, "windows")
-	if err == nil || (err != nil && err.Error() != "The specified path is not on the system drive (C:)") {
+	_, err := CheckSystemDriveAndRemoveDriveLetter(`d:\`, "windows", keepSlash)
+	if err == nil || err.Error() != "The specified path is not on the system drive (C:)" {
 		t.Fatalf("Expected error for d:")
 	}
 
 	var path string
 
 	// Single character is unchanged
-	if path, err = CheckSystemDriveAndRemoveDriveLetter("z", "windows"); err != nil {
+	if path, err = CheckSystemDriveAndRemoveDriveLetter("z", "windows", keepSlash); err != nil {
 		t.Fatalf("Single character should pass")
 	}
 	if path != "z" {
@@ -105,7 +105,7 @@ func TestCheckSystemDriveAndRemoveDriveLetter(t *testing.T) {
 	}
 
 	// Two characters without colon is unchanged
-	if path, err = CheckSystemDriveAndRemoveDriveLetter("AB", "windows"); err != nil {
+	if path, err = CheckSystemDriveAndRemoveDriveLetter("AB", "windows", keepSlash); err != nil {
 		t.Fatalf("2 characters without colon should pass")
 	}
 	if path != "AB" {
@@ -113,7 +113,7 @@ func TestCheckSystemDriveAndRemoveDriveLetter(t *testing.T) {
 	}
 
 	// Abs path without drive letter
-	if path, err = CheckSystemDriveAndRemoveDriveLetter(`\l`, "windows"); err != nil {
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(`\l`, "windows", keepSlash); err != nil {
 		t.Fatalf("abs path no drive letter should pass")
 	}
 	if path != `/l` {
@@ -121,7 +121,7 @@ func TestCheckSystemDriveAndRemoveDriveLetter(t *testing.T) {
 	}
 
 	// Abs path without drive letter, linux style
-	if path, err = CheckSystemDriveAndRemoveDriveLetter(`/l`, "windows"); err != nil {
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(`/l`, "windows", keepSlash); err != nil {
 		t.Fatalf("abs path no drive letter linux style should pass")
 	}
 	if path != `/l` {
@@ -129,7 +129,7 @@ func TestCheckSystemDriveAndRemoveDriveLetter(t *testing.T) {
 	}
 
 	// Drive-colon should be stripped
-	if path, err = CheckSystemDriveAndRemoveDriveLetter(`c:\`, "windows"); err != nil {
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(`c:\`, "windows", keepSlash); err != nil {
 		t.Fatalf("An absolute path should pass")
 	}
 	if path != `/` {
@@ -137,7 +137,7 @@ func TestCheckSystemDriveAndRemoveDriveLetter(t *testing.T) {
 	}
 
 	// Verify with a linux-style path
-	if path, err = CheckSystemDriveAndRemoveDriveLetter(`c:/`, "windows"); err != nil {
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(`c:/`, "windows", keepSlash); err != nil {
 		t.Fatalf("An absolute path should pass")
 	}
 	if path != `/` {
@@ -145,7 +145,7 @@ func TestCheckSystemDriveAndRemoveDriveLetter(t *testing.T) {
 	}
 
 	// Failure on c:
-	if path, err = CheckSystemDriveAndRemoveDriveLetter(`c:`, "windows"); err == nil {
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(`c:`, "windows", keepSlash); err == nil {
 		t.Fatalf("c: should fail")
 	}
 	if err.Error() != `No relative path specified in "c:"` {
@@ -153,7 +153,7 @@ func TestCheckSystemDriveAndRemoveDriveLetter(t *testing.T) {
 	}
 
 	// Failure on d:
-	if path, err = CheckSystemDriveAndRemoveDriveLetter(`d:`, "windows"); err == nil {
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(`d:`, "windows", keepSlash); err == nil {
 		t.Fatalf("c: should fail")
 	}
 	if err.Error() != `No relative path specified in "d:"` {
@@ -161,12 +161,48 @@ func TestCheckSystemDriveAndRemoveDriveLetter(t *testing.T) {
 	}
 
 	// UNC path should fail.
-	if _, err = CheckSystemDriveAndRemoveDriveLetter(`\\.\C$\test`, "windows"); err == nil {
+	if _, err = CheckSystemDriveAndRemoveDriveLetter(`\\.\C$\test`, "windows", keepSlash); err == nil {
 		t.Fatalf("UNC path should fail")
+	}
+
+	// also testing for keepSlash = true
+	keepSlash = true
+	origPath := "\\a\\b\\..\\c\\"
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(origPath, "windows", keepSlash); err != nil {
+		t.Fatalf("windows relative paths should be cleaned and should pass")
+	}
+	// When input OS is Windows, the path should be properly cleaned
+	if path != "/a/c/" {
+		t.Fatalf("Path was not cleaned successfully")
+	}
+
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(origPath, "windows", false); err != nil {
+		t.Fatalf("windows relative paths should be cleaned and should pass [keepSlash = false]")
+	}
+	// When input OS is Windows, the path should be properly cleaned
+	if path != "/a/c" {
+		t.Fatalf("Path was not cleaned successfully [keepSlash = false]")
+	}
+
+	// windows-style relative paths on linux
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(origPath, "linux", keepSlash); err != nil {
+		t.Fatalf("windows style relative paths should be considered a valid path element in linux and should pass")
+	}
+	// When input OS is Linux, this is a valid path element name.
+	if path != "\\a\\b\\..\\c\\" {
+		t.Fatalf("Path was not cleaned successfully")
+	}
+
+	if path, err = CheckSystemDriveAndRemoveDriveLetter(origPath, "linux", false); err != nil {
+		t.Fatalf("windows style relative paths should be considered a valid path element in linux and should pass")
+	}
+	// When input OS is Linux, this is a valid path element name.
+	if path != "\\a\\b\\..\\c\\" {
+		t.Fatalf("Path was not cleaned successfully [keepSlash = false]")
 	}
 }
 
-// TestNormalizeWorkdir tests NormalizeWorkdir
+// TestNormalizeWorkdirWindows tests NormalizeWorkdir
 func TestNormalizeWorkdirWindows(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -300,7 +336,7 @@ func TestNormalizeWorkdirWindows(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := NormalizeWorkdir(tc.currentWorkdir, tc.newWorkDir, "windows")
 			if tc.err != "" {
-				require.EqualError(t, errors.Cause(err), tc.err)
+				require.ErrorContains(t, err, tc.err)
 			} else {
 				require.NoError(t, err)
 			}
@@ -365,7 +401,7 @@ func TestNormalizeWorkdirUnix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := NormalizeWorkdir(tc.currentWorkdir, tc.newWorkDir, "linux")
 			if tc.err != "" {
-				require.EqualError(t, errors.Cause(err), tc.err)
+				require.ErrorContains(t, err, tc.err)
 			} else {
 				require.NoError(t, err)
 			}

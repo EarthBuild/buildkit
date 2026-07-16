@@ -2,12 +2,13 @@ package ops
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"path"
 	"runtime"
-	"sort"
+	"slices"
 	"sync"
 
 	"github.com/moby/buildkit/cache"
@@ -18,6 +19,7 @@ import (
 	"github.com/moby/buildkit/solver/llbsolver/ops/fileoptypes"
 	"github.com/moby/buildkit/solver/llbsolver/ops/opsutils"
 	"github.com/moby/buildkit/solver/pb"
+	"github.com/moby/buildkit/util/cachedigest"
 	"github.com/moby/buildkit/util/flightcontrol"
 	"github.com/moby/buildkit/util/semutil"
 	"github.com/moby/buildkit/worker"
@@ -50,13 +52,13 @@ func NewFileOp(v solver.Vertex, op *pb.Op_File, cm cache.Manager, parallelism *s
 	}, nil
 }
 
-func (f *fileOp) CacheMap(ctx context.Context, g session.Group, index int) (*solver.CacheMap, bool, error) {
+func (f *fileOp) CacheMap(ctx context.Context, jobCtx solver.JobContext, index int) (*solver.CacheMap, bool, error) {
 	selectors := map[int][]opsutils.Selector{}
 	invalidSelectors := map[int]struct{}{}
 
 	actions := make([][]byte, 0, len(f.op.Actions))
 
-	markInvalid := func(idx pb.InputIndex) {
+	markInvalid := func(idx int64) {
 		if idx != -1 {
 			invalidSelectors[int(idx)] = struct{}{}
 		}
@@ -69,7 +71,7 @@ func (f *fileOp) CacheMap(ctx context.Context, g session.Group, index int) (*sol
 		var err error
 		switch a := action.Action.(type) {
 		case *pb.FileAction_Mkdir:
-			p := *a.Mkdir
+			p := a.Mkdir.CloneVT()
 			markInvalid(action.Input)
 			processOwner(p.Owner, selectors)
 			dt, err = json.Marshal(p)
@@ -77,26 +79,33 @@ func (f *fileOp) CacheMap(ctx context.Context, g session.Group, index int) (*sol
 				return nil, false, err
 			}
 		case *pb.FileAction_Mkfile:
-			p := *a.Mkfile
+			p := a.Mkfile.CloneVT()
 			markInvalid(action.Input)
 			processOwner(p.Owner, selectors)
 			dt, err = json.Marshal(p)
 			if err != nil {
 				return nil, false, err
 			}
+		case *pb.FileAction_Symlink:
+			p := a.Symlink.CloneVT()
+			markInvalid(action.Input)
+			dt, err = json.Marshal(p)
+			if err != nil {
+				return nil, false, err
+			}
 		case *pb.FileAction_Rm:
-			p := *a.Rm
+			p := a.Rm.CloneVT()
 			markInvalid(action.Input)
 			dt, err = json.Marshal(p)
 			if err != nil {
 				return nil, false, err
 			}
 		case *pb.FileAction_Copy:
-			p := *a.Copy
+			p := a.Copy.CloneVT()
 			markInvalid(action.Input)
 			processOwner(p.Owner, selectors)
 			if action.SecondaryInput != -1 && int(action.SecondaryInput) < f.numInputs {
-				addSelector(selectors, int(action.SecondaryInput), p.Src, p.AllowWildcard, p.FollowSymlink, p.IncludePatterns, p.ExcludePatterns)
+				addSelector(selectors, int(action.SecondaryInput), p.Src, p.AllowWildcard, p.FollowSymlink, p.IncludePatterns, p.ExcludePatterns, p.RequiredPaths)
 				p.Src = path.Base(p.Src)
 			}
 			dt, err = json.Marshal(p)
@@ -126,8 +135,12 @@ func (f *fileOp) CacheMap(ctx context.Context, g session.Group, index int) (*sol
 		return nil, false, err
 	}
 
+	dgst, err := cachedigest.FromBytes(dt, cachedigest.TypeJSON)
+	if err != nil {
+		return nil, false, err
+	}
 	cm := &solver.CacheMap{
-		Digest: digest.FromBytes(dt),
+		Digest: dgst,
 		Deps: make([]struct {
 			Selector          digest.Digest
 			ComputeDigestFunc solver.ResultBasedCacheFunc
@@ -139,14 +152,17 @@ func (f *fileOp) CacheMap(ctx context.Context, g session.Group, index int) (*sol
 		if _, ok := invalidSelectors[idx]; ok {
 			continue
 		}
-		dgsts := make([][]byte, 0, len(m))
+		paths := make([][]byte, 0, len(m))
 		for _, k := range m {
-			dgsts = append(dgsts, []byte(k.Path))
+			paths = append(paths, []byte(k.Path))
 		}
-		sort.Slice(dgsts, func(i, j int) bool {
-			return bytes.Compare(dgsts[i], dgsts[j]) > 0
-		})
-		cm.Deps[idx].Selector = digest.FromBytes(bytes.Join(dgsts, []byte{0}))
+		slices.SortFunc(paths, bytes.Compare)
+		slices.Reverse(paths) // historical reasons
+		dgst, err := cachedigest.FromBytes(bytes.Join(paths, []byte{0}), cachedigest.TypeStringList)
+		if err != nil {
+			return nil, false, err
+		}
+		cm.Deps[idx].Selector = dgst
 
 		cm.Deps[idx].ComputeDigestFunc = opsutils.NewContentHashFunc(dedupeSelectors(m))
 	}
@@ -157,7 +173,7 @@ func (f *fileOp) CacheMap(ctx context.Context, g session.Group, index int) (*sol
 	return cm, true, nil
 }
 
-func (f *fileOp) Exec(ctx context.Context, g session.Group, inputs []solver.Result) ([]solver.Result, error) {
+func (f *fileOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []solver.Result) ([]solver.Result, error) {
 	inpRefs := make([]fileoptypes.Ref, 0, len(inputs))
 	for _, inp := range inputs {
 		workerRef, ok := inp.Sys().(*worker.WorkerRef)
@@ -169,11 +185,11 @@ func (f *fileOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 
 	backend, err := file.NewFileOpBackend(getReadUserFn(f.w))
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	fs := NewFileOpSolver(f.w, backend, f.refManager)
-	outs, err := fs.Solve(ctx, inpRefs, f.op.Actions, g)
+	outs, err := fs.Solve(ctx, inpRefs, f.op.Actions, jobCtx.Session())
 	if err != nil {
 		return nil, err
 	}
@@ -199,13 +215,14 @@ func (f *fileOp) Acquire(ctx context.Context) (solver.ReleaseFunc, error) {
 	}, nil
 }
 
-func addSelector(m map[int][]opsutils.Selector, idx int, sel string, wildcard, followLinks bool, includePatterns, excludePatterns []string) {
+func addSelector(m map[int][]opsutils.Selector, idx int, sel string, wildcard, followLinks bool, includePatterns, excludePatterns, requiredPaths []string) {
 	s := opsutils.Selector{
 		Path:            sel,
 		FollowLinks:     followLinks,
 		Wildcard:        wildcard && containsWildcards(sel),
 		IncludePatterns: includePatterns,
 		ExcludePatterns: excludePatterns,
+		RequiredPaths:   requiredPaths,
 	}
 
 	m[idx] = append(m[idx], s)
@@ -253,10 +270,9 @@ func dedupeSelectors(m []opsutils.Selector) []opsutils.Selector {
 		}
 	}
 
-	sort.Slice(selectors, func(i, j int) bool {
-		return selectors[i].Path < selectors[j].Path
+	slices.SortFunc(selectors, func(i, j opsutils.Selector) int {
+		return cmp.Compare(i.Path, j.Path)
 	})
-
 	return selectors
 }
 
@@ -269,7 +285,7 @@ func processOwner(chopt *pb.ChownOpt, selectors map[int][]opsutils.Selector) err
 			if u.ByName.Input < 0 {
 				return errors.Errorf("invalid user index %d", u.ByName.Input)
 			}
-			addSelector(selectors, int(u.ByName.Input), "/etc/passwd", false, true, nil, nil)
+			addSelector(selectors, int(u.ByName.Input), "/etc/passwd", false, true, nil, nil, nil)
 		}
 	}
 	if chopt.Group != nil {
@@ -277,7 +293,7 @@ func processOwner(chopt *pb.ChownOpt, selectors map[int][]opsutils.Selector) err
 			if u.ByName.Input < 0 {
 				return errors.Errorf("invalid user index %d", u.ByName.Input)
 			}
-			addSelector(selectors, int(u.ByName.Input), "/etc/group", false, true, nil, nil)
+			addSelector(selectors, int(u.ByName.Input), "/etc/group", false, true, nil, nil, nil)
 		}
 	}
 	return nil
@@ -345,7 +361,7 @@ func (s *FileOpSolver) Solve(ctx context.Context, inputs []fileoptypes.Ref, acti
 		return nil, errors.Errorf("no outputs specified")
 	}
 
-	for i := 0; i < len(s.outs); i++ {
+	for i := range len(s.outs) {
 		if _, ok := s.outs[i]; !ok {
 			return nil, errors.Errorf("missing output index %d", i)
 		}
@@ -354,7 +370,7 @@ func (s *FileOpSolver) Solve(ctx context.Context, inputs []fileoptypes.Ref, acti
 	defer func() {
 		for _, in := range s.ins {
 			if in.ref == nil && in.mount != nil {
-				in.mount.Release(context.TODO())
+				in.mount.Release(context.WithoutCancel(ctx))
 			}
 		}
 	}()
@@ -391,10 +407,8 @@ func (s *FileOpSolver) Solve(ctx context.Context, inputs []fileoptypes.Ref, acti
 }
 
 func (s *FileOpSolver) validate(idx int, inputs []fileoptypes.Ref, actions []*pb.FileAction, loaded []int) error {
-	for _, check := range loaded {
-		if idx == check {
-			return errors.Errorf("loop from index %d", idx)
-		}
+	if slices.Contains(loaded, idx) {
+		return errors.Errorf("loop from index %d", idx)
 	}
 	if idx < len(inputs) {
 		return nil
@@ -432,6 +446,7 @@ func (s *FileOpSolver) getInput(ctx context.Context, idx int, inputs []fileoptyp
 
 		defer func() {
 			if err != nil && inpMount != nil {
+				ctx := context.WithoutCancel(ctx)
 				inputRes := make([]solver.Result, len(inputs))
 				for i, input := range inputs {
 					inputRes[i] = worker.NewWorkerRefResult(input.(cache.ImmutableRef), s.w)
@@ -458,8 +473,9 @@ func (s *FileOpSolver) getInput(ctx context.Context, idx int, inputs []fileoptyp
 
 				err = errdefs.WithExecErrorWithContext(ctx, err, inputRes, outputRes)
 			}
+			ctx := context.WithoutCancel(ctx)
 			for _, m := range toRelease {
-				m.Release(context.TODO())
+				m.Release(ctx)
 			}
 		}()
 
@@ -472,7 +488,7 @@ func (s *FileOpSolver) getInput(ctx context.Context, idx int, inputs []fileoptyp
 				if inp.ref != nil {
 					m, err := s.r.Prepare(ctx, inp.ref, false, g)
 					if err != nil {
-						return err
+						return errors.WithStack(err)
 					}
 					inpMount = m
 					return nil
@@ -491,7 +507,7 @@ func (s *FileOpSolver) getInput(ctx context.Context, idx int, inputs []fileoptyp
 				if inp.ref != nil {
 					m, err := s.r.Prepare(ctx, inp.ref, true, g)
 					if err != nil {
-						return err
+						return errors.WithStack(err)
 					}
 					inpMountSecondary = m
 					toRelease = append(toRelease, m)
@@ -519,7 +535,7 @@ func (s *FileOpSolver) getInput(ctx context.Context, idx int, inputs []fileoptyp
 				if inp.ref != nil {
 					mm, err := s.r.Prepare(ctx, inp.ref, true, g)
 					if err != nil {
-						return nil, err
+						return nil, errors.WithStack(err)
 					}
 					toRelease = append(toRelease, mm)
 					m = mm
@@ -570,7 +586,7 @@ func (s *FileOpSolver) getInput(ctx context.Context, idx int, inputs []fileoptyp
 		if inpMount == nil {
 			m, err := s.r.Prepare(ctx, nil, false, g)
 			if err != nil {
-				return input{}, err
+				return input{}, errors.WithStack(err)
 			}
 			inpMount = m
 		}
@@ -581,7 +597,15 @@ func (s *FileOpSolver) getInput(ctx context.Context, idx int, inputs []fileoptyp
 			if err != nil {
 				return input{}, err
 			}
-			if err := s.b.Mkdir(ctx, inpMount, user, group, *a.Mkdir); err != nil {
+			if err := s.b.Mkdir(ctx, inpMount, user, group, a.Mkdir); err != nil {
+				return input{}, err
+			}
+		case *pb.FileAction_Symlink:
+			user, group, err := loadOwner(ctx, a.Symlink.Owner)
+			if err != nil {
+				return input{}, err
+			}
+			if err := s.b.Symlink(ctx, inpMount, user, group, a.Symlink); err != nil {
 				return input{}, err
 			}
 		case *pb.FileAction_Mkfile:
@@ -589,11 +613,11 @@ func (s *FileOpSolver) getInput(ctx context.Context, idx int, inputs []fileoptyp
 			if err != nil {
 				return input{}, err
 			}
-			if err := s.b.Mkfile(ctx, inpMount, user, group, *a.Mkfile); err != nil {
+			if err := s.b.Mkfile(ctx, inpMount, user, group, a.Mkfile); err != nil {
 				return input{}, err
 			}
 		case *pb.FileAction_Rm:
-			if err := s.b.Rm(ctx, inpMount, *a.Rm); err != nil {
+			if err := s.b.Rm(ctx, inpMount, a.Rm); err != nil {
 				return input{}, err
 			}
 		case *pb.FileAction_Copy:
@@ -608,7 +632,7 @@ func (s *FileOpSolver) getInput(ctx context.Context, idx int, inputs []fileoptyp
 			if err != nil {
 				return input{}, err
 			}
-			if err := s.b.Copy(ctx, inpMountSecondary, inpMount, user, group, *a.Copy); err != nil {
+			if err := s.b.Copy(ctx, inpMountSecondary, inpMount, user, group, a.Copy); err != nil {
 				return input{}, err
 			}
 		default:

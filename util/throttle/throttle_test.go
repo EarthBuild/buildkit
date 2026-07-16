@@ -26,12 +26,10 @@ func TestThrottle(t *testing.T) {
 	// test that i is never incremented twice and at least once in next 600ms
 	retries := 0
 	for {
-		require.True(t, retries < 10)
+		require.Less(t, retries, 10)
 		time.Sleep(60 * time.Millisecond)
 		v := atomic.LoadInt64(&i)
-		if v > 1 {
-			require.Fail(t, "invalid value %d", v)
-		}
+		require.LessOrEqual(t, v, int64(1))
 		if v == 1 {
 			break
 		}
@@ -44,7 +42,7 @@ func TestThrottle(t *testing.T) {
 
 	retries = 0
 	for {
-		require.True(t, retries < 10)
+		require.Less(t, retries, 10)
 		time.Sleep(60 * time.Millisecond)
 		v := atomic.LoadInt64(&i)
 		if v == 2 {

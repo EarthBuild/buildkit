@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/distribution/reference"
 	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
-	"github.com/moby/buildkit/exporter/containerimage/image"
 	"github.com/moby/buildkit/frontend/gateway/client"
+	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/imageutil"
+	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 	"github.com/moby/patternmatcher/ignorefile"
 	"github.com/pkg/errors"
 )
@@ -23,30 +26,54 @@ const (
 	maxContextRecursion = 10
 )
 
-func (bc *Client) namedContext(ctx context.Context, name string, nameWithPlatform string, opt ContextOpt) (*llb.State, *image.Image, error) {
-	return bc.namedContextRecursive(ctx, name, nameWithPlatform, opt, 0)
+type NamedContext struct {
+	input            string
+	bc               *Client
+	name             string
+	nameWithPlatform string
+	sharedKey        string
+	opt              ContextOpt
 }
 
-func (bc *Client) namedContextRecursive(ctx context.Context, name string, nameWithPlatform string, opt ContextOpt, count int) (*llb.State, *image.Image, error) {
+func (bc *Client) namedContext(name string, nameWithPlatform string, opt ContextOpt) (*NamedContext, error) {
 	opts := bc.bopts.Opts
-	v, ok := opts[contextPrefix+nameWithPlatform]
+	contextKey := contextPrefix + nameWithPlatform
+	v, ok := opts[contextKey]
 	if !ok {
-		return nil, nil, nil
+		return nil, nil
 	}
+	sharedKey := opts["sharedkey:localdir:"+nameWithPlatform]
 
+	return &NamedContext{
+		input:            v,
+		bc:               bc,
+		name:             name,
+		nameWithPlatform: nameWithPlatform,
+		sharedKey:        sharedKey,
+		opt:              opt,
+	}, nil
+}
+
+func (nc *NamedContext) Load(ctx context.Context) (*llb.State, *dockerspec.DockerOCIImage, error) {
+	return nc.load(ctx, 0)
+}
+
+func (nc *NamedContext) load(ctx context.Context, count int) (*llb.State, *dockerspec.DockerOCIImage, error) {
+	opt := nc.opt
 	if count > maxContextRecursion {
-		return nil, nil, errors.New("context recursion limit exceeded; this may indicate a cycle in the provided source policies: " + v)
+		return nil, nil, errors.New("context recursion limit exceeded; this may indicate a cycle in the provided source policies: " + nc.input)
 	}
 
-	vv := strings.SplitN(v, ":", 2)
+	vv := strings.SplitN(nc.input, ":", 2)
 	if len(vv) != 2 {
-		return nil, nil, errors.Errorf("invalid context specifier %s for %s", v, nameWithPlatform)
+		return nil, nil, errors.Errorf("invalid context specifier %s for %s", nc.input, nc.nameWithPlatform)
 	}
 
 	// allow git@ without protocol for SSH URLs for backwards compatibility
 	if strings.HasPrefix(vv[0], "git@") {
 		vv[0] = "git"
 	}
+
 	switch vv[0] {
 	case "docker-image":
 		ref := strings.TrimPrefix(vv[1], "//")
@@ -56,7 +83,7 @@ func (bc *Client) namedContextRecursive(ctx context.Context, name string, nameWi
 		}
 
 		imgOpt := []llb.ImageOption{
-			llb.WithCustomName("[context " + nameWithPlatform + "] " + ref),
+			llb.WithCustomName("[context " + nc.nameWithPlatform + "] " + ref),
 		}
 		if opt.Platform != nil {
 			imgOpt = append(imgOpt, llb.Platform(*opt.Platform))
@@ -69,21 +96,36 @@ func (bc *Client) namedContextRecursive(ctx context.Context, name string, nameWi
 
 		named = reference.TagNameOnly(named)
 
-		ref, dgst, data, err := bc.client.ResolveImageConfig(ctx, named.String(), llb.ResolveImageConfigOpt{
-			Platform:     opt.Platform,
-			ResolveMode:  opt.ResolveMode,
-			LogName:      fmt.Sprintf("[context %s] load metadata for %s", nameWithPlatform, ref),
-			ResolverType: llb.ResolverTypeRegistry,
+		ref, dgst, data, err := nc.bc.client.ResolveImageConfig(ctx, named.String(), sourceresolver.Opt{
+			LogName: fmt.Sprintf("[context %s] load metadata for %s", nc.nameWithPlatform, ref),
+			ImageOpt: &sourceresolver.ResolveImageOpt{
+				Platform:    opt.Platform,
+				ResolveMode: opt.ResolveMode,
+			},
 		})
 		if err != nil {
 			e := &imageutil.ResolveToNonImageError{}
 			if errors.As(err, &e) {
-				return bc.namedContextRecursive(ctx, e.Updated, name, opt, count+1)
+				before, after, ok := strings.Cut(e.Updated, "://")
+				if !ok {
+					return nil, nil, errors.Errorf("could not parse ref: %s", e.Updated)
+				}
+
+				nc.bc.bopts.Opts[contextPrefix+nc.nameWithPlatform] = before + ":" + after
+
+				ncnew, err := nc.bc.namedContext(nc.name, nc.nameWithPlatform, nc.opt)
+				if err != nil {
+					return nil, nil, err
+				}
+				if ncnew == nil {
+					return nil, nil, nil
+				}
+				return ncnew.load(ctx, count+1)
 			}
 			return nil, nil, err
 		}
 
-		var img image.Image
+		var img dockerspec.DockerOCIImage
 		if err := json.Unmarshal(data, &img); err != nil {
 			return nil, nil, err
 		}
@@ -99,16 +141,22 @@ func (bc *Client) namedContextRecursive(ctx context.Context, name string, nameWi
 		}
 		return &st, &img, nil
 	case "git":
-		st, ok := DetectGitContext(v, true)
+		st, ok, err := DetectGitContext(nc.input, nil)
 		if !ok {
-			return nil, nil, errors.Errorf("invalid git context %s", v)
+			return nil, nil, errors.Errorf("invalid git context %s", nc.input)
+		}
+		if err != nil {
+			return nil, nil, err
 		}
 		return st, nil, nil
 	case "http", "https":
-		st, ok := DetectGitContext(v, true)
+		st, ok, err := DetectGitContext(nc.input, nil)
 		if !ok {
-			httpst := llb.HTTP(v, llb.WithCustomName("[context "+nameWithPlatform+"] "+v))
+			httpst := llb.HTTP(nc.input, llb.WithCustomName("[context "+nc.nameWithPlatform+"] "+nc.input))
 			st = &httpst
+		}
+		if err != nil {
+			return nil, nil, err
 		}
 		return st, nil, nil
 	case "oci-layout":
@@ -128,38 +176,37 @@ func (bc *Client) namedContextRecursive(ctx context.Context, name string, nameWi
 
 		// for the dummy ref primarily used in log messages, we can use the
 		// original name, since the store key may not be significant
-		dummyRef, err := reference.ParseNormalizedNamed(name)
+		dummyRef, err := reference.ParseNormalizedNamed(nc.name)
 		if err != nil {
-			return nil, nil, errors.Wrapf(err, "could not parse oci-layout reference %q", name)
+			return nil, nil, errors.Wrapf(err, "could not parse oci-layout reference %q", nc.name)
 		}
 		dummyRef, err = reference.WithDigest(dummyRef, dgstd.Digest())
 		if err != nil {
-			return nil, nil, errors.Wrapf(err, "could not wrap %q with digest", name)
+			return nil, nil, errors.Wrapf(err, "could not wrap %q with digest", nc.name)
 		}
 
-		// TODO: How should source policy be handled here with a dummy ref?
-		_, dgst, data, err := bc.client.ResolveImageConfig(ctx, dummyRef.String(), llb.ResolveImageConfigOpt{
-			Platform:     opt.Platform,
-			ResolveMode:  opt.ResolveMode,
-			LogName:      fmt.Sprintf("[context %s] load metadata for %s", nameWithPlatform, dummyRef.String()),
-			ResolverType: llb.ResolverTypeOCILayout,
-			Store: llb.ResolveImageConfigOptStore{
-				SessionID: bc.bopts.SessionID,
-				StoreID:   named.Name(),
+		_, dgst, data, err := nc.bc.client.ResolveImageConfig(ctx, dummyRef.String(), sourceresolver.Opt{
+			LogName: fmt.Sprintf("[context %s] load metadata for %s", nc.nameWithPlatform, dummyRef.String()),
+			OCILayoutOpt: &sourceresolver.ResolveOCILayoutOpt{
+				Platform: opt.Platform,
+				Store: sourceresolver.ResolveImageConfigOptStore{
+					SessionID: nc.bc.bopts.SessionID,
+					StoreID:   named.Name(),
+				},
 			},
 		})
 		if err != nil {
 			return nil, nil, err
 		}
 
-		var img image.Image
+		var img dockerspec.DockerOCIImage
 		if err := json.Unmarshal(data, &img); err != nil {
 			return nil, nil, errors.Wrap(err, "could not parse oci-layout image config")
 		}
 
 		ociOpt := []llb.OCILayoutOption{
-			llb.WithCustomName("[context " + nameWithPlatform + "] OCI load from client"),
-			llb.OCIStore(bc.bopts.SessionID, named.Name()),
+			llb.WithCustomName("[context " + nc.nameWithPlatform + "] OCI load from client"),
+			llb.OCIStore(nc.bc.bopts.SessionID, named.Name()),
 		}
 		if opt.Platform != nil {
 			ociOpt = append(ociOpt, llb.Platform(*opt.Platform))
@@ -177,18 +224,22 @@ func (bc *Client) namedContextRecursive(ctx context.Context, name string, nameWi
 		}
 		return &st, &img, nil
 	case "local":
+		sessionID := nc.bc.bopts.SessionID
+		if v, ok := nc.bc.localsSessionIDs[vv[1]]; ok {
+			sessionID = v
+		}
 		st := llb.Local(vv[1],
-			llb.SessionID(bc.bopts.SessionID),
+			llb.SessionID(sessionID),
 			llb.FollowPaths([]string{DefaultDockerignoreName}),
-			llb.SharedKeyHint("context:"+nameWithPlatform+"-"+DefaultDockerignoreName),
-			llb.WithCustomName("[context "+nameWithPlatform+"] load "+DefaultDockerignoreName),
+			llb.SharedKeyHint("context:"+nc.nameWithPlatform+"-"+DefaultDockerignoreName),
+			llb.WithCustomName("[context "+nc.nameWithPlatform+"] load "+DefaultDockerignoreName),
 			llb.Differ(llb.DiffNone, false),
 		)
 		def, err := st.Marshal(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-		res, err := bc.client.Solve(ctx, client.SolveRequest{
+		res, err := nc.bc.client.Solve(ctx, client.SolveRequest{
 			Evaluate:   true,
 			Definition: def.ToPB(),
 		})
@@ -212,42 +263,86 @@ func (bc *Client) namedContextRecursive(ctx context.Context, name string, nameWi
 				}
 			}
 		}
-		st = llb.Local(vv[1],
-			llb.WithCustomName("[context "+nameWithPlatform+"] load from client"),
-			llb.SessionID(bc.bopts.SessionID),
-			llb.SharedKeyHint("context:"+nameWithPlatform),
-			llb.ExcludePatterns(excludes),
-		)
+
+		localOutput := &asyncLocalOutput{
+			name:             vv[1],
+			nameWithPlatform: nc.nameWithPlatform,
+			sessionID:        sessionID,
+			sharedKey:        nc.sharedKey,
+			excludes:         excludes,
+			extraOpts:        opt.AsyncLocalOpts,
+		}
+		st = llb.NewState(localOutput)
 		return &st, nil, nil
 	case "input":
-		inputs, err := bc.client.Inputs(ctx)
+		inputs, err := nc.bc.client.Inputs(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
 		st, ok := inputs[vv[1]]
 		if !ok {
-			return nil, nil, errors.Errorf("invalid input %s for %s", vv[1], nameWithPlatform)
+			return nil, nil, errors.Errorf("invalid input %s for %s", vv[1], nc.nameWithPlatform)
 		}
-		md, ok := opts[inputMetadataPrefix+vv[1]]
+		md, ok := nc.bc.bopts.Opts[inputMetadataPrefix+vv[1]]
 		if ok {
 			m := make(map[string][]byte)
 			if err := json.Unmarshal([]byte(md), &m); err != nil {
 				return nil, nil, errors.Wrapf(err, "failed to parse input metadata %s", md)
 			}
-			var img *image.Image
+			var img *dockerspec.DockerOCIImage
 			if dtic, ok := m[exptypes.ExporterImageConfigKey]; ok {
 				st, err = st.WithImageConfig(dtic)
 				if err != nil {
 					return nil, nil, err
 				}
 				if err := json.Unmarshal(dtic, &img); err != nil {
-					return nil, nil, errors.Wrapf(err, "failed to parse image config for %s", nameWithPlatform)
+					return nil, nil, errors.Wrapf(err, "failed to parse image config for %s", nc.nameWithPlatform)
 				}
 			}
 			return &st, img, nil
 		}
 		return &st, nil, nil
 	default:
-		return nil, nil, errors.Errorf("unsupported context source %s for %s", vv[0], nameWithPlatform)
+		return nil, nil, errors.Errorf("unsupported context source %s for %s", vv[0], nc.nameWithPlatform)
 	}
+}
+
+// asyncLocalOutput is an llb.Output that computes an llb.Local
+// on-demand instead of at the time of initialization.
+type asyncLocalOutput struct {
+	llb.Output
+	name             string
+	nameWithPlatform string
+	sessionID        string
+	sharedKey        string
+	excludes         []string
+	extraOpts        func() []llb.LocalOption
+	once             sync.Once
+}
+
+func (a *asyncLocalOutput) ToInput(ctx context.Context, constraints *llb.Constraints) (*pb.Input, error) {
+	a.once.Do(a.do)
+	return a.Output.ToInput(ctx, constraints)
+}
+
+func (a *asyncLocalOutput) Vertex(ctx context.Context, constraints *llb.Constraints) llb.Vertex {
+	a.once.Do(a.do)
+	return a.Output.Vertex(ctx, constraints)
+}
+
+func (a *asyncLocalOutput) do() {
+	var extraOpts []llb.LocalOption
+	if a.extraOpts != nil {
+		extraOpts = a.extraOpts()
+	}
+	sharedKey := "context:" + a.nameWithPlatform + "-" + a.sharedKey
+	opts := append([]llb.LocalOption{
+		llb.WithCustomName("[context " + a.nameWithPlatform + "] load from client"),
+		llb.SessionID(a.sessionID),
+		llb.SharedKeyHint(sharedKey),
+		llb.ExcludePatterns(a.excludes),
+	}, extraOpts...)
+
+	st := llb.Local(a.name, opts...)
+	a.Output = st.Output()
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/moby/buildkit/solver/llbsolver/ops/opsutils"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/source"
+	"github.com/moby/buildkit/util/cachedigest"
 	"github.com/moby/buildkit/util/semutil"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
@@ -73,13 +74,13 @@ func (s *SourceOp) instance(ctx context.Context) (source.SourceInstance, error) 
 	return s.src, nil
 }
 
-func (s *SourceOp) CacheMap(ctx context.Context, g session.Group, index int) (*solver.CacheMap, bool, error) {
+func (s *SourceOp) CacheMap(ctx context.Context, jobCtx solver.JobContext, index int) (*solver.CacheMap, bool, error) {
 	src, err := s.instance(ctx)
 	if err != nil {
 		return nil, false, err
 	}
 
-	k, pin, cacheOpts, done, err := src.CacheKey(ctx, g, index)
+	k, pin, cacheOpts, done, err := src.CacheKey(ctx, jobCtx, index)
 	if err != nil {
 		return nil, false, err
 	}
@@ -88,9 +89,12 @@ func (s *SourceOp) CacheMap(ctx context.Context, g session.Group, index int) (*s
 		s.pin = pin
 	}
 
-	dgst := digest.FromBytes([]byte(sourceCacheType + ":" + k))
+	dgst, err := cachedigest.FromBytes([]byte(sourceCacheType+":"+k), cachedigest.TypeString)
+	if err != nil {
+		return nil, false, err
+	}
 	if strings.HasPrefix(k, "session:") {
-		dgst = digest.Digest("random:" + strings.TrimPrefix(dgst.String(), dgst.Algorithm().String()+":"))
+		dgst = digest.Digest("random:" + dgst.Encoded())
 	}
 
 	return &solver.CacheMap{
@@ -100,12 +104,12 @@ func (s *SourceOp) CacheMap(ctx context.Context, g session.Group, index int) (*s
 	}, done, nil
 }
 
-func (s *SourceOp) Exec(ctx context.Context, g session.Group, _ []solver.Result) (outputs []solver.Result, err error) {
+func (s *SourceOp) Exec(ctx context.Context, jobCtx solver.JobContext, _ []solver.Result) (outputs []solver.Result, err error) {
 	src, err := s.instance(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ref, err := src.Snapshot(ctx, g)
+	ref, err := src.Snapshot(ctx, jobCtx)
 	if err != nil {
 		return nil, err
 	}

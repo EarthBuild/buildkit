@@ -1,4 +1,6 @@
-# SBOM Scanning Protocol
+---
+title: SBOM scanning protocol
+---
 
 BuildKit supports automatic creation of [SBOMs](https://en.wikipedia.org/wiki/Software_supply_chain)
 for builds, attaching them as [image attestations](./attestation-storage.md).
@@ -10,8 +12,7 @@ mount, writes its SBOM scan data to a specified directory.
 The SBOM generator image is expected to follow the rules of the BuildKit SBOM
 generator protocol, defined in this document.
 
-> **Note**
->
+> [!NOTE]
 > Currently, only SBOMs in the [SPDX](https://spdx.dev) JSON format are
 > supported.
 >
@@ -68,5 +69,5 @@ SBOM results for any other filesystems.
 
 ## Further reading
 
-See [frontend/attest/sbom.go](https://github.com/moby/buildkit/blob/master/frontend/attest/sbom.go)
+See [frontend/attestations/sbom/sbom.go](https://github.com/moby/buildkit/blob/master/frontend/attestations/sbom/sbom.go)
 for the code that invokes the user-specified generator.

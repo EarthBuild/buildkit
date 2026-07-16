@@ -27,7 +27,7 @@ func configurableMonitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelC
 		case <-ticker.C:
 			timeoutStart := time.Now().UTC()
 
-			ctx, cancel := context.WithTimeout(ctx, healthCfg.timeout)
+			ctx, cancel := context.WithTimeoutCause(ctx, healthCfg.timeout, nil)
 			_, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 			cancel()
 

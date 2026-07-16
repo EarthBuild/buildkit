@@ -4,24 +4,24 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	stderrors "errors"
 	"fmt"
 	"net"
 	"os"
 	"os/user"
 	"path/filepath"
-	"sort"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/pkg/seed" //nolint:staticcheck // SA1019 deprecated
-	"github.com/containerd/containerd/pkg/userns"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/containerd/sys"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/defaults"
+	"github.com/containerd/containerd/v2/pkg/sys"
+	"github.com/containerd/platforms"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
-	"github.com/docker/docker/pkg/reexec"
 	"github.com/gofrs/flock"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	regproxy "github.com/moby/buildkit/api/services/registry"
@@ -44,47 +44,50 @@ import (
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/bboltcachestorage"
+	"github.com/moby/buildkit/solver/llbsolver/cdidevices"
 	"github.com/moby/buildkit/util/apicaps"
 	"github.com/moby/buildkit/util/appcontext"
 	"github.com/moby/buildkit/util/appdefaults"
 	"github.com/moby/buildkit/util/archutil"
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/cachedigest"
+	"github.com/moby/buildkit/util/db/boltutil"
+	"github.com/moby/buildkit/util/disk"
 	"github.com/moby/buildkit/util/grpcerrors"
+	_ "github.com/moby/buildkit/util/grpcutil/encoding/proto"
 	"github.com/moby/buildkit/util/profiler"
 	"github.com/moby/buildkit/util/resolver"
 	"github.com/moby/buildkit/util/stack"
+	"github.com/moby/buildkit/util/tracing"
 	"github.com/moby/buildkit/util/tracing/detect"
 	_ "github.com/moby/buildkit/util/tracing/detect/jaeger"
 	_ "github.com/moby/buildkit/util/tracing/env"
 	"github.com/moby/buildkit/util/tracing/transform"
 	"github.com/moby/buildkit/version"
 	"github.com/moby/buildkit/worker"
+	policy "github.com/moby/policy-helpers"
+	"github.com/moby/sys/userns"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
-	"go.etcd.io/bbolt"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
 	tracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthv1 "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"tags.cncf.io/container-device-interface/pkg/cdi"
 )
 
 func init() {
 	apicaps.ExportedProduct = "buildkit"
 	stack.SetVersionInfo(version.Version, version.Revision)
-
-	//nolint:staticcheck // SA1019 deprecated
-	seed.WithTimeAndRand()
-	if reexec.Init() {
-		os.Exit(0)
-	}
 
 	// enable in memory recording for buildkitd traces
 	detect.Recorder = detect.NewTraceRecorder()
@@ -111,14 +114,18 @@ var (
 
 func registerWorkerInitializer(wi workerInitializer, flags ...cli.Flag) {
 	workerInitializers = append(workerInitializers, wi)
-	sort.Slice(workerInitializers,
-		func(i, j int) bool {
-			return workerInitializers[i].priority < workerInitializers[j].priority
-		})
+	slices.SortFunc(workerInitializers, func(a, b workerInitializer) int {
+		return a.priority - b.priority
+	})
 	appFlags = append(appFlags, flags...)
 }
 
 func main() {
+	// Disable gRPC ALPN enforcement to allow mixed grpc-go versions
+	// between earthly client and buildkitd during the upgrade transition.
+	// TODO: remove once all released earthly binaries use grpc-go >= 1.67
+	os.Setenv("GRPC_ENFORCE_ALPN_ENABLED", "false")
+
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Println(c.App.Name, version.Package, c.App.Version, version.Revision)
 	}
@@ -153,6 +160,11 @@ func main() {
 		return strconv.Itoa(*gid)
 	}
 
+	groupUsageStr := "group (name or gid) which will own all Unix socket listening addresses"
+	if runtime.GOOS == "windows" {
+		groupUsageStr = "group name(s), comma-separated, which will have RW access to the named pipe listening addresses"
+	}
+
 	app.Flags = append(app.Flags,
 		cli.StringFlag{
 			Name:  "config",
@@ -185,13 +197,14 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "group",
-			Usage: "group (name or gid) which will own all Unix socket listening addresses",
+			Usage: groupUsageStr,
 			Value: groupValue(defaultConf.GRPC.GID),
 		},
 		cli.StringFlag{
-			Name:  "debugaddr",
-			Usage: "debugging address (eg. 0.0.0.0:6060)",
-			Value: defaultConf.GRPC.DebugAddress,
+			Name:   "debugaddr",
+			Usage:  "debugging address (eg. 0.0.0.0:6060)",
+			Value:  defaultConf.GRPC.DebugAddress,
+			EnvVar: "BUILDKITD_DEBUGADDR",
 		},
 		cli.StringFlag{
 			Name:  "tlscert",
@@ -210,24 +223,37 @@ func main() {
 		},
 		cli.StringSliceFlag{
 			Name:  "allow-insecure-entitlement",
-			Usage: "allows insecure entitlements e.g. network.host, security.insecure",
+			Usage: "allows insecure entitlements e.g. network.host, security.insecure, device",
 		},
 		cli.StringFlag{
 			Name:  "otel-socket-path",
 			Usage: "OTEL collector trace socket path",
 		},
+		cli.BoolFlag{
+			Name:  "cdi-disabled",
+			Usage: "disables support of the Container Device Interface (CDI)",
+		},
+		cli.StringSliceFlag{
+			Name:  "cdi-spec-dir",
+			Usage: "list of directories to scan for CDI spec files",
+		},
+		cli.BoolFlag{
+			Name:  "save-cache-debug",
+			Usage: "enable saving cache debug info",
+		},
 	)
 	app.Flags = append(app.Flags, appFlags...)
 	app.Flags = append(app.Flags, serviceFlags()...)
 
+	var closers []func(ctx context.Context) error
 	app.Action = func(c *cli.Context) error {
 		// TODO: On Windows this always returns -1. The actual "are you admin" check is very Windows-specific.
 		// See https://github.com/golang/go/issues/28804#issuecomment-505326268 for the "short" version.
 		if os.Geteuid() > 0 {
 			return errors.New("rootless mode requires to be executed as the mapped root in a user namespace; you may use RootlessKit for setting up the namespace")
 		}
-		ctx, cancel := context.WithCancel(appcontext.Context())
-		defer cancel()
+		ctx, cancel := context.WithCancelCause(appcontext.Context())
+		defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 		cfg, err := config.LoadFile(c.GlobalString("config"))
 		if err != nil {
@@ -258,30 +284,48 @@ func main() {
 
 		logrus.SetOutput(os.Stderr) // earthly-specific: force logs to show up under earthly-buildkitd container logs
 
+		if sc := cfg.System; sc != nil {
+			if v := sc.PlatformsCacheMaxAge; v != nil {
+				archutil.CacheMaxAge = v.Duration
+			}
+		}
+
 		if cfg.GRPC.DebugAddress != "" {
 			if err := setupDebugHandlers(cfg.GRPC.DebugAddress); err != nil {
 				return err
 			}
 		}
 
-		tp, err := detect.TracerProvider()
+		tp, err := newTracerProvider(ctx)
 		if err != nil {
 			return err
 		}
+		closers = append(closers, tp.Shutdown)
 
-		streamTracer := otelgrpc.StreamServerInterceptor(otelgrpc.WithTracerProvider(tp), otelgrpc.WithPropagators(propagators))
+		mp, err := newMeterProvider(ctx)
+		if err != nil {
+			return err
+		}
+		closers = append(closers, mp.Shutdown)
 
-		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor(ctx, tp), grpcerrors.UnaryServerInterceptor,
+		statsHandler := tracing.ServerStatsHandler(
+			otelgrpc.WithTracerProvider(tp),
+			otelgrpc.WithMeterProvider(mp),
+			otelgrpc.WithPropagators(propagators),
+		)
+
+		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor, grpcerrors.UnaryServerInterceptor,
 			unaryTimeoutInterceptor(), // earthly-specific
 		)
-		stream := grpc_middleware.ChainStreamServer(streamTracer, grpcerrors.StreamServerInterceptor,
+		stream := grpc_middleware.ChainStreamServer(grpcerrors.StreamServerInterceptor,
 			streamTimeoutInterceptor(), // earthly-specific
 		)
 
-		maxMsgSize := 67108864 // 64MB
 		opts := []grpc.ServerOption{
+			grpc.StatsHandler(statsHandler),
 			grpc.UnaryInterceptor(unary), grpc.StreamInterceptor(stream),
-			grpc.MaxRecvMsgSize(maxMsgSize), grpc.MaxSendMsgSize(maxMsgSize),
+			grpc.MaxRecvMsgSize(defaults.DefaultMaxRecvMsgSize),
+			grpc.MaxSendMsgSize(defaults.DefaultMaxSendMsgSize),
 			grpc.InitialWindowSize(65535 * 32),
 			grpc.InitialConnWindowSize(65535 * 16),
 		}
@@ -322,7 +366,24 @@ func main() {
 		}()
 
 		shutdownCh := make(chan struct{})
-		controller, err := newController(c, &cfg, shutdownCh)
+
+		// listeners have to be initialized before the controller
+		// https://github.com/moby/buildkit/issues/4618
+		listeners, err := newGRPCListeners(cfg.GRPC)
+		if err != nil {
+			return err
+		}
+
+		if c.GlobalBool("save-cache-debug") {
+			db, err := cachedigest.NewDB(filepath.Join(cfg.Root, "cache-debug.db"))
+			if err != nil {
+				return errors.Wrap(err, "failed to create cache debug db")
+			}
+			cachedigest.SetDefaultDB(db)
+			defer db.Close()
+		}
+
+		controller, err := newController(ctx, c, &cfg, shutdownCh)
 		if err != nil {
 			return err
 		}
@@ -333,8 +394,8 @@ func main() {
 		reflection.Register(server)
 
 		// Earthly specific.
-		ctxReg, cancelReg := context.WithCancel(ctx)
-		defer cancelReg()
+		ctxReg, cancelReg := context.WithCancelCause(ctx)
+		defer cancelReg(nil)
 		lrPort, ok := os.LookupEnv("BUILDKIT_LOCAL_REGISTRY_LISTEN_PORT")
 		lrAddr := fmt.Sprintf("0.0.0.0:%s", lrPort)
 		if ok {
@@ -344,7 +405,7 @@ func main() {
 				for {
 					select {
 					case <-shutdownCh:
-						cancelReg()
+						cancelReg(nil)
 					case err := <-serveErr:
 						if err != nil {
 							bklog.G(ctx).Errorf("Registry serve error: %s\n", err.Error())
@@ -370,6 +431,8 @@ func main() {
 					cfg.Entitlements = append(cfg.Entitlements, e)
 				case "network.host":
 					cfg.Entitlements = append(cfg.Entitlements, e)
+				case "device":
+					cfg.Entitlements = append(cfg.Entitlements, e)
 				default:
 					return errors.Errorf("invalid entitlement : %s", e)
 				}
@@ -382,18 +445,18 @@ func main() {
 		}
 
 		errCh := make(chan error, 1)
-		if err := serveGRPC(cfg.GRPC, server, errCh); err != nil {
+		if err := serveGRPC(server, listeners, errCh); err != nil {
 			return err
 		}
 
 		select {
 		case serverErr := <-errCh:
 			err = serverErr
-			cancel()
+			cancel(err)
 		case <-ctx.Done():
-			err = ctx.Err()
+			err = context.Cause(ctx)
 		case <-shutdownCh:
-			cancelReg()
+			cancelReg(nil)
 			err = nil
 		}
 
@@ -407,8 +470,14 @@ func main() {
 		return err
 	}
 
-	app.After = func(_ *cli.Context) error {
-		return detect.Shutdown(context.TODO())
+	app.After = func(_ *cli.Context) (err error) {
+		var errs []error
+		for _, c := range closers {
+			if e := c(context.TODO()); e != nil {
+				errs = append(errs, e)
+			}
+		}
+		return stderrors.Join(errs...)
 	}
 
 	profiler.Attach(app)
@@ -419,32 +488,44 @@ func main() {
 	}
 }
 
-func serveGRPC(cfg config.GRPCConfig, server *grpc.Server, errCh chan error) error {
+func newGRPCListeners(cfg config.GRPCConfig) ([]net.Listener, error) {
 	addrs := cfg.Address
 	if len(addrs) == 0 {
-		return errors.New("--addr cannot be empty")
+		return nil, errors.New("--addr cannot be empty")
 	}
 	tlsConfig, err := serverCredentials(cfg.TLS)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	eg, _ := errgroup.WithContext(context.Background())
+
+	sd := cfg.SecurityDescriptor
+	if sd == "" {
+		sd, err = groupToSecurityDescriptor("")
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	listeners := make([]net.Listener, 0, len(addrs))
 	for _, addr := range addrs {
-		l, err := getListener(addr, *cfg.UID, *cfg.GID, tlsConfig)
+		l, err := getListener(addr, *cfg.UID, *cfg.GID, sd, tlsConfig, true)
 		if err != nil {
 			for _, l := range listeners {
 				l.Close()
 			}
-			return err
+			return listeners, err
 		}
 		listeners = append(listeners, l)
 	}
+	return listeners, nil
+}
 
+func serveGRPC(server *grpc.Server, listeners []net.Listener, errCh chan error) error {
 	if os.Getenv("NOTIFY_SOCKET") != "" {
 		notified, notifyErr := sddaemon.SdNotify(false, sddaemon.SdNotifyReady)
 		bklog.L.Debugf("SdNotifyReady notified=%v, err=%v", notified, notifyErr)
 	}
+	eg, _ := errgroup.WithContext(context.Background())
 	for _, l := range listeners {
 		func(l net.Listener) {
 			eg.Go(func() error {
@@ -486,10 +567,20 @@ func setDefaultNetworkConfig(nc config.NetworkConfig) config.NetworkConfig {
 		nc.Mode = "auto"
 	}
 	if nc.CNIConfigPath == "" {
-		nc.CNIConfigPath = appdefaults.DefaultCNIConfigPath
+		if isRootlessConfig() {
+			nc.CNIConfigPath = appdefaults.UserCNIConfigPath
+		} else {
+			nc.CNIConfigPath = appdefaults.DefaultCNIConfigPath
+		}
 	}
 	if nc.CNIBinaryPath == "" {
 		nc.CNIBinaryPath = appdefaults.DefaultCNIBinDir
+	}
+	if nc.BridgeName == "" {
+		nc.BridgeName = appdefaults.BridgeName
+	}
+	if nc.BridgeSubnet == "" {
+		nc.BridgeSubnet = appdefaults.BridgeSubnet
 	}
 	return nc
 }
@@ -544,26 +635,24 @@ func setDefaultConfig(cfg *config.Config) {
 	if cfg.OTEL.SocketPath == "" {
 		cfg.OTEL.SocketPath = appdefaults.TraceSocketPath(isRootlessConfig())
 	}
-}
 
-var isRootlessConfigOnce sync.Once
-var isRootlessConfigValue bool
+	if len(cfg.CDI.SpecDirs) == 0 {
+		cfg.CDI.SpecDirs = appdefaults.CDISpecDirs
+	}
+}
 
 // isRootlessConfig is true if we should be using the rootless config
 // defaults instead of the normal defaults.
 func isRootlessConfig() bool {
-	isRootlessConfigOnce.Do(func() {
-		if !userns.RunningInUserNS() {
-			// Default value is false so keep it that way.
-			return
-		}
-		// if buildkitd is being executed as the mapped-root (not only EUID==0 but also $USER==root)
-		// in a user namespace, we don't want to load the rootless changes in the
-		// configuration.
-		u := os.Getenv("USER")
-		isRootlessConfigValue = u != "" && u != "root"
-	})
-	return isRootlessConfigValue
+	if !userns.RunningInUserNS() {
+		// Default value is false so keep it that way.
+		return false
+	}
+	// if buildkitd is being executed as the mapped-root (not only EUID==0 but also $USER==root)
+	// in a user namespace, we don't want to load the rootless changes in the
+	// configuration.
+	u := os.Getenv("USER")
+	return u != "" && u != "root"
 }
 
 func applyMainFlags(c *cli.Context, cfg *config.Config) error {
@@ -603,11 +692,19 @@ func applyMainFlags(c *cli.Context, cfg *config.Config) error {
 	}
 
 	if group := c.String("group"); group != "" {
-		gid, err := groupToGid(group)
-		if err != nil {
-			return err
+		if runtime.GOOS == "windows" {
+			secDescriptor, err := groupToSecurityDescriptor(group)
+			if err != nil {
+				return err
+			}
+			cfg.GRPC.SecurityDescriptor = secDescriptor
+		} else {
+			gid, err := groupToGID(group)
+			if err != nil {
+				return err
+			}
+			cfg.GRPC.GID = &gid
 		}
-		cfg.GRPC.GID = &gid
 	}
 
 	if tlscert := c.String("tlscert"); tlscert != "" {
@@ -624,28 +721,31 @@ func applyMainFlags(c *cli.Context, cfg *config.Config) error {
 		cfg.OTEL.SocketPath = c.String("otel-socket-path")
 	}
 
+	if c.IsSet("cdi-disabled") {
+		cdiDisabled := c.Bool("cdi-disabled")
+		cfg.CDI.Disabled = &cdiDisabled
+	}
+	if c.IsSet("cdi-spec-dir") {
+		cfg.CDI.SpecDirs = c.StringSlice("cdi-spec-dir")
+	}
+
 	applyPlatformFlags(c)
 
 	return nil
 }
 
 // Convert a string containing either a group name or a stringified gid into a numeric id)
-func groupToGid(group string) (int, error) {
+func groupToGID(group string) (int, error) {
 	if group == "" {
 		return os.Getgid(), nil
 	}
 
-	var (
-		err error
-		id  int
-	)
-
 	// Try and parse as a number, if the error is ErrSyntax
 	// (i.e. its not a number) then we carry on and try it as a
 	// name.
-	if id, err = strconv.Atoi(group); err == nil {
+	if id, err := strconv.Atoi(group); err == nil {
 		return id, nil
-	} else if err.(*strconv.NumError).Err != strconv.ErrSyntax {
+	} else if !errors.Is(err, strconv.ErrSyntax) {
 		return 0, err
 	}
 
@@ -655,14 +755,10 @@ func groupToGid(group string) (int, error) {
 	}
 	group = ginfo.Gid
 
-	if id, err = strconv.Atoi(group); err != nil {
-		return 0, err
-	}
-
-	return id, nil
+	return strconv.Atoi(group)
 }
 
-func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener, error) {
+func getListener(addr string, uid, gid int, secDescriptor string, tlsConfig *tls.Config, warnTLS bool) (net.Listener, error) {
 	addrSlice := strings.SplitN(addr, "://", 2)
 	if len(addrSlice) < 2 {
 		return nil, errors.Errorf("address %s does not contain proto, you meant unix://%s ?",
@@ -675,17 +771,23 @@ func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener
 		if tlsConfig != nil {
 			bklog.L.Warnf("TLS is disabled for %s", addr)
 		}
+		if proto == "npipe" {
+			return getLocalListener(listenAddr, secDescriptor)
+		}
 		return sys.GetLocalListener(listenAddr, uid, gid)
 	case "fd":
 		return listenFD(listenAddr, tlsConfig)
 	case "tcp":
-		l, err := net.Listen("tcp", listenAddr)
+		listener := net.ListenConfig{}
+		l, err := listener.Listen(context.TODO(), "tcp", listenAddr)
 		if err != nil {
 			return nil, err
 		}
 
 		if tlsConfig == nil {
-			bklog.L.Warnf("TLS is not enabled for %s. enabling mutual TLS authentication is highly recommended", addr)
+			if warnTLS {
+				bklog.L.Warnf("TLS is not enabled for %s. enabling mutual TLS authentication is highly recommended", addr)
+			}
 			return l, nil
 		}
 		return tls.NewListener(l, tlsConfig), nil
@@ -694,34 +796,19 @@ func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener
 	}
 }
 
-func unaryInterceptor(globalCtx context.Context, tp trace.TracerProvider) grpc.UnaryServerInterceptor {
-	withTrace := otelgrpc.UnaryServerInterceptor(otelgrpc.WithTracerProvider(tp), otelgrpc.WithPropagators(propagators))
-
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		go func() {
-			select {
-			case <-ctx.Done():
-			case <-globalCtx.Done():
-				cancel()
-			}
-		}()
-
-		if strings.HasSuffix(info.FullMethod, "opentelemetry.proto.collector.trace.v1.TraceService/Export") {
-			return handler(ctx, req)
-		}
-
-		resp, err = withTrace(ctx, req, info, handler)
-		if err != nil {
-			bklog.G(ctx).Errorf("%s returned error: %v", info.FullMethod, err)
-			if logrus.GetLevel() >= logrus.DebugLevel {
-				fmt.Fprintf(os.Stderr, "%+v", stack.Formatter(grpcerrors.FromGRPC(err)))
-			}
-		}
-		return
+func unaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+	if strings.HasSuffix(info.FullMethod, "opentelemetry.proto.collector.trace.v1.TraceService/Export") {
+		return handler(ctx, req)
 	}
+
+	resp, err = handler(ctx, req)
+	if err != nil {
+		bklog.G(ctx).Errorf("%s returned error: %v", info.FullMethod, err)
+		if logrus.GetLevel() >= logrus.DebugLevel {
+			fmt.Fprintf(os.Stderr, "%+v", stack.Formatter(grpcerrors.FromGRPC(err)))
+		}
+	}
+	return resp, err
 }
 
 func serverCredentials(cfg config.TLSConfig) (*tls.Config, error) {
@@ -744,6 +831,7 @@ func serverCredentials(cfg config.TLSConfig) (*tls.Config, error) {
 	}
 	tlsConf := &tls.Config{
 		Certificates: []tls.Certificate{certificate},
+		NextProtos:   []string{"h2"},
 	}
 	if caFile != "" {
 		certPool := x509.NewCertPool()
@@ -761,7 +849,7 @@ func serverCredentials(cfg config.TLSConfig) (*tls.Config, error) {
 	return tlsConf, nil
 }
 
-func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{}) (*control.Controller, error) {
+func newController(ctx context.Context, c *cli.Context, cfg *config.Config, shutdownCh chan struct{}) (*control.Controller, error) {
 	sessionManager, err := session.NewManager(&session.ManagerOpt{
 		HealthFrequency:       cfg.Health.Frequency,
 		HealthAllowedFailures: cfg.Health.AllowedFailures,
@@ -772,13 +860,19 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		return nil, err
 	}
 
-	tc, err := detect.Exporter()
-	if err != nil {
+	tc := make(tracing.MultiSpanExporter, 0, 2)
+	if detect.Recorder != nil {
+		tc = append(tc, detect.Recorder)
+	}
+
+	if exp, err := detect.NewSpanExporter(context.TODO()); err != nil {
 		return nil, err
+	} else if !detect.IsNoneSpanExporter(exp) {
+		tc = append(tc, exp)
 	}
 
 	var traceSocket string
-	if tc != nil {
+	if len(tc) > 0 {
 		traceSocket = cfg.OTEL.SocketPath
 		if err := runTraceController(traceSocket, tc); err != nil {
 			return nil, err
@@ -794,15 +888,25 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		return nil, err
 	}
 	frontends := map[string]frontend.Frontend{}
-	frontends["dockerfile.v0"] = forwarder.NewGatewayForwarder(wc, dockerfile.Build)
-	frontends["gateway.v0"] = gateway.NewGatewayFrontend(wc)
+
+	if cfg.Frontends.Dockerfile.Enabled == nil || *cfg.Frontends.Dockerfile.Enabled {
+		frontends["dockerfile.v0"] = forwarder.NewGatewayForwarder(wc.Infos(), dockerfile.Build)
+	}
+	if cfg.Frontends.Gateway.Enabled == nil || *cfg.Frontends.Gateway.Enabled {
+		gwfe, err := gateway.NewGatewayFrontend(wc.Infos(), cfg.Frontends.Gateway.AllowedRepositories)
+		if err != nil {
+			return nil, err
+		}
+		frontends["gateway.v0"] = gwfe
+	}
 
 	cacheStorage, err := bboltcachestorage.NewStore(filepath.Join(cfg.Root, "cache.db"))
 	if err != nil {
 		return nil, err
 	}
+	cacheStoreForDebug = cacheStorage
 
-	historyDB, err := bbolt.Open(filepath.Join(cfg.Root, "history.db"), 0600, nil)
+	historyDB, err := boltutil.SafeOpen(filepath.Join(cfg.Root, "history.db"), 0600, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -814,21 +918,36 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		return nil, err
 	}
 
+	var verifierProvider func() (*policy.Verifier, error)
+	if cfg.Cache.GHA != nil && cfg.Cache.GHA.Verify.Required {
+		verifierProvider = newVerifierProvider(cfg.Root)
+	}
+
 	remoteCacheExporterFuncs := map[string]remotecache.ResolveCacheExporterFunc{
 		"registry": registryremotecache.ResolveCacheExporterFunc(sessionManager, resolverFn),
 		"local":    localremotecache.ResolveCacheExporterFunc(sessionManager),
 		"inline":   inlineremotecache.ResolveCacheExporterFunc(),
-		"gha":      gha.ResolveCacheExporterFunc(),
+		"gha":      gha.ResolveCacheExporterFunc(cfg.Cache.GHA, verifierProvider),
 		"s3":       s3remotecache.ResolveCacheExporterFunc(),
 		"azblob":   azblob.ResolveCacheExporterFunc(),
 	}
 	remoteCacheImporterFuncs := map[string]remotecache.ResolveCacheImporterFunc{
 		"registry": registryremotecache.ResolveCacheImporterFunc(sessionManager, w.ContentStore(), resolverFn),
 		"local":    localremotecache.ResolveCacheImporterFunc(sessionManager),
-		"gha":      gha.ResolveCacheImporterFunc(),
+		"gha":      gha.ResolveCacheImporterFunc(cfg.Cache.GHA, verifierProvider),
 		"s3":       s3remotecache.ResolveCacheImporterFunc(),
 		"azblob":   azblob.ResolveCacheImporterFunc(),
 	}
+
+	if cfg.CDI.Disabled == nil || !*cfg.CDI.Disabled {
+		cfg.Entitlements = append(cfg.Entitlements, "device")
+	}
+
+	provenanceEnv, err := loadProvenanceEnv(cfg.ProvenanceEnvDir)
+	if err != nil {
+		return nil, err
+	}
+
 	return control.NewController(control.Opt{
 		SessionManager:            sessionManager,
 		WorkerController:          wc,
@@ -843,6 +962,9 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		LeaseManager:              w.LeaseManager(),
 		ContentStore:              w.ContentStore(),
 		HistoryConfig:             cfg.History,
+		GarbageCollect:            w.GarbageCollect,
+		GracefulStop:              ctx.Done(),
+		ProvenanceEnv:             provenanceEnv,
 	})
 }
 
@@ -916,16 +1038,23 @@ func getGCPolicy(cfg config.GCConfig, root string) []client.PruneInfo {
 	if cfg.GC != nil && !*cfg.GC {
 		return nil
 	}
+	dstat, _ := disk.GetDiskStat(root)
 	if len(cfg.GCPolicy) == 0 {
-		cfg.GCPolicy = config.DefaultGCPolicy(cfg.GCKeepStorage)
+		cfg.GCPolicy = config.DefaultGCPolicy(cfg, dstat)
 	}
 	out := make([]client.PruneInfo, 0, len(cfg.GCPolicy))
 	for _, rule := range cfg.GCPolicy {
+		//nolint:staticcheck
+		if rule.ReservedSpace == (config.DiskSpace{}) && rule.KeepBytes != (config.DiskSpace{}) {
+			rule.ReservedSpace = rule.KeepBytes
+		}
 		out = append(out, client.PruneInfo{
-			Filter:       rule.Filters,
-			All:          rule.All,
-			KeepBytes:    rule.KeepBytes.AsBytes(root),
-			KeepDuration: rule.KeepDuration.Duration,
+			Filter:        rule.Filters,
+			All:           rule.All,
+			KeepDuration:  rule.KeepDuration.Duration,
+			ReservedSpace: rule.ReservedSpace.AsBytes(dstat),
+			MaxUsedSpace:  rule.MaxUsedSpace.AsBytes(dstat),
+			MinFreeSpace:  rule.MinFreeSpace.AsBytes(dstat),
 		})
 	}
 	return out
@@ -963,7 +1092,7 @@ func parseBoolOrAuto(s string) (*bool, error) {
 func runTraceController(p string, exp sdktrace.SpanExporter) error {
 	server := grpc.NewServer()
 	tracev1.RegisterTraceServiceServer(server, &traceCollector{exporter: exp})
-	l, err := getLocalListener(p)
+	l, err := getLocalListener(p, "")
 	if err != nil {
 		return errors.Wrap(err, "creating trace controller listener")
 	}
@@ -972,14 +1101,99 @@ func runTraceController(p string, exp sdktrace.SpanExporter) error {
 }
 
 type traceCollector struct {
-	*tracev1.UnimplementedTraceServiceServer
+	tracev1.UnimplementedTraceServiceServer
 	exporter sdktrace.SpanExporter
 }
 
 func (t *traceCollector) Export(ctx context.Context, req *tracev1.ExportTraceServiceRequest) (*tracev1.ExportTraceServiceResponse, error) {
-	err := t.exporter.ExportSpans(ctx, transform.Spans(req.GetResourceSpans()))
-	if err != nil {
+	if err := t.exporter.ExportSpans(ctx, transform.Spans(req.GetResourceSpans())); err != nil {
 		return nil, err
 	}
 	return &tracev1.ExportTraceServiceResponse{}, nil
+}
+
+func newTracerProvider(ctx context.Context) (*sdktrace.TracerProvider, error) {
+	opts := []sdktrace.TracerProviderOption{
+		sdktrace.WithResource(detect.Resource()),
+		sdktrace.WithSyncer(detect.Recorder),
+	}
+
+	if exp, err := detect.NewSpanExporter(ctx); err != nil {
+		return nil, err
+	} else if !detect.IsNoneSpanExporter(exp) {
+		opts = append(opts, sdktrace.WithBatcher(exp))
+	}
+	return sdktrace.NewTracerProvider(opts...), nil
+}
+
+func newMeterProvider(ctx context.Context) (*sdkmetric.MeterProvider, error) {
+	opts := []sdkmetric.Option{
+		sdkmetric.WithResource(detect.Resource()),
+	}
+
+	if r, err := prometheus.New(); err != nil {
+		// Log the error but do not fail if we could not configure the prometheus metrics.
+		bklog.G(context.Background()).
+			WithError(err).
+			Error("failed prometheus metrics configuration")
+	} else {
+		opts = append(opts, sdkmetric.WithReader(r))
+	}
+
+	if exp, err := detect.NewMetricExporter(ctx); err != nil {
+		return nil, err
+	} else if !detect.IsNoneMetricExporter(exp) {
+		r := sdkmetric.NewPeriodicReader(exp)
+		opts = append(opts, sdkmetric.WithReader(r))
+	}
+	return sdkmetric.NewMeterProvider(opts...), nil
+}
+
+func getCDIManager(cfg config.CDIConfig) (*cdidevices.Manager, error) {
+	if cfg.Disabled != nil && *cfg.Disabled {
+		return nil, nil
+	}
+	if len(cfg.SpecDirs) == 0 {
+		return nil, errors.New("no CDI specification directories specified")
+	}
+	cdiCache, err := func() (*cdi.Cache, error) {
+		cdiCache, err := cdi.NewCache(cdi.WithSpecDirs(cfg.SpecDirs...))
+		if err != nil {
+			return nil, err
+		}
+		if err := cdiCache.Refresh(); err != nil {
+			return nil, err
+		}
+		if errs := cdiCache.GetErrors(); len(errs) > 0 {
+			for dir, errs := range errs {
+				for _, err := range errs {
+					bklog.L.Warnf("CDI setup error %v: %+v", dir, err)
+				}
+			}
+		}
+		return cdiCache, nil
+	}()
+	if err != nil {
+		return nil, errors.Wrapf(err, "CDI registry initialization failure")
+	}
+	return cdidevices.NewManager(cdiCache, cfg.AutoAllowed), nil
+}
+
+func newVerifierProvider(root string) func() (*policy.Verifier, error) {
+	var mu sync.Mutex
+	var verifier *policy.Verifier
+	var initErr error
+	return func() (*policy.Verifier, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if verifier != nil || initErr != nil {
+			return verifier, initErr
+		}
+		statePath := filepath.Join(root, "policy")
+		verifier, initErr = policy.NewVerifier(policy.Config{
+			StateDir:      statePath,
+			RequireOnline: false,
+		})
+		return verifier, initErr
+	}
 }

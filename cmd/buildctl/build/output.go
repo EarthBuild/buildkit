@@ -1,7 +1,6 @@
 package build
 
 import (
-	"encoding/csv"
 	"io"
 	"os"
 	"strconv"
@@ -9,7 +8,9 @@ import (
 
 	"github.com/containerd/console"
 	"github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/session/filesync"
 	"github.com/pkg/errors"
+	"github.com/tonistiigi/go-csvvalue"
 )
 
 // parseOutputCSV parses a single --output CSV string
@@ -18,8 +19,7 @@ func parseOutputCSV(s string) (client.ExportEntry, error) {
 		Type:  "",
 		Attrs: map[string]string{},
 	}
-	csvReader := csv.NewReader(strings.NewReader(s))
-	fields, err := csvReader.Read()
+	fields, err := csvvalue.Fields(s, nil)
 	if err != nil {
 		return ex, err
 	}
@@ -66,7 +66,7 @@ func ParseOutput(exports []string) ([]client.ExportEntry, error) {
 }
 
 // resolveExporterDest returns at most either one of io.WriteCloser (single file) or a string (directory path).
-func resolveExporterDest(exporter, dest string, attrs map[string]string) (func(map[string]string) (io.WriteCloser, error), string, error) {
+func resolveExporterDest(exporter, dest string, attrs map[string]string) (filesync.FileOutputFunc, string, error) {
 	wrapWriter := func(wc io.WriteCloser) func(map[string]string) (io.WriteCloser, error) {
 		return func(m map[string]string) (io.WriteCloser, error) {
 			return wc, nil

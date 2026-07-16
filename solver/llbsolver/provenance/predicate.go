@@ -1,64 +1,21 @@
 package provenance
 
 import (
+	"maps"
 	"strings"
 
-	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/platforms"
 	slsa "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/common"
-	slsa02 "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/v0.2"
-	resourcetypes "github.com/moby/buildkit/executor/resources/types"
+	slsa1 "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/v1"
+	"github.com/moby/buildkit/frontend/dockerfile/dfgitutil"
+	provenancetypes "github.com/moby/buildkit/solver/llbsolver/provenance/types"
 	"github.com/moby/buildkit/util/purl"
 	"github.com/moby/buildkit/util/urlutil"
-	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/package-url/packageurl-go"
 )
 
-const (
-	BuildKitBuildType = "https://mobyproject.org/buildkit@v1"
-)
-
-type ProvenancePredicate struct {
-	slsa02.ProvenancePredicate
-	Invocation  ProvenanceInvocation `json:"invocation,omitempty"`
-	BuildConfig *BuildConfig         `json:"buildConfig,omitempty"`
-	Metadata    *ProvenanceMetadata  `json:"metadata,omitempty"`
-}
-
-type ProvenanceInvocation struct {
-	ConfigSource slsa02.ConfigSource `json:"configSource,omitempty"`
-	Parameters   Parameters          `json:"parameters,omitempty"`
-	Environment  Environment         `json:"environment,omitempty"`
-}
-
-type Parameters struct {
-	Frontend string            `json:"frontend,omitempty"`
-	Args     map[string]string `json:"args,omitempty"`
-	Secrets  []*Secret         `json:"secrets,omitempty"`
-	SSH      []*SSH            `json:"ssh,omitempty"`
-	Locals   []*LocalSource    `json:"locals,omitempty"`
-	// TODO: select export attributes
-	// TODO: frontend inputs
-}
-
-type Environment struct {
-	Platform string `json:"platform"`
-}
-
-type ProvenanceMetadata struct {
-	slsa02.ProvenanceMetadata
-	BuildKitMetadata BuildKitMetadata `json:"https://mobyproject.org/buildkit@v1#metadata,omitempty"`
-	Hermetic         bool             `json:"https://mobyproject.org/buildkit@v1#hermetic,omitempty"`
-}
-
-type BuildKitMetadata struct {
-	VCS      map[string]string                  `json:"vcs,omitempty"`
-	Source   *Source                            `json:"source,omitempty"`
-	Layers   map[string][][]ocispecs.Descriptor `json:"layers,omitempty"`
-	SysUsage []*resourcetypes.SysSample         `json:"sysUsage,omitempty"`
-}
-
-func slsaMaterials(srcs Sources) ([]slsa.ProvenanceMaterial, error) {
-	count := len(srcs.Images) + len(srcs.Git) + len(srcs.HTTP)
+func slsaMaterials(srcs provenancetypes.Sources) ([]slsa.ProvenanceMaterial, error) {
+	count := len(srcs.Images) + len(srcs.ImageBlobs) + len(srcs.Git) + len(srcs.HTTP)
 	out := make([]slsa.ProvenanceMaterial, 0, count)
 
 	for _, s := range srcs.Images {
@@ -83,12 +40,37 @@ func slsaMaterials(srcs Sources) ([]slsa.ProvenanceMaterial, error) {
 		out = append(out, material)
 	}
 
+	for _, s := range srcs.ImageBlobs {
+		purlType := packageurl.TypeDocker
+		if s.Local {
+			purlType = packageurl.TypeOCI
+		}
+		uri, err := purl.RefToPURL(purlType, s.Ref, nil)
+		if err != nil {
+			return nil, err
+		}
+		uri, err = setPURLQualifier(uri, packageurl.Qualifier{
+			Key:   "ref_type",
+			Value: "blob",
+		})
+		if err != nil {
+			return nil, err
+		}
+		material := slsa.ProvenanceMaterial{
+			URI: uri,
+		}
+		if s.Digest != "" {
+			material.Digest = slsa.DigestSet{
+				s.Digest.Algorithm().String(): s.Digest.Hex(),
+			}
+		}
+		out = append(out, material)
+	}
+
 	for _, s := range srcs.Git {
 		out = append(out, slsa.ProvenanceMaterial{
-			URI: s.URL,
-			Digest: slsa.DigestSet{
-				"sha1": s.Commit,
-			},
+			URI:    s.URL,
+			Digest: digestSetForCommit(s.Commit),
 		})
 	}
 
@@ -104,14 +86,38 @@ func slsaMaterials(srcs Sources) ([]slsa.ProvenanceMaterial, error) {
 	return out, nil
 }
 
-func findMaterial(srcs Sources, uri string) (*slsa.ProvenanceMaterial, bool) {
+func digestSetForCommit(commit string) slsa.DigestSet {
+	dset := slsa.DigestSet{}
+	if len(commit) == 64 {
+		dset["sha256"] = commit
+	} else {
+		dset["sha1"] = commit
+	}
+	return dset
+}
+
+func setPURLQualifier(uri string, q packageurl.Qualifier) (string, error) {
+	p, err := packageurl.FromString(uri)
+	if err != nil {
+		return "", err
+	}
+	for i, qq := range p.Qualifiers {
+		if qq.Key == q.Key {
+			p.Qualifiers[i].Value = q.Value
+			return p.ToString(), nil
+		}
+	}
+	p.Qualifiers = append(p.Qualifiers, q)
+	return p.ToString(), nil
+}
+
+func findMaterial(srcs provenancetypes.Sources, uri string) (*slsa.ProvenanceMaterial, bool) {
+	uri, _ = dfgitutil.FragmentFormat(uri)
 	for _, s := range srcs.Git {
 		if s.URL == uri {
 			return &slsa.ProvenanceMaterial{
-				URI: s.URL,
-				Digest: slsa.DigestSet{
-					"sha1": s.Commit,
-				},
+				URI:    s.URL,
+				Digest: digestSetForCommit(s.Commit),
 			}, true
 		}
 	}
@@ -128,69 +134,82 @@ func findMaterial(srcs Sources, uri string) (*slsa.ProvenanceMaterial, bool) {
 	return nil, false
 }
 
-func NewPredicate(c *Capture) (*ProvenancePredicate, error) {
+func NewPredicate(c *Capture) (*provenancetypes.ProvenancePredicateSLSA1, error) {
 	materials, err := slsaMaterials(c.Sources)
 	if err != nil {
 		return nil, err
 	}
-	inv := ProvenanceInvocation{}
+	var resolvedDeps []slsa1.ResourceDescriptor
+	for _, m := range materials {
+		resolvedDeps = append(resolvedDeps, slsa1.ResourceDescriptor{
+			URI:    m.URI,
+			Digest: m.Digest,
+		})
+	}
+
+	args := maps.Clone(c.Args)
 
 	contextKey := "context"
-	if v, ok := c.Args["contextkey"]; ok && v != "" {
+	if v, ok := args["contextkey"]; ok && v != "" {
 		contextKey = v
+	} else if v, ok := c.Args["input:context"]; ok && v != "" {
+		contextKey = "input:context"
 	}
 
-	if v, ok := c.Args[contextKey]; ok && v != "" {
+	ext := provenancetypes.ProvenanceExternalParametersSLSA1{}
+	if v, ok := args[contextKey]; ok && v != "" {
 		if m, ok := findMaterial(c.Sources, v); ok {
-			inv.ConfigSource.URI = m.URI
-			inv.ConfigSource.Digest = m.Digest
+			ext.ConfigSource.URI = m.URI
+			ext.ConfigSource.Digest = m.Digest
 		} else {
-			inv.ConfigSource.URI = v
+			ext.ConfigSource.URI = v
 		}
-		inv.ConfigSource.URI = urlutil.RedactCredentials(inv.ConfigSource.URI)
-		delete(c.Args, contextKey)
+		ext.ConfigSource.URI = urlutil.RedactCredentials(ext.ConfigSource.URI)
+		delete(args, contextKey)
 	}
 
-	if v, ok := c.Args["filename"]; ok && v != "" {
-		inv.ConfigSource.EntryPoint = v
-		delete(c.Args, "filename")
+	if v, ok := args["filename"]; ok && v != "" {
+		ext.ConfigSource.Path = v
+		delete(args, "filename")
 	}
 
 	vcs := make(map[string]string)
-	for k, v := range c.Args {
+	for k, v := range args {
 		if strings.HasPrefix(k, "vcs:") {
 			if k == "vcs:source" {
 				v = urlutil.RedactCredentials(v)
 			}
-			delete(c.Args, k)
+			delete(args, k)
 			if v != "" {
 				vcs[strings.TrimPrefix(k, "vcs:")] = v
 			}
 		}
 	}
 
-	inv.Environment.Platform = platforms.Format(platforms.Normalize(platforms.DefaultSpec()))
+	internal := provenancetypes.ProvenanceInternalParametersSLSA1{}
+	internal.BuilderPlatform = platforms.Format(platforms.Normalize(platforms.DefaultSpec()))
 
-	inv.Parameters.Frontend = c.Frontend
-	inv.Parameters.Args = c.Args
-
+	req := provenancetypes.Parameters{}
+	req.Frontend = c.Frontend
+	req.Args = args
 	for _, s := range c.Secrets {
-		inv.Parameters.Secrets = append(inv.Parameters.Secrets, &Secret{
+		req.Secrets = append(req.Secrets, &provenancetypes.Secret{
 			ID:       s.ID,
 			Optional: s.Optional,
 		})
 	}
 	for _, s := range c.SSH {
-		inv.Parameters.SSH = append(inv.Parameters.SSH, &SSH{
+		req.SSH = append(req.SSH, &provenancetypes.SSH{
 			ID:       s.ID,
 			Optional: s.Optional,
 		})
 	}
 	for _, s := range c.Sources.Local {
-		inv.Parameters.Locals = append(inv.Parameters.Locals, &LocalSource{
+		req.Locals = append(req.Locals, &provenancetypes.LocalSource{
 			Name: s.Name,
 		})
 	}
+	ext.Request = req
 
 	incompleteMaterials := c.IncompleteMaterials
 	if !incompleteMaterials {
@@ -199,26 +218,28 @@ func NewPredicate(c *Capture) (*ProvenancePredicate, error) {
 		}
 	}
 
-	pr := &ProvenancePredicate{
-		Invocation: inv,
-		ProvenancePredicate: slsa02.ProvenancePredicate{
-			BuildType: BuildKitBuildType,
-			Materials: materials,
-		},
-		Metadata: &ProvenanceMetadata{
-			ProvenanceMetadata: slsa02.ProvenanceMetadata{
-				Completeness: slsa02.ProvenanceComplete{
-					Parameters:  c.Frontend != "",
-					Environment: true,
-					Materials:   !incompleteMaterials,
-				},
+	pr := &provenancetypes.ProvenancePredicateSLSA1{
+		BuildDefinition: provenancetypes.ProvenanceBuildDefinitionSLSA1{
+			ProvenanceBuildDefinition: slsa1.ProvenanceBuildDefinition{
+				BuildType:            provenancetypes.BuildKitBuildType1,
+				ResolvedDependencies: resolvedDeps,
 			},
-			Hermetic: !incompleteMaterials && !c.NetworkAccess,
+			ExternalParameters: ext,
+			InternalParameters: internal,
+		},
+		RunDetails: provenancetypes.ProvenanceRunDetailsSLSA1{
+			Metadata: &provenancetypes.ProvenanceMetadataSLSA1{
+				Completeness: provenancetypes.BuildKitComplete{
+					Request:              c.Frontend != "",
+					ResolvedDependencies: !incompleteMaterials,
+				},
+				Hermetic: !incompleteMaterials && !c.NetworkAccess,
+			},
 		},
 	}
 
 	if len(vcs) > 0 {
-		pr.Metadata.BuildKitMetadata.VCS = vcs
+		pr.RunDetails.Metadata.BuildKitMetadata.VCS = vcs
 	}
 
 	return pr, nil

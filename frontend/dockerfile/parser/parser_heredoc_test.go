@@ -107,6 +107,12 @@ one two
 
 RUN <<$EOF
 $EOF
+
+RUN <<  EOF
+EOF
+
+RUN <<  EOF  > foo
+EOF
 	`)
 
 	tests := [][]Heredoc{
@@ -290,6 +296,22 @@ $EOF
 				Expand:  true,
 			},
 		},
+		{
+			// RUN <<  EOF
+			{
+				Name:    "EOF",
+				Content: "",
+				Expand:  true,
+			},
+		},
+		{
+			// RUN <<  EOF  /foo
+			{
+				Name:    "EOF",
+				Content: "",
+				Expand:  true,
+			},
+		},
 	}
 
 	result, err := Parse(dockerfile)
@@ -333,6 +355,8 @@ func TestParseHeredocHelpers(t *testing.T) {
 		"<<-'EOF'",
 		`<<-"EOF"`,
 		`<<EO"F"`,
+		"<< EOF",
+		"<<- EOF",
 	}
 	invalidHeredocs := []string{
 		"<<'EOF",
@@ -357,7 +381,7 @@ func TestParseHeredocHelpers(t *testing.T) {
 	for _, src := range validHeredocs {
 		heredoc, err := ParseHeredoc(src)
 		require.NoError(t, err)
-		require.Equal(t, heredoc.Name, "EOF")
+		require.Equal(t, "EOF", heredoc.Name)
 	}
 	for _, src := range invalidHeredocs {
 		_, err := ParseHeredoc(src)
@@ -377,6 +401,18 @@ func TestHeredocsFromLine(t *testing.T) {
 		{
 			line:         "RUN <<-EOF",
 			heredocNames: []string{"EOF"},
+		},
+		{
+			line:         "RUN <<EOF",
+			heredocNames: []string{"EOF"},
+		},
+		{
+			line:         "RUN <<- EOF",
+			heredocNames: []string{"EOF"},
+		},
+		{
+			line:         "RUN << -EOF",
+			heredocNames: []string{"-EOF"},
 		},
 		{
 			line:         "RUN <<'EOF'",

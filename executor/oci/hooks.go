@@ -3,8 +3,8 @@ package oci
 import (
 	"context"
 
-	"github.com/containerd/containerd/containers"
-	"github.com/containerd/containerd/oci"
+	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 )
@@ -26,14 +26,14 @@ func WithHook(hook OciHook) oci.SpecOpts {
 		h := specs.Hook{
 			Path:    hook.Path,
 			Args:    hook.Args,
-			Env:     hook.Args,
+			Env:     hook.Env,
 			Timeout: hook.Timeout,
 		}
 
 		// Yes, its verbose... but it reads _so much better_ than the golang reflection version
 		switch hook.Phase {
 		case "prestart":
-			s.Hooks.Prestart = append(s.Hooks.Prestart, h)
+			s.Hooks.Prestart = append(s.Hooks.Prestart, h) //nolint:staticcheck // intentional support for legacy prestart hooks
 		case "createRuntime":
 			s.Hooks.CreateRuntime = append(s.Hooks.CreateRuntime, h)
 		case "createContainer":

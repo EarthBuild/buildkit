@@ -9,12 +9,23 @@ const AttrMountSSHSock = "git.mountsshsock"
 const AttrGitLFSInclude = "git.lfsinclude" // earthly-specific
 const AttrGitLogLevel = "git.loglevel"     // earthly-specific
 const AttrGitSSHCommand = "git.sshCommand" // earthly-specific
+const AttrGitChecksum = "git.checksum"
+const AttrGitSkipSubmodules = "git.skipsubmodules"
+const AttrGitMTime = "git.mtime"
+
+const AttrGitSignatureVerifyPubKey = "git.sig.pubkey"
+const AttrGitSignatureVerifyRejectExpired = "git.sig.rejectexpired"
+const AttrGitSignatureVerifyRequireSignedTag = "git.sig.requiresignedtag"
+const AttrGitSignatureVerifyIgnoreSignedTag = "git.sig.ignoresignedtag"
+
 const AttrLocalSessionID = "local.session"
 const AttrLocalUniqueID = "local.unique"
 const AttrIncludePatterns = "local.includepattern"
 const AttrFollowPaths = "local.followpaths"
 const AttrExcludePatterns = "local.excludepatterns"
 const AttrSharedKeyHint = "local.sharedkeyhint"
+const AttrMetadataTransfer = "local.metadatatransfer"
+const AttrMetadataTransferExclude = "local.metadatatransferexclude"
 
 const AttrLLBDefinitionFilename = "llbbuild.filename"
 
@@ -23,6 +34,10 @@ const AttrHTTPFilename = "http.filename"
 const AttrHTTPPerm = "http.perm"
 const AttrHTTPUID = "http.uid"
 const AttrHTTPGID = "http.gid"
+const AttrHTTPAuthHeaderSecret = "http.authheadersecret"
+const AttrHTTPHeaderPrefix = "http.header."
+const AttrHTTPSignatureVerifyPubKey = "http.sig.pubkey"
+const AttrHTTPSignatureVerify = "http.sig.signature"
 
 const AttrImageResolveMode = "image.resolvemode"
 const AttrImageResolveModeDefault = "default"
@@ -30,6 +45,7 @@ const AttrImageResolveModeForcePull = "pull"
 const AttrImageResolveModePreferLocal = "local"
 const AttrImageRecordType = "image.recordtype"
 const AttrImageLayerLimit = "image.layerlimit"
+const AttrImageChecksum = "image.checksum"
 
 const AttrOCILayoutSessionID = "oci.session"
 const AttrOCILayoutStoreID = "oci.store"

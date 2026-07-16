@@ -5,8 +5,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -44,10 +44,6 @@ func (c gzipType) NeedsComputeDiffBySelf(comp Config) bool {
 }
 
 func (c gzipType) OnlySupportOCITypes() bool {
-	return false
-}
-
-func (c gzipType) NeedsForceCompression() bool {
 	return false
 }
 

@@ -51,6 +51,9 @@ func monitor(clicontext *cli.Context) error {
 		if ev.Record.NumTotalSteps != 0 {
 			fmt.Printf("  cache: %d/%d\n", ev.Record.NumCachedSteps, ev.Record.NumTotalSteps)
 		}
+		if ev.Record.NumWarnings != 0 {
+			fmt.Printf("  warnings: %d\n", ev.Record.NumWarnings)
+		}
 		if ev.Record.Logs != nil {
 			fmt.Printf("  logs: %s\n", ev.Record.Logs)
 		}
@@ -59,16 +62,24 @@ func monitor(clicontext *cli.Context) error {
 		}
 
 		if ev.Record.Result != nil {
-			if ev.Record.Result.Result != nil {
-				fmt.Printf("  descriptor: %s\n", ev.Record.Result.Result)
+			if len(ev.Record.Result.Results) > 0 {
+				for _, res := range ev.Record.Result.Results {
+					fmt.Printf("  descriptor: %s\n", res)
+				}
+			} else if ev.Record.Result.ResultDeprecated != nil {
+				fmt.Printf("  descriptor: %s\n", ev.Record.Result.ResultDeprecated)
 			}
 			for _, att := range ev.Record.Result.Attestations {
 				fmt.Printf("  attestation: %s\n", att)
 			}
 		}
 		for k, res := range ev.Record.Results {
-			if res.Result != nil {
-				fmt.Printf("  [%s] descriptor: %s\n", k, res.Result)
+			if len(ev.Record.Result.Results) > 0 {
+				for _, res := range res.Results {
+					fmt.Printf("  [%s] descriptor: %s\n", k, res)
+				}
+			} else if res.ResultDeprecated != nil {
+				fmt.Printf("  [%s] descriptor: %s\n", k, res.ResultDeprecated)
 			}
 			for _, att := range res.Attestations {
 				fmt.Printf("  [%s] attestation: %s\n", k, att)

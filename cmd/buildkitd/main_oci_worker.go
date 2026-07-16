@@ -1,11 +1,11 @@
 //go:build linux
-// +build linux
 
 package main
 
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,17 +14,16 @@ import (
 	"time"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
-	"github.com/containerd/containerd/defaults"
-	"github.com/containerd/containerd/pkg/dialer"
-	"github.com/containerd/containerd/pkg/userns"
-	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
-	ctdsnapshot "github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/native"
-	"github.com/containerd/containerd/snapshots/overlay"
-	"github.com/containerd/containerd/snapshots/overlay/overlayutils"
-	snproxy "github.com/containerd/containerd/snapshots/proxy"
-	fuseoverlayfs "github.com/containerd/fuse-overlayfs-snapshotter"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	ctdsnapshot "github.com/containerd/containerd/v2/core/snapshots"
+	snproxy "github.com/containerd/containerd/v2/core/snapshots/proxy"
+	"github.com/containerd/containerd/v2/defaults"
+	"github.com/containerd/containerd/v2/pkg/dialer"
+	"github.com/containerd/containerd/v2/pkg/reference"
+	"github.com/containerd/containerd/v2/plugins/snapshots/native"
+	"github.com/containerd/containerd/v2/plugins/snapshots/overlay"
+	"github.com/containerd/containerd/v2/plugins/snapshots/overlay/overlayutils"
+	fuseoverlayfs "github.com/containerd/fuse-overlayfs-snapshotter/v2"
 	sgzfs "github.com/containerd/stargz-snapshotter/fs"
 	sgzconf "github.com/containerd/stargz-snapshotter/fs/config"
 	sgzlayer "github.com/containerd/stargz-snapshotter/fs/layer"
@@ -34,6 +33,7 @@ import (
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/disk"
 	"github.com/moby/buildkit/util/network/cniprovider"
 	"github.com/moby/buildkit/util/network/netproviders"
 	"github.com/moby/buildkit/util/resolver"
@@ -41,7 +41,8 @@ import (
 	"github.com/moby/buildkit/worker"
 	"github.com/moby/buildkit/worker/base"
 	"github.com/moby/buildkit/worker/runc"
-	"github.com/pelletier/go-toml"
+	"github.com/moby/sys/userns"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -89,23 +90,23 @@ func init() {
 		},
 		cli.StringFlag{
 			Name:  "oci-worker-net",
-			Usage: "worker network type (auto, cni or host)",
-			Value: defaultConf.Workers.OCI.NetworkConfig.Mode,
+			Usage: "worker network type (auto, bridge, cni or host)",
+			Value: defaultConf.Workers.OCI.Mode,
 		},
 		cli.StringFlag{
 			Name:  "oci-cni-config-path",
 			Usage: "path of cni config file",
-			Value: defaultConf.Workers.OCI.NetworkConfig.CNIConfigPath,
+			Value: defaultConf.Workers.OCI.CNIConfigPath,
 		},
 		cli.StringFlag{
 			Name:  "oci-cni-binary-dir",
 			Usage: "path of cni binary files",
-			Value: defaultConf.Workers.OCI.NetworkConfig.CNIBinaryPath,
+			Value: defaultConf.Workers.OCI.CNIBinaryPath,
 		},
 		cli.IntFlag{
 			Name:  "oci-cni-pool-size",
 			Usage: "size of cni network namespace pool",
-			Value: defaultConf.Workers.OCI.NetworkConfig.CNIPoolSize,
+			Value: defaultConf.Workers.OCI.CNIPoolSize,
 		},
 		cli.StringFlag{
 			Name:  "oci-worker-binary",
@@ -119,6 +120,11 @@ func init() {
 		cli.BoolFlag{
 			Name:  "oci-worker-selinux",
 			Usage: "apply SELinux labels",
+		},
+		cli.IntFlag{
+			Name:  "oci-max-parallelism",
+			Usage: "limit the number of parallel build steps that can run at the same time",
+			Value: defaultConf.Workers.OCI.MaxParallelism,
 		},
 	}
 	n := "oci-worker-rootless"
@@ -149,15 +155,13 @@ func init() {
 			Usage: "Enable automatic garbage collection on worker",
 		})
 	}
-	flags = append(flags, cli.Int64Flag{
+	flags = append(flags, cli.StringFlag{
 		Name:  "oci-worker-gc-keepstorage",
-		Usage: "Amount of storage GC keep locally (MB)",
-		Value: func() int64 {
-			keep := defaultConf.Workers.OCI.GCKeepStorage.AsBytes(defaultConf.Root)
-			if keep == 0 {
-				keep = config.DetectDefaultGCCap().AsBytes(defaultConf.Root)
-			}
-			return keep / 1e6
+		Usage: "Amount of storage GC keep locally, format \"Reserved[,Free[,Maximum]]\" (MB)",
+		Value: func() string {
+			cfg := defaultConf.Workers.OCI.GCConfig
+			dstat, _ := disk.GetDiskStat(defaultConf.Root)
+			return gcConfigToString(cfg, dstat)
 		}(),
 		Hidden: len(defaultConf.Workers.OCI.GCPolicy) != 0,
 	})
@@ -192,9 +196,7 @@ func applyOCIFlags(c *cli.Context, cfg *config.Config) error {
 	if cfg.Workers.OCI.Labels == nil {
 		cfg.Workers.OCI.Labels = make(map[string]string)
 	}
-	for k, v := range labels {
-		cfg.Workers.OCI.Labels[k] = v
-	}
+	maps.Copy(cfg.Workers.OCI.Labels, labels)
 	if c.GlobalIsSet("oci-worker-snapshotter") {
 		cfg.Workers.OCI.Snapshotter = c.GlobalString("oci-worker-snapshotter")
 	}
@@ -222,20 +224,26 @@ func applyOCIFlags(c *cli.Context, cfg *config.Config) error {
 	}
 
 	if c.GlobalIsSet("oci-worker-gc-keepstorage") {
-		cfg.Workers.OCI.GCKeepStorage = config.DiskSpace{Bytes: c.GlobalInt64("oci-worker-gc-keepstorage") * 1e6}
+		gc, err := stringToGCConfig(c.GlobalString("oci-worker-gc-keepstorage"))
+		if err != nil {
+			return err
+		}
+		cfg.Workers.OCI.GCReservedSpace = gc.GCReservedSpace
+		cfg.Workers.OCI.GCMaxUsedSpace = gc.GCMaxUsedSpace
+		cfg.Workers.OCI.GCMinFreeSpace = gc.GCMinFreeSpace
 	}
 
 	if c.GlobalIsSet("oci-worker-net") {
-		cfg.Workers.OCI.NetworkConfig.Mode = c.GlobalString("oci-worker-net")
+		cfg.Workers.OCI.Mode = c.GlobalString("oci-worker-net")
 	}
 	if c.GlobalIsSet("oci-cni-config-path") {
-		cfg.Workers.OCI.NetworkConfig.CNIConfigPath = c.GlobalString("oci-cni-worker-path")
+		cfg.Workers.OCI.CNIConfigPath = c.GlobalString("oci-cni-worker-path")
 	}
 	if c.GlobalIsSet("oci-cni-binary-dir") {
-		cfg.Workers.OCI.NetworkConfig.CNIBinaryPath = c.GlobalString("oci-cni-binary-dir")
+		cfg.Workers.OCI.CNIBinaryPath = c.GlobalString("oci-cni-binary-dir")
 	}
 	if c.GlobalIsSet("oci-cni-pool-size") {
-		cfg.Workers.OCI.NetworkConfig.CNIPoolSize = c.GlobalInt("oci-cni-pool-size")
+		cfg.Workers.OCI.CNIPoolSize = c.GlobalInt("oci-cni-pool-size")
 	}
 	if c.GlobalIsSet("oci-worker-binary") {
 		cfg.Workers.OCI.Binary = c.GlobalString("oci-worker-binary")
@@ -248,6 +256,9 @@ func applyOCIFlags(c *cli.Context, cfg *config.Config) error {
 	}
 	if c.GlobalIsSet("oci-worker-selinux") {
 		cfg.Workers.OCI.SELinux = c.GlobalBool("oci-worker-selinux")
+	}
+	if c.GlobalIsSet("oci-max-parallelism") {
+		cfg.Workers.OCI.MaxParallelism = c.GlobalInt("oci-max-parallelism")
 	}
 
 	return nil
@@ -278,8 +289,8 @@ func ociWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([]worker
 
 	if cfg.Rootless {
 		bklog.L.Debugf("running in rootless mode")
-		if common.config.Workers.OCI.NetworkConfig.Mode == "auto" {
-			common.config.Workers.OCI.NetworkConfig.Mode = "host"
+		if common.config.Workers.OCI.Mode == "auto" {
+			common.config.Workers.OCI.Mode = "host"
 		}
 	}
 
@@ -294,13 +305,20 @@ func ociWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([]worker
 
 	dns := getDNSConfig(common.config.DNS)
 
+	cdiManager, err := getCDIManager(common.config.CDI)
+	if err != nil {
+		return nil, err
+	}
+
 	nc := netproviders.Opt{
-		Mode: common.config.Workers.OCI.NetworkConfig.Mode,
+		Mode: common.config.Workers.OCI.Mode,
 		CNI: cniprovider.Opt{
-			Root:       common.config.Root,
-			ConfigPath: common.config.Workers.OCI.CNIConfigPath,
-			BinaryDir:  common.config.Workers.OCI.CNIBinaryPath,
-			PoolSize:   common.config.Workers.OCI.CNIPoolSize,
+			Root:         common.config.Root,
+			ConfigPath:   common.config.Workers.OCI.CNIConfigPath,
+			BinaryDir:    common.config.Workers.OCI.CNIBinaryPath,
+			PoolSize:     common.config.Workers.OCI.CNIPoolSize,
+			BridgeName:   common.config.Workers.OCI.BridgeName,
+			BridgeSubnet: common.config.Workers.OCI.BridgeSubnet,
 		},
 	}
 
@@ -320,7 +338,7 @@ func ociWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([]worker
 		})
 	}
 
-	opt, err := runc.NewWorkerOpt(common.config.Root, snFactory, cfg.Rootless, processMode, cfg.Labels, idmapping, nc, dns, cfg.Binary, cfg.ApparmorProfile, cfg.SELinux, parallelismSem, common.traceSocket, cfg.DefaultCgroupParent, ociHooks, cfg.SampleFrequency)
+	opt, err := runc.NewWorkerOpt(common.config.Root, snFactory, cfg.Rootless, processMode, cfg.Labels, idmapping, nc, dns, cfg.Binary, cfg.ApparmorProfile, cfg.SELinux, parallelismSem, common.traceSocket, cfg.DefaultCgroupParent, ociHooks, cfg.SampleFrequency, cdiManager)
 	if err != nil {
 		return nil, err
 	}
@@ -369,6 +387,8 @@ func snapshotterFactory(commonRoot string, cfg config.OCIConfig, sm *session.Man
 				grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 				grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
 			}
+			// ignore SA1019 NewClient has different behavior and needs to be tested
+			//nolint:staticcheck
 			conn, err := grpc.Dial(dialer.DialAddress(address), gopts...)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to dial %q", address)
@@ -415,11 +435,11 @@ func snapshotterFactory(commonRoot string, cfg config.OCIConfig, sm *session.Man
 			// the main BuildKit config, the main config Unmarshalls it into a
 			// generic map[string]interface{}. Here we convert it back into TOML
 			// tree, and unmarshal it to the actual type.
-			t, err := toml.TreeFromMap(cfg.StargzSnapshotterConfig)
+			b, err := toml.Marshal(cfg.StargzSnapshotterConfig)
 			if err != nil {
 				return snFactory, errors.Wrapf(err, "failed to parse stargz config")
 			}
-			err = t.Unmarshal(&sgzCfg)
+			err = toml.Unmarshal(b, &sgzCfg)
 			if err != nil {
 				return snFactory, errors.Wrapf(err, "failed to parse stargz config")
 			}
@@ -489,8 +509,8 @@ func sourceWithSession(hosts docker.RegistryHosts, sm *session.Manager) sgzsourc
 		// to the snapshotter API. So, first, get all these IDs
 		var ids []string
 		for k := range labels {
-			if strings.HasPrefix(k, targetRefLabel+".") {
-				ids = append(ids, strings.TrimPrefix(k, targetRefLabel+"."))
+			if after, ok := strings.CutPrefix(k, targetRefLabel+"."); ok {
+				ids = append(ids, after)
 			}
 		}
 
@@ -518,7 +538,7 @@ func sourceWithSession(hosts docker.RegistryHosts, sm *session.Manager) sgzsourc
 			// Get source information based on labels and RegistryHosts containing
 			// session-based authorizer.
 			parse := sgzsource.FromDefaultLabels(func(ref reference.Spec) ([]docker.RegistryHost, error) {
-				return resolver.DefaultPool.GetResolver(hosts, named.String(), "pull", sm, session.NewGroup(sids...)).
+				return resolver.DefaultPool.GetResolver(hosts, named.String(), resolver.ScopeType{}, sm, session.NewGroup(sids...)).
 					HostsFunc(ref.Hostname())
 			})
 			if s, err := parse(map[string]string{

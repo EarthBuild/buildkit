@@ -3,12 +3,14 @@ package cache
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/url"
+	"slices"
 	"strings"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/pkg/reference"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
@@ -18,6 +20,7 @@ import (
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/progress/logs"
 	"github.com/moby/buildkit/util/pull/pullprogress"
+	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -38,7 +41,7 @@ func (sr *immutableRef) GetRemotes(ctx context.Context, createIfNeeded bool, ref
 	if err != nil {
 		return nil, err
 	}
-	defer done(ctx)
+	defer done(context.WithoutCancel(ctx))
 
 	// fast path if compression variants aren't required
 	// NOTE: compressionopt is applied only to *newly created layers* if Force != true.
@@ -51,7 +54,7 @@ func (sr *immutableRef) GetRemotes(ctx context.Context, createIfNeeded bool, ref
 	}
 
 	// Search all available remotes that has the topmost blob with the specified
-	// compression with all combination of copmressions
+	// compression with all combination of compressions
 	res := []*solver.Remote{remote}
 	topmost, parentChain := remote.Descriptors[len(remote.Descriptors)-1], remote.Descriptors[:len(remote.Descriptors)-1]
 	vDesc, err := getBlobWithCompression(ctx, sr.cm.ContentStore, topmost, refCfg.Compression.Type)
@@ -85,7 +88,7 @@ func (sr *immutableRef) GetRemotes(ctx context.Context, createIfNeeded bool, ref
 	return res, nil
 }
 
-func appendRemote(parents []*solver.Remote, desc ocispecs.Descriptor, p content.Provider) (res []*solver.Remote) {
+func appendRemote(parents []*solver.Remote, desc ocispecs.Descriptor, p content.InfoReaderProvider) (res []*solver.Remote) {
 	for _, pRemote := range parents {
 		provider := contentutil.NewMultiProvider(pRemote.Provider)
 		provider.Add(desc.Digest, p)
@@ -111,14 +114,22 @@ func getAvailableBlobs(ctx context.Context, cs content.Store, chain *solver.Remo
 	}
 	var descs []ocispecs.Descriptor
 	if err := walkBlob(ctx, cs, target, func(desc ocispecs.Descriptor) bool {
-		descs = append(descs, desc)
+		// Nothing prevents this function from being called multiple times for the same descriptor.
+		// So we need to make sure we don't add the same descriptor again.
+		// Looping over the list is preferable:
+		// 1. to avoid using a map, which don't preserve the order of descriptors,
+		// 2. descs will have a length the number of compression variants for a blob, which is usually very small
+		if !slices.ContainsFunc(descs, func(d ocispecs.Descriptor) bool {
+			return d.Digest == desc.Digest
+		}) {
+			descs = append(descs, desc)
+		}
 		return true
 	}); err != nil {
 		bklog.G(ctx).WithError(err).Warn("failed to walk variant blob") // is not a critical error at this moment.
 	}
 	var res []*solver.Remote
 	for _, desc := range descs {
-		desc := desc
 		if len(parents) == 0 { // bottommost ref
 			res = append(res, &solver.Remote{
 				Descriptors: []ocispecs.Descriptor{desc},
@@ -197,14 +208,7 @@ func (sr *immutableRef) getRemote(ctx context.Context, createIfNeeded bool, refC
 				if existings, ok := desc.Annotations[dslKey]; ok {
 					existingRepos = strings.Split(existings, ",")
 				}
-				addNewRepo := true
-				for _, existing := range existingRepos {
-					if existing == repo {
-						addNewRepo = false
-						break
-					}
-				}
-				if addNewRepo {
+				if !slices.Contains(existingRepos, repo) {
 					existingRepos = append(existingRepos, repo)
 				}
 				desc.Annotations[dslKey] = strings.Join(existingRepos, ",")
@@ -212,7 +216,7 @@ func (sr *immutableRef) getRemote(ctx context.Context, createIfNeeded bool, refC
 			}
 		}
 
-		if needsForceCompression(ctx, sr.cm.ContentStore, desc, refCfg) {
+		if refCfg.Compression.Force {
 			if needs, err := refCfg.Compression.Type.NeedsConversion(ctx, sr.cm.ContentStore, desc); err != nil {
 				return nil, err
 			} else if needs {
@@ -234,9 +238,7 @@ func (sr *immutableRef) getRemote(ctx context.Context, createIfNeeded bool, refC
 				for _, k := range addAnnotations {
 					newDesc.Annotations[k] = desc.Annotations[k]
 				}
-				for k, v := range blobDesc.Annotations {
-					newDesc.Annotations[k] = v
-				}
+				maps.Copy(newDesc.Annotations, blobDesc.Annotations)
 				desc = newDesc
 			}
 		}
@@ -276,10 +278,13 @@ func (mp *lazyMultiProvider) ReaderAt(ctx context.Context, desc ocispecs.Descrip
 	return mp.mprovider.ReaderAt(ctx, desc)
 }
 
+func (mp *lazyMultiProvider) Info(ctx context.Context, dgst digest.Digest) (content.Info, error) {
+	return mp.mprovider.Info(ctx, dgst)
+}
+
 func (mp *lazyMultiProvider) Unlazy(ctx context.Context) error {
 	eg, egctx := errgroup.WithContext(ctx)
 	for _, p := range mp.plist {
-		p := p
 		eg.Go(func() error {
 			return p.Unlazy(egctx)
 		})
@@ -296,12 +301,34 @@ type lazyRefProvider struct {
 
 func (p lazyRefProvider) ReaderAt(ctx context.Context, desc ocispecs.Descriptor) (content.ReaderAt, error) {
 	if desc.Digest != p.desc.Digest {
-		return nil, errdefs.ErrNotFound
+		return nil, cerrdefs.ErrNotFound
 	}
 	if err := p.Unlazy(ctx); err != nil {
 		return nil, err
 	}
 	return p.ref.cm.ContentStore.ReaderAt(ctx, desc)
+}
+
+func (p lazyRefProvider) Info(ctx context.Context, dgst digest.Digest) (content.Info, error) {
+	if dgst != p.desc.Digest {
+		return content.Info{}, cerrdefs.ErrNotFound
+	}
+	info, err := p.ref.cm.ContentStore.Info(ctx, dgst)
+	if err == nil {
+		return info, nil
+	}
+
+	if isLazy, err1 := p.ref.isLazy(ctx); err1 != nil {
+		return content.Info{}, err1
+	} else if !isLazy {
+		return content.Info{}, err
+	}
+
+	// for lazy records don't unlazy without read request
+	return content.Info{
+		Digest: p.desc.Digest,
+		Size:   p.desc.Size,
+	}, nil
 }
 
 func (p lazyRefProvider) Unlazy(ctx context.Context) error {

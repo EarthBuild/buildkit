@@ -2,19 +2,22 @@ package local
 
 import (
 	"github.com/moby/buildkit/solver/llbsolver/provenance"
+	provenancetypes "github.com/moby/buildkit/solver/llbsolver/provenance/types"
 	"github.com/moby/buildkit/source"
 	srctypes "github.com/moby/buildkit/source/types"
 	"github.com/tonistiigi/fsutil"
 )
 
 type LocalIdentifier struct {
-	Name            string
-	SessionID       string
-	IncludePatterns []string
-	ExcludePatterns []string
-	FollowPaths     []string
-	SharedKeyHint   string
-	Differ          fsutil.DiffType
+	Name               string
+	SessionID          string
+	IncludePatterns    []string
+	ExcludePatterns    []string
+	FollowPaths        []string
+	SharedKeyHint      string
+	Differ             fsutil.DiffType
+	MetadataOnly       bool
+	MetadataExceptions []string
 }
 
 func NewLocalIdentifier(str string) (*LocalIdentifier, error) {
@@ -28,7 +31,7 @@ func (*LocalIdentifier) Scheme() string {
 var _ source.Identifier = (*LocalIdentifier)(nil)
 
 func (id *LocalIdentifier) Capture(c *provenance.Capture, pin string) error {
-	c.AddLocal(provenance.LocalSource{
+	c.AddLocal(provenancetypes.LocalSource{
 		Name: id.Name,
 	})
 	return nil

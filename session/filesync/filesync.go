@@ -3,7 +3,7 @@ package filesync
 import (
 	"context"
 	"fmt"
-	io "io"
+	"io"
 	"net/url"
 	"os"
 	"strconv"
@@ -27,12 +27,21 @@ const (
 	keyFollowPaths        = "followpaths"
 	keyDirName            = "dir-name"
 	keyExporterMetaPrefix = "exporter-md-"
+
+	keyExporterID = "buildkit-attachable-exporter-id"
 )
 
 type fsSyncProvider struct {
 	dirs   DirSource
 	p      progressCb
 	doneCh chan error
+}
+
+type FileOutputFunc func(map[string]string) (io.WriteCloser, error)
+
+type SyncedDir struct {
+	Dir string
+	Map func(string, *fstypes.Stat) fsutil.MapResult
 }
 
 type DirSource interface {
@@ -62,6 +71,7 @@ func (sp *fsSyncProvider) Register(server *grpc.Server) {
 func (sp *fsSyncProvider) DiffCopy(stream FileSync_DiffCopyServer) error {
 	return sp.handle("diffcopy", stream)
 }
+
 func (sp *fsSyncProvider) TarStream(stream FileSync_TarStreamServer) error {
 	return sp.handle("tarstream", stream)
 }
@@ -135,7 +145,7 @@ type progressCb func(int, bool)
 type protocol struct {
 	name   string
 	sendFn func(stream Stream, fs fsutil.FS, progress progressCb) error
-	recvFn func(stream grpc.ClientStream, destDir string, cu CacheUpdater, progress progressCb, differ fsutil.DiffType, mapFunc func(string, *fstypes.Stat) bool) error
+	recvFn func(stream grpc.ClientStream, destDir string, cu CacheUpdater, progress progressCb, differ fsutil.DiffType, mapFunc, metadataOnlyFilter func(string, *fstypes.Stat) bool) error
 }
 
 var supportedProtocols = []protocol{
@@ -148,15 +158,17 @@ var supportedProtocols = []protocol{
 
 // FSSendRequestOpt defines options for FSSend request
 type FSSendRequestOpt struct {
-	Name            string
-	IncludePatterns []string
-	ExcludePatterns []string
-	FollowPaths     []string
-	DestDir         string
-	CacheUpdater    CacheUpdater
-	ProgressCb      func(int, bool)
-	Filter          func(string, *fstypes.Stat) bool
-	Differ          fsutil.DiffType
+	Name               string
+	IncludePatterns    []string
+	ExcludePatterns    []string
+	FollowPaths        []string
+	DestDir            string
+	CacheUpdater       CacheUpdater
+	ProgressCb         func(int, bool)
+	Filter             func(string, *fstypes.Stat) bool
+	Differ             fsutil.DiffType
+	MetadataOnly       bool
+	MetadataOnlyFilter func(string, *fstypes.Stat) bool
 }
 
 // CacheUpdater is an object capable of sending notifications for the cache hash changes
@@ -170,7 +182,7 @@ type CacheUpdater interface {
 func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 	var pr *protocol
 	for _, p := range supportedProtocols {
-		if c.Supports(session.MethodURL(_FileSync_serviceDesc.ServiceName, p.name)) {
+		if c.Supports(session.MethodURL(FileSync_ServiceDesc.ServiceName, p.name)) {
 			pr = &p
 			break
 		}
@@ -195,8 +207,8 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 
 	opts[keyDirName] = []string{opt.Name}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	client := NewFileSyncClient(c.Conn())
 
@@ -223,62 +235,60 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 		panic(fmt.Sprintf("invalid protocol: %q", pr.name))
 	}
 
-	return pr.recvFn(stream, opt.DestDir, opt.CacheUpdater, opt.ProgressCb, opt.Differ, opt.Filter)
+	var metadataOnlyFilter func(string, *fstypes.Stat) bool
+	if opt.MetadataOnly {
+		if opt.MetadataOnlyFilter != nil {
+			metadataOnlyFilter = opt.MetadataOnlyFilter
+		} else {
+			metadataOnlyFilter = func(string, *fstypes.Stat) bool { return false }
+		}
+	}
+
+	return pr.recvFn(stream, opt.DestDir, opt.CacheUpdater, opt.ProgressCb, opt.Differ, opt.Filter, metadataOnlyFilter)
 }
 
 // NewFSSyncTargetDir allows writing into a directory
-func NewFSSyncTargetDir(outdir string, verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
-	p := &fsSyncTarget{
-		outdir:            outdir,
-		verboseProgressCB: verboseProgressCB,
+// earthly-specific: progressFn reports cumulative received bytes (fsutil ProgressCb)
+func NewFSSyncTargetDir(outdir string, progressFn func(bytes int, done bool)) session.Attachable {
+	p := &earthlySyncTarget{
+		outdir:     outdir,
+		progressFn: progressFn,
 	}
 	return p
 }
 
-// NewFSSyncTarget allows writing into an io.WriteCloser
-func NewFSSyncTarget(f func(map[string]string) (io.WriteCloser, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
-	p := &fsSyncTarget{
-		f:                 f,
-		verboseProgressCB: verboseProgressCB,
+// NewFSSyncMultiTarget allows writing into an io.WriteCloser; it is earthly-specific
+func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progressFn func(bytes int, done bool)) session.Attachable {
+	p := &earthlySyncTarget{
+		f:          f,
+		outdirFunc: outdirFunc,
+		progressFn: progressFn,
 	}
 	return p
 }
 
-// NewFSSyncTarget allows writing into an io.WriteCloser; it is earthly-specific
-func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
-	p := &fsSyncTarget{
-		f:                 f,
-		outdirFunc:        outdirFunc,
-		verboseProgressCB: verboseProgressCB,
-	}
-	return p
-}
-
-type fsSyncTarget struct {
+// earthlySyncTarget is earthly-specific: a byte-progress callback plus outdirFunc
+type earthlySyncTarget struct {
 	outdir     string
-	outdirFunc func(map[string]string) (string, error) //earthly
+	outdirFunc func(map[string]string) (string, error)
 	f          func(map[string]string) (io.WriteCloser, error)
-
-	verboseProgressCB fsutil.VerboseProgressCB
+	progressFn func(bytes int, done bool)
 }
 
-func (sp *fsSyncTarget) Register(server *grpc.Server) {
+func (sp *earthlySyncTarget) Register(server *grpc.Server) {
 	RegisterFileSendServer(server, sp)
 }
 
-func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
+func (sp *earthlySyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 	if sp.outdir != "" {
-		return syncTargetDiffCopy(stream, sp.outdir, sp.verboseProgressCB)
+		return syncTargetDiffCopy(stream, sp.outdir, sp.progressFn)
 	}
 
-	if sp.f == nil {
-		return errors.New("empty outfile and outdir")
-	}
-	opts, _ := metadata.FromIncomingContext(stream.Context()) // if no metadata continue with empty object
+	opts, _ := metadata.FromIncomingContext(stream.Context())
 	md := map[string]string{}
 	for k, v := range opts {
-		if strings.HasPrefix(k, keyExporterMetaPrefix) {
-			md[strings.TrimPrefix(k, keyExporterMetaPrefix)] = strings.Join(v, ",")
+		if after, ok0 := strings.CutPrefix(k, keyExporterMetaPrefix); ok0 {
+			md[after] = strings.Join(v, ",")
 		}
 	}
 	if sp.outdirFunc != nil {
@@ -287,7 +297,7 @@ func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 			return err
 		}
 		if outdir != "" {
-			return syncTargetDiffCopy(stream, outdir, sp.verboseProgressCB)
+			return syncTargetDiffCopy(stream, outdir, sp.progressFn)
 		}
 	}
 	wc, err := sp.f(md)
@@ -306,13 +316,132 @@ func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 	return writeTargetFile(stream, wc)
 }
 
-func CopyToCaller(ctx context.Context, fs fsutil.FS, c session.Caller, progress func(int, bool)) error {
-	method := session.MethodURL(_FileSend_serviceDesc.ServiceName, "diffcopy")
+type FSSyncTarget interface {
+	target() *fsSyncTarget
+}
+
+type fsSyncTarget struct {
+	id     int
+	outdir string
+	f      FileOutputFunc
+}
+
+func (target *fsSyncTarget) target() *fsSyncTarget {
+	return target
+}
+
+func WithFSSync(id int, f FileOutputFunc) FSSyncTarget {
+	return &fsSyncTarget{
+		id: id,
+		f:  f,
+	}
+}
+
+func WithFSSyncDir(id int, outdir string) FSSyncTarget {
+	return &fsSyncTarget{
+		id:     id,
+		outdir: outdir,
+	}
+}
+
+func NewFSSyncTarget(targets ...FSSyncTarget) *SyncTarget {
+	st := &SyncTarget{
+		fs:      make(map[int]FileOutputFunc),
+		outdirs: make(map[int]string),
+	}
+	st.Add(targets...)
+	return st
+}
+
+type SyncTarget struct {
+	fs      map[int]FileOutputFunc
+	outdirs map[int]string
+}
+
+var _ session.Attachable = &SyncTarget{}
+
+func (sp *SyncTarget) Add(targets ...FSSyncTarget) {
+	for _, t := range targets {
+		t := t.target()
+		if t.f != nil {
+			sp.fs[t.id] = t.f
+		}
+		if t.outdir != "" {
+			sp.outdirs[t.id] = t.outdir
+		}
+	}
+}
+
+func (sp *SyncTarget) Register(server *grpc.Server) {
+	RegisterFileSendServer(server, sp)
+}
+
+func (sp *SyncTarget) chooser(ctx context.Context) int {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return 0
+	}
+	values := md[keyExporterID]
+	if len(values) == 0 {
+		return 0
+	}
+	id, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return int(id)
+}
+
+func (sp *SyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
+	id := sp.chooser(stream.Context())
+	if outdir, ok := sp.outdirs[id]; ok {
+		return syncTargetDiffCopy(stream, outdir, nil)
+	}
+	f, ok := sp.fs[id]
+	if !ok {
+		return errors.Errorf("exporter %d not found", id)
+	}
+
+	opts, _ := metadata.FromIncomingContext(stream.Context()) // if no metadata continue with empty object
+	md := map[string]string{}
+	for k, v := range opts {
+		if after, ok0 := strings.CutPrefix(k, keyExporterMetaPrefix); ok0 {
+			md[after] = strings.Join(v, ",")
+		}
+	}
+	wc, err := f(md)
+	if err != nil {
+		return err
+	}
+	if wc == nil {
+		return status.Errorf(codes.AlreadyExists, "target already exists")
+	}
+	defer func() {
+		err1 := wc.Close()
+		if err == nil {
+			err = err1
+		}
+	}()
+	return writeTargetFile(stream, wc)
+}
+
+func CopyToCaller(ctx context.Context, fs fsutil.FS, id int, c session.Caller, progress func(int, bool)) error {
+	method := session.MethodURL(FileSend_ServiceDesc.ServiceName, "diffcopy")
 	if !c.Supports(method) {
 		return errors.Errorf("method %s not supported by the client", method)
 	}
 
 	client := NewFileSendClient(c.Conn())
+
+	opts, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		opts = make(map[string][]string)
+	}
+	if existingVal, ok := opts[keyExporterID]; ok {
+		bklog.G(ctx).Warnf("overwriting grpc metadata key %q from value %+v to %+v", keyExporterID, existingVal, id)
+	}
+	opts[keyExporterID] = []string{fmt.Sprint(id)}
+	ctx = metadata.NewOutgoingContext(ctx, opts)
 
 	cc, err := client.DiffCopy(ctx)
 	if err != nil {
@@ -324,7 +453,7 @@ func CopyToCaller(ctx context.Context, fs fsutil.FS, c session.Caller, progress 
 
 // CopyToCallerWithMeta is earthly specific
 func CopyToCallerWithMeta(ctx context.Context, md map[string]string, fs fsutil.FS, c session.Caller, progress func(int, bool)) error {
-	method := session.MethodURL(_FileSend_serviceDesc.ServiceName, "diffcopy")
+	method := session.MethodURL(FileSend_ServiceDesc.ServiceName, "diffcopy")
 	if !c.Supports(method) {
 		return errors.Errorf("method %s not supported by the client", method)
 	}
@@ -346,8 +475,8 @@ func CopyToCallerWithMeta(ctx context.Context, md map[string]string, fs fsutil.F
 	return sendDiffCopy(cc, fs, progress)
 }
 
-func CopyFileWriter(ctx context.Context, md map[string]string, c session.Caller) (io.WriteCloser, error) {
-	method := session.MethodURL(_FileSend_serviceDesc.ServiceName, "diffcopy")
+func CopyFileWriter(ctx context.Context, md map[string]string, id int, c session.Caller) (io.WriteCloser, error) {
+	method := session.MethodURL(FileSend_ServiceDesc.ServiceName, "diffcopy")
 	if !c.Supports(method) {
 		return nil, errors.Errorf("method %s not supported by the client", method)
 	}
@@ -365,7 +494,10 @@ func CopyFileWriter(ctx context.Context, md map[string]string, c session.Caller)
 		}
 		opts[k] = []string{v}
 	}
-
+	if existingVal, ok := opts[keyExporterID]; ok {
+		bklog.G(ctx).Warnf("overwriting grpc metadata key %q from value %+v to %+v", keyExporterID, existingVal, id)
+	}
+	opts[keyExporterID] = []string{fmt.Sprint(id)}
 	ctx = metadata.NewOutgoingContext(ctx, opts)
 
 	cc, err := client.DiffCopy(ctx)

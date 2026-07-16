@@ -1,5 +1,4 @@
 //go:build !windows
-// +build !windows
 
 package appdefaults
 
@@ -10,11 +9,15 @@ import (
 )
 
 const (
-	Address              = "unix:///run/buildkit/buildkitd.sock"
 	Root                 = "/var/lib/buildkit"
 	ConfigDir            = "/etc/buildkit"
 	DefaultCNIBinDir     = "/opt/cni/bin"
 	DefaultCNIConfigPath = "/etc/buildkit/cni.json"
+)
+
+var (
+	UserCNIConfigPath = filepath.Join(UserConfigDir(), "cni.json")
+	CDISpecDirs       = []string{"/etc/cdi", "/var/run/cdi", "/etc/buildkit/cdi"}
 )
 
 // UserAddress typically returns /run/user/$UID/buildkit/buildkitd.sock
@@ -78,5 +81,5 @@ func TraceSocketPath(inUserNS bool) string {
 			return filepath.Join(dirs[0], "buildkit", "otel-grpc.sock")
 		}
 	}
-	return "/run/buildkit/otel-grpc.sock"
+	return traceSocketPath
 }

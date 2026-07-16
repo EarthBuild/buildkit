@@ -142,27 +142,27 @@ func TestIndexes(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	sis, err := s.Search(ctx, "tag:baz")
+	sis, err := s.Search(ctx, "tag:baz", false)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(sis))
 
-	require.Equal(t, sis[0].ID(), "foo1")
-	require.Equal(t, sis[1].ID(), "foo3")
+	require.Equal(t, "foo1", sis[0].ID())
+	require.Equal(t, "foo3", sis[1].ID())
 
-	sis, err = s.Search(ctx, "tag:bax")
+	sis, err = s.Search(ctx, "tag:bax", false)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(sis))
 
-	require.Equal(t, sis[0].ID(), "foo2")
+	require.Equal(t, "foo2", sis[0].ID())
 
 	err = s.Clear("foo1")
 	require.NoError(t, err)
 
-	sis, err = s.Search(ctx, "tag:baz")
+	sis, err = s.Search(ctx, "tag:baz", false)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(sis))
 
-	require.Equal(t, sis[0].ID(), "foo3")
+	require.Equal(t, "foo3", sis[0].ID())
 }
 
 func TestExternalData(t *testing.T) {

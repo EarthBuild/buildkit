@@ -4,20 +4,22 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
-	"github.com/containerd/containerd/content/local"
-	"github.com/containerd/containerd/diff/apply"
-	"github.com/containerd/containerd/diff/walking"
-	ctdmetadata "github.com/containerd/containerd/metadata"
-	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/native"
+	"github.com/containerd/containerd/v2/core/diff/apply"
+	ctdmetadata "github.com/containerd/containerd/v2/core/metadata"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/plugins/content/local"
+	"github.com/containerd/containerd/v2/plugins/diff/walking"
+	"github.com/containerd/containerd/v2/plugins/snapshots/native"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/metadata"
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/identity"
+	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	containerdsnapshot "github.com/moby/buildkit/snapshot/containerd"
+	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/source"
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/testutil/httpserver"
@@ -27,22 +29,20 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func TestHTTPSource(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Depends on unimplemented containerd bind-mount support on Windows")
-	}
+const signFixturesPathEnv = "BUILDKIT_TEST_SIGN_FIXTURES"
 
+func TestHTTPSource(t *testing.T) {
 	t.Parallel()
 	ctx := context.TODO()
 
 	hs, err := newHTTPSource(t)
 	require.NoError(t, err)
 
-	resp := httpserver.Response{
+	resp := &httpserver.Response{
 		Etag:    identity.NewID(),
 		Content: []byte("content1"),
 	}
-	server := httpserver.NewTestServer(map[string]httpserver.Response{
+	server := httpserver.NewTestServer(map[string]*httpserver.Response{
 		"/foo": resp,
 	})
 	defer server.Close()
@@ -55,19 +55,20 @@ func TestHTTPSource(t *testing.T) {
 	k, p, _, _, err := h.CacheKey(ctx, nil, 0)
 	require.NoError(t, err)
 
-	expectedContent1 := "sha256:0b1a154faa3003c1fbe7fda9c8a42d55fde2df2a2c405c32038f8ac7ed6b044a"
-	expectedPin1 := "sha256:d0b425e00e15a0d36b9b361f02bab63563aed6cb4665083905386c55d5b679fa"
+	expectedPin1 := digest.FromBytes(resp.Content).String()
+	plaintext1 := `{"Filename":"foo","Perm":0,"UID":0,"GID":0,"Checksum":"` + expectedPin1 + `"}`
+	expectedContent1 := digest.FromBytes([]byte(plaintext1)).String()
 
 	require.Equal(t, expectedContent1, k)
 	require.Equal(t, expectedPin1, p)
-	require.Equal(t, server.Stats("/foo").AllRequests, 1)
-	require.Equal(t, server.Stats("/foo").CachedRequests, 0)
+	require.Equal(t, 1, server.Stats("/foo").AllRequests)
+	require.Equal(t, 0, server.Stats("/foo").CachedRequests)
 
 	ref, err := h.Snapshot(ctx, nil)
 	require.NoError(t, err)
 	defer func() {
 		if ref != nil {
-			ref.Release(context.TODO())
+			ref.Release(context.WithoutCancel(ctx))
 			ref = nil
 		}
 	}()
@@ -88,14 +89,14 @@ func TestHTTPSource(t *testing.T) {
 
 	require.Equal(t, expectedContent1, k)
 	require.Equal(t, expectedPin1, p)
-	require.Equal(t, server.Stats("/foo").AllRequests, 2)
-	require.Equal(t, server.Stats("/foo").CachedRequests, 1)
+	require.Equal(t, 2, server.Stats("/foo").AllRequests)
+	require.Equal(t, 1, server.Stats("/foo").CachedRequests)
 
 	ref, err = h.Snapshot(ctx, nil)
 	require.NoError(t, err)
 	defer func() {
 		if ref != nil {
-			ref.Release(context.TODO())
+			ref.Release(context.WithoutCancel(ctx))
 			ref = nil
 		}
 	}()
@@ -107,13 +108,14 @@ func TestHTTPSource(t *testing.T) {
 	ref.Release(context.TODO())
 	ref = nil
 
-	resp2 := httpserver.Response{
+	resp2 := &httpserver.Response{
 		Etag:    identity.NewID(),
 		Content: []byte("content2"),
 	}
 
-	expectedContent2 := "sha256:888722f299c02bfae173a747a0345bb2291cf6a076c36d8eb6fab442a8adddfa"
-	expectedPin2 := "sha256:dab741b6289e7dccc1ed42330cae1accc2b755ce8079c2cd5d4b5366c9f769a6"
+	expectedPin2 := digest.FromBytes(resp2.Content).String()
+	plaintext2 := `{"Filename":"foo","Perm":0,"UID":0,"GID":0,"Checksum":"` + expectedPin2 + `"}`
+	expectedContent2 := digest.FromBytes([]byte(plaintext2)).String()
 
 	// update etag, downloads again
 	server.SetRoute("/foo", resp2)
@@ -126,14 +128,14 @@ func TestHTTPSource(t *testing.T) {
 
 	require.Equal(t, expectedContent2, k)
 	require.Equal(t, expectedPin2, p)
-	require.Equal(t, server.Stats("/foo").AllRequests, 4)
-	require.Equal(t, server.Stats("/foo").CachedRequests, 1)
+	require.Equal(t, 4, server.Stats("/foo").AllRequests)
+	require.Equal(t, 1, server.Stats("/foo").CachedRequests)
 
 	ref, err = h.Snapshot(ctx, nil)
 	require.NoError(t, err)
 	defer func() {
 		if ref != nil {
-			ref.Release(context.TODO())
+			ref.Release(context.WithoutCancel(ctx))
 			ref = nil
 		}
 	}()
@@ -147,21 +149,17 @@ func TestHTTPSource(t *testing.T) {
 }
 
 func TestHTTPDefaultName(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Depends on unimplemented containerd bind-mount support on Windows")
-	}
-
 	t.Parallel()
 	ctx := context.TODO()
 
 	hs, err := newHTTPSource(t)
 	require.NoError(t, err)
 
-	resp := httpserver.Response{
+	resp := &httpserver.Response{
 		Etag:    identity.NewID(),
 		Content: []byte("content1"),
 	}
-	server := httpserver.NewTestServer(map[string]httpserver.Response{
+	server := httpserver.NewTestServer(map[string]*httpserver.Response{
 		"/": resp,
 	})
 	defer server.Close()
@@ -174,16 +172,20 @@ func TestHTTPDefaultName(t *testing.T) {
 	k, p, _, _, err := h.CacheKey(ctx, nil, 0)
 	require.NoError(t, err)
 
-	require.Equal(t, "sha256:146f16ec8810a62a57ce314aba391f95f7eaaf41b8b1ebaf2ab65fd63b1ad437", k)
-	require.Equal(t, "sha256:d0b425e00e15a0d36b9b361f02bab63563aed6cb4665083905386c55d5b679fa", p)
-	require.Equal(t, server.Stats("/").AllRequests, 1)
-	require.Equal(t, server.Stats("/").CachedRequests, 0)
+	expectedPin := digest.FromBytes(resp.Content).String()
+	plaintext := `{"Filename":"download","Perm":0,"UID":0,"GID":0,"Checksum":"` + expectedPin + `"}`
+	expectedContent := digest.FromBytes([]byte(plaintext)).String()
+
+	require.Equal(t, expectedContent, k)
+	require.Equal(t, expectedPin, p)
+	require.Equal(t, 1, server.Stats("/").AllRequests)
+	require.Equal(t, 0, server.Stats("/").CachedRequests)
 
 	ref, err := h.Snapshot(ctx, nil)
 	require.NoError(t, err)
 	defer func() {
 		if ref != nil {
-			ref.Release(context.TODO())
+			ref.Release(context.WithoutCancel(ctx))
 			ref = nil
 		}
 	}()
@@ -203,7 +205,7 @@ func TestHTTPInvalidURL(t *testing.T) {
 	hs, err := newHTTPSource(t)
 	require.NoError(t, err)
 
-	server := httpserver.NewTestServer(map[string]httpserver.Response{})
+	server := httpserver.NewTestServer(map[string]*httpserver.Response{})
 	defer server.Close()
 
 	id := &HTTPIdentifier{URL: server.URL + "/foo"}
@@ -217,26 +219,23 @@ func TestHTTPInvalidURL(t *testing.T) {
 }
 
 func TestHTTPChecksum(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Depends on unimplemented containerd bind-mount support on Windows")
-	}
-
 	t.Parallel()
 	ctx := context.TODO()
 
 	hs, err := newHTTPSource(t)
 	require.NoError(t, err)
 
-	resp := httpserver.Response{
+	resp := &httpserver.Response{
 		Etag:    identity.NewID(),
 		Content: []byte("content-correct"),
 	}
-	server := httpserver.NewTestServer(map[string]httpserver.Response{
+	server := httpserver.NewTestServer(map[string]*httpserver.Response{
 		"/foo": resp,
 	})
 	defer server.Close()
 
-	id := &HTTPIdentifier{URL: server.URL + "/foo", Checksum: digest.FromBytes([]byte("content-different"))}
+	expectedPinDifferent := digest.FromBytes([]byte("content-different"))
+	id := &HTTPIdentifier{URL: server.URL + "/foo", Checksum: expectedPinDifferent}
 
 	h, err := hs.Resolve(ctx, id, nil, nil)
 	require.NoError(t, err)
@@ -244,23 +243,25 @@ func TestHTTPChecksum(t *testing.T) {
 	k, p, _, _, err := h.CacheKey(ctx, nil, 0)
 	require.NoError(t, err)
 
-	expectedContentDifferent := "sha256:f25996f463dca69cffb580f8273ffacdda43332b5f0a8bea2ead33900616d44b"
-	expectedContentCorrect := "sha256:c6a440110a7757b9e1e47b52e413cba96c62377c37a474714b6b3c4f8b74e536"
-	expectedPinDifferent := "sha256:ab0d5a7aa55c1c95d59c302eb12c55368940e6f0a257646afd455cabe248edc4"
-	expectedPinCorrect := "sha256:f5fa14774044d2ec428ffe7efbfaa0a439db7bc8127d6b71aea21e1cd558d0f0"
+	plaintextDifferent := `{"Filename":"foo","Perm":0,"UID":0,"GID":0,"Checksum":"` + expectedPinDifferent + `"}`
+	expectedContentDifferent := digest.FromBytes([]byte(plaintextDifferent)).String()
+
+	expectedPinCorrect := digest.FromBytes(resp.Content).String()
+	plaintextCorrect := `{"Filename":"foo","Perm":0,"UID":0,"GID":0,"Checksum":"` + expectedPinCorrect + `"}`
+	expectedContentCorrect := digest.FromBytes([]byte(plaintextCorrect)).String()
 
 	require.Equal(t, expectedContentDifferent, k)
-	require.Equal(t, expectedPinDifferent, p)
-	require.Equal(t, server.Stats("/foo").AllRequests, 0)
-	require.Equal(t, server.Stats("/foo").CachedRequests, 0)
+	require.Equal(t, expectedPinDifferent.String(), p)
+	require.Equal(t, 0, server.Stats("/foo").AllRequests)
+	require.Equal(t, 0, server.Stats("/foo").CachedRequests)
 
 	_, err = h.Snapshot(ctx, nil)
 	require.Error(t, err)
 
 	require.Equal(t, expectedContentDifferent, k)
-	require.Equal(t, expectedPinDifferent, p)
-	require.Equal(t, server.Stats("/foo").AllRequests, 1)
-	require.Equal(t, server.Stats("/foo").CachedRequests, 0)
+	require.Equal(t, expectedPinDifferent.String(), p)
+	require.Equal(t, 1, server.Stats("/foo").AllRequests)
+	require.Equal(t, 0, server.Stats("/foo").CachedRequests)
 
 	id = &HTTPIdentifier{URL: server.URL + "/foo", Checksum: digest.FromBytes([]byte("content-correct"))}
 
@@ -272,14 +273,14 @@ func TestHTTPChecksum(t *testing.T) {
 
 	require.Equal(t, expectedContentCorrect, k)
 	require.Equal(t, expectedPinCorrect, p)
-	require.Equal(t, server.Stats("/foo").AllRequests, 1)
-	require.Equal(t, server.Stats("/foo").CachedRequests, 0)
+	require.Equal(t, 1, server.Stats("/foo").AllRequests)
+	require.Equal(t, 0, server.Stats("/foo").CachedRequests)
 
 	ref, err := h.Snapshot(ctx, nil)
 	require.NoError(t, err)
 	defer func() {
 		if ref != nil {
-			ref.Release(context.TODO())
+			ref.Release(context.WithoutCancel(ctx))
 			ref = nil
 		}
 	}()
@@ -290,11 +291,191 @@ func TestHTTPChecksum(t *testing.T) {
 
 	require.Equal(t, expectedContentCorrect, k)
 	require.Equal(t, expectedPinCorrect, p)
-	require.Equal(t, server.Stats("/foo").AllRequests, 2)
-	require.Equal(t, server.Stats("/foo").CachedRequests, 0)
+	require.Equal(t, 2, server.Stats("/foo").AllRequests)
+	require.Equal(t, 0, server.Stats("/foo").CachedRequests)
 
 	ref.Release(context.TODO())
 	ref = nil
+}
+
+func TestHTTPSignatureVerification(t *testing.T) {
+	t.Parallel()
+	ctx := context.TODO()
+
+	fixturesPath, ok := os.LookupEnv(signFixturesPathEnv)
+	if !ok {
+		t.Skip("missing BUILDKIT_TEST_SIGN_FIXTURES")
+	}
+
+	payload := readSignFixture(t, fixturesPath, "user1.http.artifact")
+	signature := readSignFixture(t, fixturesPath, "user1.http.artifact.asc")
+	pubKeyUser1 := readSignFixture(t, fixturesPath, "user1.gpg.pub")
+	pubKeyUser2 := readSignFixture(t, fixturesPath, "user2.gpg.pub")
+
+	hs, err := newHTTPSource(t)
+	require.NoError(t, err)
+
+	server := httpserver.NewTestServer(map[string]*httpserver.Response{
+		"/artifact": {
+			Etag:    identity.NewID(),
+			Content: payload,
+		},
+	})
+	defer server.Close()
+
+	t.Run("valid-signature", func(t *testing.T) {
+		id := &HTTPIdentifier{
+			URL: server.URL + "/artifact",
+			VerifySignature: &HTTPSignatureVerifyOptions{
+				PubKey:    pubKeyUser1,
+				Signature: signature,
+			},
+		}
+		h, err := hs.Resolve(ctx, id, nil, nil)
+		require.NoError(t, err)
+		_, _, _, _, err = h.CacheKey(ctx, nil, 0)
+		require.NoError(t, err)
+	})
+
+	t.Run("wrong-pubkey", func(t *testing.T) {
+		id := &HTTPIdentifier{
+			URL: server.URL + "/artifact",
+			VerifySignature: &HTTPSignatureVerifyOptions{
+				PubKey:    pubKeyUser2,
+				Signature: signature,
+			},
+		}
+		h, err := hs.Resolve(ctx, id, nil, nil)
+		require.NoError(t, err)
+		_, _, _, _, err = h.CacheKey(ctx, nil, 0)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to verify pgp signature")
+	})
+
+	t.Run("multiblock-pubkey", func(t *testing.T) {
+		merged := append(append([]byte{}, pubKeyUser2...), '\n')
+		merged = append(merged, pubKeyUser1...)
+		id := &HTTPIdentifier{
+			URL: server.URL + "/artifact",
+			VerifySignature: &HTTPSignatureVerifyOptions{
+				PubKey:    merged,
+				Signature: signature,
+			},
+		}
+		h, err := hs.Resolve(ctx, id, nil, nil)
+		require.NoError(t, err)
+		_, _, _, _, err = h.CacheKey(ctx, nil, 0)
+		require.NoError(t, err)
+	})
+
+	t.Run("missing-signature", func(t *testing.T) {
+		id := &HTTPIdentifier{
+			URL: server.URL + "/artifact",
+			VerifySignature: &HTTPSignatureVerifyOptions{
+				PubKey: pubKeyUser1,
+			},
+		}
+		h, err := hs.Resolve(ctx, id, nil, nil)
+		require.NoError(t, err)
+		_, _, _, _, err = h.CacheKey(ctx, nil, 0)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "requires both pubkey and signature")
+	})
+}
+
+func TestPruneAfterCacheKey(t *testing.T) {
+	t.Parallel()
+	ctx := context.TODO()
+
+	cm, err := newCacheManager(t)
+	require.NoError(t, err)
+
+	hs, err := NewSource(Opt{
+		CacheAccessor: cm,
+	})
+	require.NoError(t, err)
+
+	resp := &httpserver.Response{
+		Etag:    identity.NewID(),
+		Content: []byte("content-correct"),
+	}
+	server := httpserver.NewTestServer(map[string]*httpserver.Response{
+		"/foo": resp,
+	})
+	defer server.Close()
+
+	id := &HTTPIdentifier{URL: server.URL + "/foo"}
+
+	h, err := hs.Resolve(ctx, id, nil, nil)
+	require.NoError(t, err)
+
+	jc := &simpleJobContext{}
+
+	k, p, _, _, err := h.CacheKey(ctx, jc, 0)
+	require.NoError(t, err)
+
+	expectedPin := digest.FromBytes(resp.Content).String()
+	plaintextCacheKey := `{"Filename":"foo","Perm":0,"UID":0,"GID":0,"Checksum":"` + expectedPin + `"}`
+	expectedCacheKey := digest.FromBytes([]byte(plaintextCacheKey)).String()
+
+	require.Equal(t, expectedCacheKey, k)
+	require.Equal(t, expectedPin, p)
+	require.Equal(t, 1, server.Stats("/foo").AllRequests)
+	require.Equal(t, 0, server.Stats("/foo").CachedRequests)
+
+	err = cm.Prune(ctx, nil, client.PruneInfo{
+		All: true,
+	})
+	require.NoError(t, err)
+
+	du, err := cm.DiskUsage(ctx, client.DiskUsageInfo{})
+	require.NoError(t, err)
+	require.Len(t, du, 1)
+	for _, u := range du {
+		require.Equal(t, "http url "+id.URL, u.Description)
+	}
+
+	resp.Etag = identity.NewID()
+	resp.Content = []byte("content-updated")
+
+	ref, err := h.Snapshot(ctx, jc)
+	require.NoError(t, err)
+	ref.Release(context.TODO())
+
+	dt, err := readFile(ctx, ref, "foo")
+	require.NoError(t, err)
+	require.Equal(t, dt, []byte("content-correct"))
+
+	require.Equal(t, 1, server.Stats("/foo").AllRequests)
+	require.Equal(t, 0, server.Stats("/foo").CachedRequests)
+
+	du, err = cm.DiskUsage(ctx, client.DiskUsageInfo{})
+	require.NoError(t, err)
+	require.Len(t, du, 1)
+
+	err = cm.Prune(ctx, nil, client.PruneInfo{
+		All: true,
+	})
+	require.NoError(t, err)
+
+	du, err = cm.DiskUsage(ctx, client.DiskUsageInfo{})
+	require.NoError(t, err)
+	require.Len(t, du, 1)
+
+	err = jc.Release()
+	require.NoError(t, err)
+
+	err = cm.Prune(ctx, nil, client.PruneInfo{
+		All: true,
+	})
+	require.NoError(t, err)
+
+	du, err = cm.DiskUsage(ctx, client.DiskUsageInfo{})
+	require.NoError(t, err)
+	for _, u := range du {
+		t.Logf("du: %+v", *u)
+	}
+	require.Len(t, du, 0)
 }
 
 func readFile(ctx context.Context, ref cache.ImmutableRef, fp string) ([]byte, error) {
@@ -320,6 +501,16 @@ func readFile(ctx context.Context, ref cache.ImmutableRef, fp string) ([]byte, e
 }
 
 func newHTTPSource(t *testing.T) (source.Source, error) {
+	cm, err := newCacheManager(t)
+	if err != nil {
+		return nil, err
+	}
+	return NewSource(Opt{
+		CacheAccessor: cm,
+	})
+}
+
+func newCacheManager(t *testing.T) (cache.Manager, error) {
 	tmpdir := t.TempDir()
 
 	snapshotter, err := native.NewSnapshotter(filepath.Join(tmpdir, "snapshots"))
@@ -368,6 +559,7 @@ func newHTTPSource(t *testing.T) (source.Source, error) {
 		Applier:        applier,
 		Differ:         differ,
 		GarbageCollect: mdb.GarbageCollect,
+		Root:           tmpdir,
 		MountPoolRoot:  filepath.Join(tmpdir, "cachemounts"),
 	})
 	if err != nil {
@@ -377,7 +569,45 @@ func newHTTPSource(t *testing.T) (source.Source, error) {
 		require.NoError(t, cm.Close())
 	})
 
-	return NewSource(Opt{
-		CacheAccessor: cm,
-	})
+	return cm, nil
+}
+
+type simpleJobContext struct {
+	releasers []func() error
+}
+
+func (s *simpleJobContext) Session() session.Group {
+	return nil
+}
+func (s *simpleJobContext) Cleanup(f func() error) error {
+	s.releasers = append(s.releasers, f)
+	return nil
+}
+
+func (s *simpleJobContext) Release() error {
+	var firstErr error
+	for _, r := range s.releasers {
+		if err := r(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	s.releasers = nil
+	return firstErr
+}
+
+func (s *simpleJobContext) ResolverCache() solver.ResolverCache {
+	return nil
+}
+
+func readSignFixture(t *testing.T, fixturesPath, name string) []byte {
+	t.Helper()
+	p := filepath.Join(fixturesPath, name)
+	dt, err := os.ReadFile(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("missing signing fixture at %s", p)
+		}
+		require.NoError(t, err)
+	}
+	return dt
 }

@@ -26,7 +26,7 @@ func (s *server) run(ctx context.Context, l net.Listener, id string) error {
 
 	eg.Go(func() error {
 		<-ctx.Done()
-		return ctx.Err()
+		return context.Cause(ctx)
 	})
 
 	eg.Go(func() error {
@@ -40,7 +40,7 @@ func (s *server) run(ctx context.Context, l net.Listener, id string) error {
 
 			opts := make(map[string][]string)
 			opts[KeySSHID] = []string{id}
-			ctx = metadata.NewOutgoingContext(ctx, opts)
+			ctx := metadata.NewOutgoingContext(ctx, opts)
 
 			stream, err := client.ForwardAgent(ctx)
 			if err != nil {
@@ -80,7 +80,8 @@ func MountSSHSocket(ctx context.Context, c session.Caller, opt SocketOpt) (sockP
 
 	sockPath = filepath.Join(dir, "ssh_auth_sock")
 
-	l, err := net.Listen("unix", sockPath)
+	listener := net.ListenConfig{}
+	l, err := listener.Listen(context.TODO(), "unix", sockPath)
 	if err != nil {
 		return "", nil, errors.WithStack(err)
 	}

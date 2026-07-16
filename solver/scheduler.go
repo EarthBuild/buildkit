@@ -3,23 +3,15 @@ package solver
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
+	"github.com/moby/buildkit/errdefs"
 	"github.com/moby/buildkit/solver/internal/pipe"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/cond"
 	"github.com/pkg/errors"
 )
-
-var debugScheduler = false // TODO: replace with logs in build trace
-
-func init() {
-	if os.Getenv("BUILDKIT_SCHEDULER_DEBUG") == "1" {
-		debugScheduler = true
-	}
-}
 
 func newScheduler(ef edgeFactory) *scheduler {
 	s := &scheduler{
@@ -114,17 +106,17 @@ func (s *scheduler) dispatch(e *edge) {
 	helpMe = append(helpMe, fmt.Sprintf("%s: %+v", e.edge.Vertex.Name(), e))
 
 	helpMe = append(helpMe, fmt.Sprintf("%d %d %d %d", len(s.incoming), len(s.outgoing), len(s.incoming[e]), len(s.outgoing[e])))
-	inc := make([]pipe.Sender, len(s.incoming[e]))
+	inc := make([]pipeSender, len(s.incoming[e]))
 	for i, p := range s.incoming[e] {
 		inc[i] = p.Sender
 	}
-	out := make([]pipe.Receiver, len(s.outgoing[e]))
+	out := make([]pipeReceiver, len(s.outgoing[e]))
 	for i, p := range s.outgoing[e] {
 		out[i] = p.Receiver
 	}
 
 	e.hasActiveOutgoing = false
-	updates := []pipe.Receiver{}
+	updates := []pipeReceiver{}
 	for _, p := range out {
 		if ok := p.Receive(); ok {
 			updates = append(updates, p)
@@ -138,13 +130,9 @@ func (s *scheduler) dispatch(e *edge) {
 	pf := &pipeFactory{s: s, e: e}
 
 	// unpark the edge
-	if debugScheduler {
-		debugSchedulerPreUnpark(e, inc, updates, out)
-	}
+	debugSchedulerPreUnpark(e, inc, updates, out)
 	e.unpark(inc, updates, out, pf)
-	if debugScheduler {
-		debugSchedulerPostUnpark(e, inc)
-	}
+	debugSchedulerPostUnpark(e, inc)
 
 	// set up new requests that didn't complete/were added by this run
 	helpMe = append(helpMe, fmt.Sprintf("make openIncoming %d", len(inc)))
@@ -184,16 +172,20 @@ func (s *scheduler) dispatch(e *edge) {
 			origEdge := e.index.LoadOrStore(k, e)
 			if origEdge != nil {
 				if e.isDep(origEdge) || origEdge.isDep(e) {
-					bklog.G(context.TODO()).Debugf("skip merge due to dependency")
+					debugSchedulerSkipMergeDueToDependency(e, origEdge)
 				} else {
 					dest, src := origEdge, e
 					if s.ef.hasOwner(origEdge.edge, e.edge) {
+						debugSchedulerSwapMergeDueToOwner(e, origEdge)
 						dest, src = src, dest
 					}
 
 					bklog.G(context.TODO()).Debugf("merging edge %s[%d] to %s[%d]\n", src.edge.Vertex.Name(), src.edge.Index, dest.edge.Vertex.Name(), dest.edge.Index)
+					debugSchedulerMergingEdges(src, dest)
 					if s.mergeTo(dest, src) {
 						s.ef.setEdge(src.edge, dest)
+					} else {
+						debugSchedulerMergingEdgesSkipped(src, dest)
 					}
 				}
 			}
@@ -245,7 +237,7 @@ func (s *scheduler) build(ctx context.Context, edge Edge) (CachedResult, error) 
 
 	wait := make(chan struct{})
 
-	p := s.newPipe(e, nil, pipe.Request{Payload: &edgeRequest{desiredState: edgeStatusComplete}})
+	p := s.newPipe(e, nil, pipeRequest{Payload: &edgeRequest{desiredState: edgeStatusComplete}})
 	p.OnSendCompletion = func() {
 		p.Receiver.Receive()
 		if p.Receiver.Status().Completed {
@@ -254,8 +246,8 @@ func (s *scheduler) build(ctx context.Context, edge Edge) (CachedResult, error) 
 	}
 	s.mu.Unlock()
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	go func() {
 		<-ctx.Done()
@@ -271,9 +263,9 @@ func (s *scheduler) build(ctx context.Context, edge Edge) (CachedResult, error) 
 }
 
 // newPipe creates a new request pipe between two edges
-func (s *scheduler) newPipe(target, from *edge, req pipe.Request) *pipe.Pipe {
+func (s *scheduler) newPipe(target, from *edge, req pipeRequest) *pipe.Pipe[*edgeRequest, any] {
 	p := &edgePipe{
-		Pipe:   pipe.New(req),
+		Pipe:   newPipe(req),
 		Target: target,
 		From:   from,
 	}
@@ -297,8 +289,8 @@ func (s *scheduler) newPipe(target, from *edge, req pipe.Request) *pipe.Pipe {
 }
 
 // newRequestWithFunc creates a new request pipe that invokes a async function
-func (s *scheduler) newRequestWithFunc(e *edge, f func(context.Context) (interface{}, error)) pipe.Receiver {
-	pp, start := pipe.NewWithFunction(f)
+func (s *scheduler) newRequestWithFunc(e *edge, f func(context.Context) (any, error)) pipeReceiver {
+	pp, start := pipe.NewWithFunction[*edgeRequest](f)
 	p := &edgePipe{
 		Pipe: pp,
 		From: e,
@@ -368,72 +360,23 @@ type pipeFactory struct {
 	s *scheduler
 }
 
-func (pf *pipeFactory) NewInputRequest(ee Edge, req *edgeRequest) pipe.Receiver {
+func (pf *pipeFactory) NewInputRequest(ee Edge, req *edgeRequest) pipeReceiver {
 	target := pf.s.ef.getEdge(ee)
 	if target == nil {
 		dgst := ee.Vertex.Digest()
 		bklog.G(context.TODO()).Errorf("failed to get edge dgst=%s name=%s desiredState=%s; actives history: %s", dgst, ee.Vertex.Name(), req.desiredState, dgstTrackerInst.String()) // earthly-specific
-		return pf.NewFuncRequest(func(_ context.Context) (interface{}, error) {
-			return nil, errors.Errorf("failed to get edge: inconsistent graph state")
+		debugSchedulerInconsistentGraphState(ee)
+		return pf.NewFuncRequest(func(_ context.Context) (any, error) {
+			return nil, errdefs.Internal(errors.Errorf("failed to get edge: inconsistent graph state in edge %s %s %d", ee.Vertex.Name(), ee.Vertex.Digest(), ee.Index))
 		})
 	}
-	p := pf.s.newPipe(target, pf.e, pipe.Request{Payload: req})
-	if debugScheduler {
-		bklog.G(context.TODO()).Debugf("> newPipe %s %p desiredState=%s", ee.Vertex.Name(), p, req.desiredState)
-	}
+	p := pf.s.newPipe(target, pf.e, pipeRequest{Payload: req})
+	debugSchedulerNewPipe(pf.e, p, req)
 	return p.Receiver
 }
 
-func (pf *pipeFactory) NewFuncRequest(f func(context.Context) (interface{}, error)) pipe.Receiver {
+func (pf *pipeFactory) NewFuncRequest(f func(context.Context) (any, error)) pipeReceiver {
 	p := pf.s.newRequestWithFunc(pf.e, f)
-	if debugScheduler {
-		bklog.G(context.TODO()).Debugf("> newFunc %p", p)
-	}
+	debugSchedulerNewFunc(pf.e, p)
 	return p
-}
-
-func debugSchedulerPreUnpark(e *edge, inc []pipe.Sender, updates, allPipes []pipe.Receiver) {
-	log := bklog.G(context.TODO())
-
-	log.Debugf(">> unpark %s req=%d upt=%d out=%d state=%s %s", e.edge.Vertex.Name(), len(inc), len(updates), len(allPipes), e.state, e.edge.Vertex.Digest())
-
-	for i, dep := range e.deps {
-		des := edgeStatusInitial
-		if dep.req != nil {
-			des = dep.req.Request().(*edgeRequest).desiredState
-		}
-		log.Debugf(":: dep%d %s state=%s des=%s keys=%d hasslowcache=%v preprocessfunc=%v", i, e.edge.Vertex.Inputs()[i].Vertex.Name(), dep.state, des, len(dep.keys), e.slowCacheFunc(dep) != nil, e.preprocessFunc(dep) != nil)
-	}
-
-	for i, in := range inc {
-		req := in.Request()
-		log.Debugf("> incoming-%d: %p dstate=%s canceled=%v", i, in, req.Payload.(*edgeRequest).desiredState, req.Canceled)
-	}
-
-	for i, up := range updates {
-		if up == e.cacheMapReq {
-			log.Debugf("> update-%d: %p cacheMapReq complete=%v", i, up, up.Status().Completed)
-		} else if up == e.execReq {
-			log.Debugf("> update-%d: %p execReq complete=%v", i, up, up.Status().Completed)
-		} else {
-			st, ok := up.Status().Value.(*edgeState)
-			if ok {
-				index := -1
-				if dep, ok := e.depRequests[up]; ok {
-					index = int(dep.index)
-				}
-				log.Debugf("> update-%d: %p input-%d keys=%d state=%s", i, up, index, len(st.keys), st.state)
-			} else {
-				log.Debugf("> update-%d: unknown", i)
-			}
-		}
-	}
-}
-
-func debugSchedulerPostUnpark(e *edge, inc []pipe.Sender) {
-	log := bklog.G(context.TODO())
-	for i, in := range inc {
-		log.Debugf("< incoming-%d: %p completed=%v", i, in, in.Status().Completed)
-	}
-	log.Debugf("<< unpark %s\n", e.edge.Vertex.Name())
 }

@@ -74,6 +74,9 @@ func TestCommandsTooManyArguments(t *testing.T) {
 					Value: "arg2",
 					Next: &parser.Node{
 						Value: "arg3",
+						Next: &parser.Node{
+							Value: "",
+						},
 					},
 				},
 			},
@@ -97,6 +100,9 @@ func TestCommandsBlankNames(t *testing.T) {
 				Value: "",
 				Next: &parser.Node{
 					Value: "arg2",
+					Next: &parser.Node{
+						Value: "=",
+					},
 				},
 			},
 		}
@@ -145,6 +151,29 @@ func TestParseOptInterval(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestNilLinter(t *testing.T) {
+	for cmd := range command.Commands {
+		t.Run(cmd, func(t *testing.T) {
+			t.Parallel()
+
+			for _, tc := range []string{
+				cmd + " foo=bar",
+				cmd + " a",
+				cmd + " a b",
+				cmd + " a b c",
+				cmd + " 0 0",
+			} {
+				t.Run(tc, func(t *testing.T) {
+					ast, err := parser.Parse(strings.NewReader("FROM busybox\n" + tc))
+					if err == nil {
+						_, _, _ = Parse(ast.AST, nil)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestCommentsDetection(t *testing.T) {
 	dt := `# foo sets foo
 ARG foo=bar
@@ -161,21 +190,21 @@ ARG bar baz=123
 	ast, err := parser.Parse(bytes.NewBuffer([]byte(dt)))
 	require.NoError(t, err)
 
-	stages, meta, err := Parse(ast.AST)
+	stages, meta, err := Parse(ast.AST, nil)
 	require.NoError(t, err)
 
-	require.Equal(t, "defines first stage", stages[0].Comment)
+	require.Equal(t, "defines first stage", stages[0].DocComment)
 	require.Equal(t, "foo", meta[0].Args[0].Key)
-	require.Equal(t, "sets foo", meta[0].Args[0].Comment)
+	require.Equal(t, "sets foo", meta[0].Args[0].DocComment)
 
 	st := stages[0]
 
 	require.Equal(t, "foo", st.Commands[0].(*ArgCommand).Args[0].Key)
-	require.Equal(t, "", st.Commands[0].(*ArgCommand).Args[0].Comment)
+	require.Equal(t, "", st.Commands[0].(*ArgCommand).Args[0].DocComment)
 	require.Equal(t, "bar", st.Commands[1].(*ArgCommand).Args[0].Key)
-	require.Equal(t, "defines bar", st.Commands[1].(*ArgCommand).Args[0].Comment)
+	require.Equal(t, "defines bar", st.Commands[1].(*ArgCommand).Args[0].DocComment)
 	require.Equal(t, "baz", st.Commands[1].(*ArgCommand).Args[1].Key)
-	require.Equal(t, "is something else", st.Commands[1].(*ArgCommand).Args[1].Comment)
+	require.Equal(t, "is something else", st.Commands[1].(*ArgCommand).Args[1].DocComment)
 }
 
 func TestErrorCases(t *testing.T) {
@@ -199,7 +228,7 @@ func TestErrorCases(t *testing.T) {
 		{
 			name:          "MAINTAINER unknown flag",
 			dockerfile:    "MAINTAINER --boo joe@example.com",
-			expectedError: "unknown flag: boo",
+			expectedError: "unknown flag: --boo",
 		},
 		{
 			name:          "Chaining ONBUILD",
@@ -239,14 +268,14 @@ func TestRunCmdFlagsUsed(t *testing.T) {
 	n := ast.AST.Children[0]
 	c, err := ParseInstruction(n)
 	require.NoError(t, err)
-	require.IsType(t, c, &RunCommand{})
+	require.IsType(t, &RunCommand{}, c)
 	require.Equal(t, []string{"mount"}, c.(*RunCommand).FlagsUsed)
 }
 
 func BenchmarkParseBuildStageName(b *testing.B) {
 	b.ReportAllocs()
 	stageNames := []string{"STAGE_NAME", "StageName", "St4g3N4m3"}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, s := range stageNames {
 			_, _ = parseBuildStageName([]string{"foo", "as", s})
 		}

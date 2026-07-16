@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/content/local"
-	"github.com/containerd/containerd/diff/apply"
-	"github.com/containerd/containerd/diff/walking"
-	"github.com/containerd/containerd/leases"
-	ctdmetadata "github.com/containerd/containerd/metadata"
-	"github.com/containerd/containerd/namespaces"
-	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/native"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/diff/apply"
+	"github.com/containerd/containerd/v2/core/leases"
+	ctdmetadata "github.com/containerd/containerd/v2/core/metadata"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/containerd/v2/plugins/content/local"
+	"github.com/containerd/containerd/v2/plugins/diff/walking"
+	"github.com/containerd/containerd/v2/plugins/snapshots/native"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/snapshot"
@@ -25,6 +25,7 @@ import (
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/winlayers"
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sync/errgroup"
@@ -108,6 +109,7 @@ func newCacheManager(ctx context.Context, t *testing.T, opt cmOpt) (co *cmOut, e
 		Differ:         differ,
 		LeaseManager:   lm,
 		GarbageCollect: mdb.GarbageCollect,
+		Root:           tmpdir,
 		MountPoolRoot:  filepath.Join(tmpdir, "cachemounts"),
 	})
 	if err != nil {
@@ -288,8 +290,8 @@ func TestCacheMountLockedRefs(t *testing.T) {
 	gotRef4 := make(chan struct{})
 	go func() {
 		ref4, err := g2.getRefCacheDir(ctx, nil, "foo", pb.CacheSharingOpt_LOCKED)
-		require.NoError(t, err)
-		require.Equal(t, ref.ID(), ref4.ID())
+		assert.NoError(t, err)
+		assert.Equal(t, ref.ID(), ref4.ID())
 		close(gotRef4)
 	}()
 
@@ -359,7 +361,7 @@ func TestCacheMountSharedRefsDeadlock(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		err = eg.Wait()
-		require.NoError(t, err)
+		assert.NoError(t, err)
 		close(done)
 	}()
 

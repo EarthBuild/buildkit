@@ -5,13 +5,14 @@ import (
 	"io"
 	"time"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes"
-	"github.com/moby/buildkit/client/llb"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/remotes"
+	"github.com/containerd/containerd/v2/pkg/reference"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/session"
 	sessioncontent "github.com/moby/buildkit/session/content"
 	"github.com/moby/buildkit/util/imageutil"
+	"github.com/moby/buildkit/util/iohelper"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
@@ -21,7 +22,7 @@ const (
 )
 
 // getOCILayoutResolver gets a resolver to an OCI layout for a specified store from the client using the given session.
-func getOCILayoutResolver(store llb.ResolveImageConfigOptStore, sm *session.Manager, g session.Group) *ociLayoutResolver {
+func getOCILayoutResolver(store sourceresolver.ResolveImageConfigOptStore, sm *session.Manager, g session.Group) *ociLayoutResolver {
 	r := &ociLayoutResolver{
 		store: store,
 		sm:    sm,
@@ -32,7 +33,7 @@ func getOCILayoutResolver(store llb.ResolveImageConfigOptStore, sm *session.Mana
 
 type ociLayoutResolver struct {
 	remotes.Resolver
-	store llb.ResolveImageConfigOptStore
+	store sourceresolver.ResolveImageConfigOptStore
 	sm    *session.Manager
 	g     session.Group
 }
@@ -51,7 +52,7 @@ func (r *ociLayoutResolver) Fetch(ctx context.Context, desc ocispecs.Descriptor)
 		if err != nil {
 			return err
 		}
-		rc = &readerAtWrapper{readerAt: readerAt}
+		rc = iohelper.ReadCloser(readerAt)
 		return nil
 	})
 	return rc, err
@@ -104,7 +105,7 @@ func (r *ociLayoutResolver) info(ctx context.Context, ref reference.Spec) (conte
 	err := r.withCaller(ctx, func(ctx context.Context, caller session.Caller) error {
 		store := sessioncontent.NewCallerStore(caller, "oci:"+r.store.StoreID)
 
-		_, dgst := reference.SplitObject(ref.Object)
+		dgst := ref.Digest()
 		if dgst == "" {
 			return errors.Errorf("reference %q does not contain a digest", ref.String())
 		}
@@ -123,8 +124,9 @@ func (r *ociLayoutResolver) info(ctx context.Context, ref reference.Spec) (conte
 
 func (r *ociLayoutResolver) withCaller(ctx context.Context, f func(context.Context, session.Caller) error) error {
 	if r.store.SessionID != "" {
-		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
+		timeoutCtx, cancel := context.WithCancelCause(ctx)
+		timeoutCtx, _ = context.WithTimeoutCause(timeoutCtx, 5*time.Second, errors.WithStack(context.DeadlineExceeded)) //nolint:govet
+		defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 		caller, err := r.sm.Get(timeoutCtx, r.store.SessionID, false)
 		if err != nil {
@@ -135,19 +137,4 @@ func (r *ociLayoutResolver) withCaller(ctx context.Context, f func(context.Conte
 	return r.sm.Any(ctx, r.g, func(ctx context.Context, _ string, caller session.Caller) error {
 		return f(ctx, caller)
 	})
-}
-
-// readerAtWrapper wraps a ReaderAt to give a Reader
-type readerAtWrapper struct {
-	offset   int64
-	readerAt content.ReaderAt
-}
-
-func (r *readerAtWrapper) Read(p []byte) (n int, err error) {
-	n, err = r.readerAt.ReadAt(p, r.offset)
-	r.offset += int64(n)
-	return
-}
-func (r *readerAtWrapper) Close() error {
-	return r.readerAt.Close()
 }

@@ -7,15 +7,17 @@ import (
 	_ "github.com/moby/buildkit/client/connhelper/dockercontainer"
 	_ "github.com/moby/buildkit/client/connhelper/kubepod"
 	_ "github.com/moby/buildkit/client/connhelper/nerdctlcontainer"
+	_ "github.com/moby/buildkit/client/connhelper/npipe"
 	_ "github.com/moby/buildkit/client/connhelper/podmancontainer"
 	_ "github.com/moby/buildkit/client/connhelper/ssh"
 	bccommon "github.com/moby/buildkit/cmd/buildctl/common"
 	"github.com/moby/buildkit/solver/errdefs"
+	"github.com/moby/buildkit/sourcepolicy/policysession"
 	"github.com/moby/buildkit/util/apicaps"
 	"github.com/moby/buildkit/util/appdefaults"
+	_ "github.com/moby/buildkit/util/grpcutil/encoding/proto"
 	"github.com/moby/buildkit/util/profiler"
 	"github.com/moby/buildkit/util/stack"
-	_ "github.com/moby/buildkit/util/tracing/detect/delegated"
 	_ "github.com/moby/buildkit/util/tracing/detect/jaeger"
 	_ "github.com/moby/buildkit/util/tracing/env"
 	"github.com/moby/buildkit/version"
@@ -42,6 +44,7 @@ func main() {
 	app.Name = "buildctl"
 	app.Usage = "build utility"
 	app.Version = version.Version
+	app.EnableBashCompletion = true
 
 	defaultAddress := os.Getenv("BUILDKIT_HOST")
 	if defaultAddress == "" {
@@ -86,7 +89,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "tlsdir",
-			Usage: "directory containing CA certificate, client certificate, and client key",
+			Usage: "directory containing CA certificate, client certificate, and client key. Supported file names are (ca.pem, cert.pem, key.pem) or (ca.crt, tls.crt, tls.key)",
 			Value: "",
 		},
 		cli.IntFlag{
@@ -144,6 +147,11 @@ func handleErr(debug bool, err error) {
 	}
 	for _, s := range errdefs.Sources(err) {
 		s.Print(os.Stderr)
+	}
+	for _, msg := range policysession.DenyMessages(err) {
+		if msg.GetMessage() != "" {
+			fmt.Fprintf(os.Stderr, "policy deny: %s\n", msg.GetMessage())
+		}
 	}
 	if debug {
 		fmt.Fprintf(os.Stderr, "error: %+v", stack.Formatter(err))

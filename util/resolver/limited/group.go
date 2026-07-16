@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/remotes"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/remotes"
 	"github.com/distribution/reference"
 	"github.com/moby/buildkit/util/bklog"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -20,7 +20,10 @@ type contextKeyT string
 
 var contextKey = contextKeyT("buildkit/util/resolver/limited")
 
-var Default = New(4)
+// DefaultMaxConcurrency is the default number of concurrent connections per registry.
+var DefaultMaxConcurrency int64 = 4
+
+var Default = New(int(DefaultMaxConcurrency))
 
 type Group struct {
 	mu   sync.Mutex

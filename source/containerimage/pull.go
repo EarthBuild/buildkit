@@ -3,22 +3,25 @@ package containerimage
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"runtime"
 	"time"
 
-	"github.com/containerd/containerd/content"
-	containerderrdefs "github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/leases"
-	"github.com/containerd/containerd/remotes"
-	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/leases"
+	"github.com/containerd/containerd/v2/core/remotes"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/pkg/snapshotters"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/errdefs"
+	"github.com/moby/buildkit/util/cachedigest"
 	"github.com/moby/buildkit/util/estargz"
 	"github.com/moby/buildkit/util/flightcontrol"
 	"github.com/moby/buildkit/util/imageutil"
@@ -43,9 +46,10 @@ type puller struct {
 	Ref            string
 	SessionManager *session.Manager
 	layerLimit     *int
+	checksum       digest.Digest
 	vtx            solver.Vertex
 	ResolverType
-	store llb.ResolveImageConfigOptStore
+	store sourceresolver.ResolveImageConfigOptStore
 
 	g                flightcontrol.Group[struct{}]
 	cacheKeyErr      error
@@ -58,36 +62,44 @@ type puller struct {
 	*pull.Puller
 }
 
-func mainManifestKey(ctx context.Context, desc ocispecs.Descriptor, platform ocispecs.Platform, layerLimit *int) (digest.Digest, error) {
+func mainManifestKey(desc ocispecs.Descriptor, platform ocispecs.Platform, layerLimit *int) (digest.Digest, error) {
 	dt, err := json.Marshal(struct {
-		Digest  digest.Digest
-		OS      string
-		Arch    string
-		Variant string `json:",omitempty"`
-		Limit   *int   `json:",omitempty"`
+		Digest     digest.Digest
+		OS         string
+		Arch       string
+		Variant    string   `json:",omitempty"`
+		OSVersion  string   `json:",omitempty"`
+		OSFeatures []string `json:",omitempty"`
+		Limit      *int     `json:",omitempty"`
 	}{
-		Digest:  desc.Digest,
-		OS:      platform.OS,
-		Arch:    platform.Architecture,
-		Variant: platform.Variant,
-		Limit:   layerLimit,
+		Digest:     desc.Digest,
+		OS:         platform.OS,
+		Arch:       platform.Architecture,
+		Variant:    platform.Variant,
+		OSVersion:  platform.OSVersion,
+		OSFeatures: platform.OSFeatures,
+		Limit:      layerLimit,
 	})
 	if err != nil {
 		return "", err
 	}
-	return digest.FromBytes(dt), nil
+	return cachedigest.FromBytes(dt, cachedigest.TypeJSON)
 }
 
-func (p *puller) CacheKey(ctx context.Context, g session.Group, index int) (cacheKey string, imgDigest string, cacheOpts solver.CacheOpts, cacheDone bool, err error) {
+func (p *puller) CacheKey(ctx context.Context, jobCtx solver.JobContext, index int) (cacheKey string, imgDigest string, cacheOpts solver.CacheOpts, cacheDone bool, err error) {
+	var g session.Group
+	if jobCtx != nil {
+		g = jobCtx.Session()
+	}
 	var getResolver pull.SessionResolver
 	switch p.ResolverType {
 	case ResolverTypeRegistry:
-		resolver := resolver.DefaultPool.GetResolver(p.RegistryHosts, p.Ref, "pull", p.SessionManager, g).WithImageStore(p.ImageStore, p.Mode)
-		p.Puller.Resolver = resolver
+		resolver := resolver.DefaultPool.GetResolver(p.RegistryHosts, p.Ref, resolver.ScopeType{}, p.SessionManager, g).WithImageStore(p.ImageStore, p.Mode)
+		p.Resolver = resolver
 		getResolver = func(g session.Group) remotes.Resolver { return resolver.WithSession(g) }
 	case ResolverTypeOCILayout:
 		resolver := getOCILayoutResolver(p.store, p.SessionManager, g)
-		p.Puller.Resolver = resolver
+		p.Resolver = resolver
 		// OCILayout has no need for session
 		getResolver = func(g session.Group) remotes.Resolver { return resolver }
 	default:
@@ -123,6 +135,10 @@ func (p *puller) CacheKey(ctx context.Context, g session.Group, index int) (cach
 			return struct{}{}, err
 		}
 
+		if p.checksum != "" && p.manifest.MainManifestDesc.Digest != p.checksum {
+			return struct{}{}, errors.Errorf("image digest %s for %s does not match expected checksum %s", p.manifest.MainManifestDesc.Digest, p.Ref, p.checksum)
+		}
+
 		if ll := p.layerLimit; ll != nil {
 			if *ll > len(p.manifest.Descriptors) {
 				return struct{}{}, errors.Errorf("layer limit %d is greater than the number of layers in the image %d", *ll, len(p.manifest.Descriptors))
@@ -146,9 +162,9 @@ func (p *puller) CacheKey(ctx context.Context, g session.Group, index int) (cach
 				if labels == nil {
 					labels = make(map[string]string)
 				}
-				for k, v := range estargz.SnapshotLabels(p.manifest.Ref, p.manifest.Descriptors, i) {
-					labels[k] = v
-				}
+				maps.Copy(labels, estargz.SnapshotLabels(p.manifest.Ref, p.manifest.Descriptors, i))
+				labels[snapshotters.TargetRefLabel] = p.manifest.Ref
+
 				p.descHandlers[desc.Digest] = &cache.DescHandler{
 					Provider:       p.manifest.Provider,
 					Progress:       progressController,
@@ -160,7 +176,7 @@ func (p *puller) CacheKey(ctx context.Context, g session.Group, index int) (cach
 		}
 
 		desc := p.manifest.MainManifestDesc
-		k, err := mainManifestKey(ctx, desc, p.Platform, p.layerLimit)
+		k, err := mainManifestKey(desc, p.Platform, p.layerLimit)
 		if err != nil {
 			return struct{}{}, err
 		}
@@ -182,7 +198,7 @@ func (p *puller) CacheKey(ctx context.Context, g session.Group, index int) (cach
 		return "", "", nil, false, err
 	}
 
-	cacheOpts = solver.CacheOpts(make(map[interface{}]interface{}))
+	cacheOpts = solver.CacheOpts(make(map[any]any))
 	for dgst, descHandler := range p.descHandlers {
 		cacheOpts[cache.DescHandlerKey(dgst)] = descHandler
 	}
@@ -194,16 +210,20 @@ func (p *puller) CacheKey(ctx context.Context, g session.Group, index int) (cach
 	return p.configKey, p.manifest.MainManifestDesc.Digest.String(), cacheOpts, cacheDone, nil
 }
 
-func (p *puller) Snapshot(ctx context.Context, g session.Group) (ir cache.ImmutableRef, err error) {
+func (p *puller) Snapshot(ctx context.Context, jobCtx solver.JobContext) (ir cache.ImmutableRef, err error) {
+	var g session.Group
+	if jobCtx != nil {
+		g = jobCtx.Session()
+	}
 	var getResolver pull.SessionResolver
 	switch p.ResolverType {
 	case ResolverTypeRegistry:
-		resolver := resolver.DefaultPool.GetResolver(p.RegistryHosts, p.Ref, "pull", p.SessionManager, g).WithImageStore(p.ImageStore, p.Mode)
-		p.Puller.Resolver = resolver
+		resolver := resolver.DefaultPool.GetResolver(p.RegistryHosts, p.Ref, resolver.ScopeType{}, p.SessionManager, g).WithImageStore(p.ImageStore, p.Mode)
+		p.Resolver = resolver
 		getResolver = func(g session.Group) remotes.Resolver { return resolver.WithSession(g) }
 	case ResolverTypeOCILayout:
 		resolver := getOCILayoutResolver(p.store, p.SessionManager, g)
-		p.Puller.Resolver = resolver
+		p.Resolver = resolver
 		// OCILayout has no need for session
 		getResolver = func(g session.Group) remotes.Resolver { return resolver }
 	default:
@@ -214,14 +234,14 @@ func (p *puller) Snapshot(ctx context.Context, g session.Group) (ir cache.Immuta
 	}
 	defer func() {
 		if p.releaseTmpLeases != nil {
-			p.releaseTmpLeases(context.TODO())
+			p.releaseTmpLeases(context.WithoutCancel(ctx))
 		}
 	}()
 
 	var current cache.ImmutableRef
 	defer func() {
 		if err != nil && current != nil {
-			current.Release(context.TODO())
+			current.Release(context.WithoutCancel(ctx))
 		}
 	}()
 
@@ -245,13 +265,13 @@ func (p *puller) Snapshot(ctx context.Context, g session.Group) (ir cache.Immuta
 	}
 
 	for _, desc := range p.manifest.Nonlayers {
-		if _, err := p.ContentStore.Info(ctx, desc.Digest); containerderrdefs.IsNotFound(err) {
+		if _, err := p.ContentStore.Info(ctx, desc.Digest); cerrdefs.IsNotFound(err) {
 			// manifest or config must have gotten gc'd after CacheKey, re-pull them
 			ctx, done, err := leaseutil.WithLease(ctx, p.LeaseManager, leaseutil.MakeTemporary)
 			if err != nil {
 				return nil, err
 			}
-			defer done(ctx)
+			defer done(context.WithoutCancel(ctx))
 
 			if _, err := p.PullManifests(ctx, getResolver); err != nil {
 				return nil, err
@@ -286,7 +306,7 @@ func cacheKeyFromConfig(dt []byte, layerLimit *int) (digest.Digest, error) {
 		if layerLimit != nil {
 			return "", errors.Wrap(err, "failed to parse image config")
 		}
-		return digest.FromBytes(dt), nil // digest of config
+		return cachedigest.FromBytes(dt, cachedigest.TypeJSON) // digest of config
 	}
 	if layerLimit != nil {
 		l := *layerLimit

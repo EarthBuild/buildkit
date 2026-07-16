@@ -44,18 +44,23 @@ platforms=["linux/amd64"]
 address="containerd.sock"
 [worker.containerd.runtime]
 name="exotic"
+path="/usr/bin/exotic"
 options.foo="bar"
 [[worker.containerd.gcpolicy]]
 all=true
 filters=["foo==bar"]
-keepBytes=20
+reservedSpace=20
 keepDuration=3600
 [[worker.containerd.gcpolicy]]
-keepBytes="40MB"
+reservedSpace="40MB"
 keepDuration=7200
 [[worker.containerd.gcpolicy]]
-keepBytes="20%"
+reservedSpace="20%"
 keepDuration="24h"
+[[worker.containerd.gcpolicy]]
+reservedSpace="10GB"
+maxUsedSpace="80%"
+minFreeSpace="10%"
 
 [registry."docker.io"]
 mirrors=["hub.docker.io"]
@@ -107,32 +112,40 @@ searchDomains=["example.com"]
 	require.Equal(t, 0, len(cfg.Workers.OCI.GCPolicy))
 	require.Equal(t, "non-default", cfg.Workers.Containerd.Namespace)
 	require.Equal(t, "exotic", cfg.Workers.Containerd.Runtime.Name)
+	require.Equal(t, "/usr/bin/exotic", cfg.Workers.Containerd.Runtime.Path)
 	require.Equal(t, "bar", cfg.Workers.Containerd.Runtime.Options["foo"])
-	require.Equal(t, 3, len(cfg.Workers.Containerd.GCPolicy))
+	require.Equal(t, 4, len(cfg.Workers.Containerd.GCPolicy))
 
 	require.Nil(t, cfg.Workers.Containerd.GC)
 	require.Equal(t, true, cfg.Workers.Containerd.GCPolicy[0].All)
-	require.Equal(t, false, cfg.Workers.Containerd.GCPolicy[1].All)
-	require.Equal(t, false, cfg.Workers.Containerd.GCPolicy[2].All)
-	require.Equal(t, int64(20), cfg.Workers.Containerd.GCPolicy[0].KeepBytes.Bytes)
-	require.Equal(t, int64(40*1024*1024), cfg.Workers.Containerd.GCPolicy[1].KeepBytes.Bytes)
-	require.Equal(t, int64(20), cfg.Workers.Containerd.GCPolicy[2].KeepBytes.Percentage)
-	require.Equal(t, time.Duration(3600), cfg.Workers.Containerd.GCPolicy[0].KeepDuration.Duration/time.Second)
-	require.Equal(t, time.Duration(7200), cfg.Workers.Containerd.GCPolicy[1].KeepDuration.Duration/time.Second)
-	require.Equal(t, time.Duration(86400), cfg.Workers.Containerd.GCPolicy[2].KeepDuration.Duration/time.Second)
 	require.Equal(t, 1, len(cfg.Workers.Containerd.GCPolicy[0].Filters))
+	require.Equal(t, int64(20), cfg.Workers.Containerd.GCPolicy[0].ReservedSpace.Bytes)
+	require.Equal(t, time.Duration(3600), cfg.Workers.Containerd.GCPolicy[0].KeepDuration.Duration/time.Second)
+
+	require.Equal(t, false, cfg.Workers.Containerd.GCPolicy[1].All)
+	require.Equal(t, int64(40*1024*1024), cfg.Workers.Containerd.GCPolicy[1].ReservedSpace.Bytes)
+	require.Equal(t, time.Duration(7200), cfg.Workers.Containerd.GCPolicy[1].KeepDuration.Duration/time.Second)
 	require.Equal(t, 0, len(cfg.Workers.Containerd.GCPolicy[1].Filters))
 
-	require.Equal(t, *cfg.Registries["docker.io"].PlainHTTP, true)
-	require.Equal(t, *cfg.Registries["docker.io"].Insecure, true)
-	require.Equal(t, cfg.Registries["docker.io"].Mirrors[0], "hub.docker.io")
-	require.Equal(t, cfg.Registries["docker.io"].RootCAs, []string{"myca.pem"})
-	require.Equal(t, cfg.Registries["docker.io"].TLSConfigDir, []string{"/etc/buildkitd/myregistry"})
-	require.Equal(t, cfg.Registries["docker.io"].KeyPairs[0].Key, "key.pem")
-	require.Equal(t, cfg.Registries["docker.io"].KeyPairs[0].Certificate, "cert.pem")
+	require.Equal(t, false, cfg.Workers.Containerd.GCPolicy[2].All)
+	require.Equal(t, int64(20), cfg.Workers.Containerd.GCPolicy[2].ReservedSpace.Percentage)
+	require.Equal(t, time.Duration(86400), cfg.Workers.Containerd.GCPolicy[2].KeepDuration.Duration/time.Second)
+
+	require.Equal(t, false, cfg.Workers.Containerd.GCPolicy[3].All)
+	require.Equal(t, int64(10*1024*1024*1024), cfg.Workers.Containerd.GCPolicy[3].ReservedSpace.Bytes)
+	require.Equal(t, int64(80), cfg.Workers.Containerd.GCPolicy[3].MaxUsedSpace.Percentage)
+	require.Equal(t, int64(10), cfg.Workers.Containerd.GCPolicy[3].MinFreeSpace.Percentage)
+
+	require.Equal(t, true, *cfg.Registries["docker.io"].PlainHTTP)
+	require.Equal(t, true, *cfg.Registries["docker.io"].Insecure)
+	require.Equal(t, "hub.docker.io", cfg.Registries["docker.io"].Mirrors[0])
+	require.Equal(t, []string{"myca.pem"}, cfg.Registries["docker.io"].RootCAs)
+	require.Equal(t, []string{"/etc/buildkitd/myregistry"}, cfg.Registries["docker.io"].TLSConfigDir)
+	require.Equal(t, "key.pem", cfg.Registries["docker.io"].KeyPairs[0].Key)
+	require.Equal(t, "cert.pem", cfg.Registries["docker.io"].KeyPairs[0].Certificate)
 
 	require.NotNil(t, cfg.DNS)
-	require.Equal(t, cfg.DNS.Nameservers, []string{"1.1.1.1", "8.8.8.8"})
-	require.Equal(t, cfg.DNS.SearchDomains, []string{"example.com"})
-	require.Equal(t, cfg.DNS.Options, []string{"edns0"})
+	require.Equal(t, []string{"1.1.1.1", "8.8.8.8"}, cfg.DNS.Nameservers)
+	require.Equal(t, []string{"example.com"}, cfg.DNS.SearchDomains)
+	require.Equal(t, []string{"edns0"}, cfg.DNS.Options)
 }

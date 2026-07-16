@@ -24,10 +24,12 @@ package remote
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/big"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -37,15 +39,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/pkg/reference"
+	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/cache"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	commonmetrics "github.com/containerd/stargz-snapshotter/fs/metrics/common"
 	"github.com/containerd/stargz-snapshotter/fs/source"
-	"github.com/hashicorp/go-multierror"
 	rhttp "github.com/hashicorp/go-retryablehttp"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -121,25 +122,27 @@ func (r *Resolver) Resolve(ctx context.Context, hosts source.RegistryHosts, refs
 func (r *Resolver) resolveFetcher(ctx context.Context, hosts source.RegistryHosts, refspec reference.Spec, desc ocispec.Descriptor) (f fetcher, size int64, err error) {
 	blobConfig := &r.blobConfig
 	fc := &fetcherConfig{
-		hosts:       hosts,
-		refspec:     refspec,
-		desc:        desc,
-		maxRetries:  blobConfig.MaxRetries,
-		minWaitMSec: time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
-		maxWaitMSec: time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
+		hosts:      hosts,
+		refspec:    refspec,
+		desc:       desc,
+		maxRetries: blobConfig.MaxRetries,
+		minWait:    time.Duration(blobConfig.MinWaitMSec) * time.Millisecond,
+		maxWait:    time.Duration(blobConfig.MaxWaitMSec) * time.Millisecond,
 	}
-	var handlersErr error
+	var errs []error
 	for name, p := range r.handlers {
 		// TODO: allow to configure the selection of readers based on the hostname in refspec
 		r, size, err := p.Handle(ctx, desc)
 		if err != nil {
-			handlersErr = multierror.Append(handlersErr, err)
+			errs = append(errs, err)
 			continue
 		}
 		log.G(ctx).WithField("handler name", name).WithField("ref", refspec.String()).WithField("digest", desc.Digest).
 			Debugf("contents is provided by a handler")
 		return &remoteFetcher{r}, size, nil
 	}
+
+	handlersErr := errors.Join(errs...)
 
 	log.G(ctx).WithError(handlersErr).WithField("ref", refspec.String()).WithField("digest", desc.Digest).Debugf("using default handler")
 	hf, size, err := newHTTPFetcher(ctx, fc)
@@ -153,19 +156,23 @@ func (r *Resolver) resolveFetcher(ctx context.Context, hosts source.RegistryHost
 }
 
 type fetcherConfig struct {
-	hosts       source.RegistryHosts
-	refspec     reference.Spec
-	desc        ocispec.Descriptor
-	maxRetries  int
-	minWaitMSec time.Duration
-	maxWaitMSec time.Duration
+	hosts      source.RegistryHosts
+	refspec    reference.Spec
+	desc       ocispec.Descriptor
+	maxRetries int
+	minWait    time.Duration
+	maxWait    time.Duration
 }
 
 func jitter(duration time.Duration) time.Duration {
 	if duration <= 0 {
 		return duration
 	}
-	return time.Duration(rand.Int63n(int64(duration)) + int64(duration))
+	b, err := rand.Int(rand.Reader, big.NewInt(int64(duration)))
+	if err != nil {
+		panic(err)
+	}
+	return time.Duration(b.Int64() + int64(duration))
 }
 
 // backoffStrategy extends retryablehttp's DefaultBackoff to add a random jitter to avoid overwhelming the repository
@@ -195,7 +202,7 @@ func newHTTPFetcher(ctx context.Context, fc *fetcherConfig) (*httpFetcher, int64
 	}
 	desc := fc.desc
 	if desc.Digest.String() == "" {
-		return nil, 0, fmt.Errorf("Digest is mandatory in layer descriptor")
+		return nil, 0, fmt.Errorf("digest is mandatory in layer descriptor")
 	}
 	digest := desc.Digest
 	pullScope, err := docker.RepositoryScope(fc.refspec, false)
@@ -215,15 +222,16 @@ func newHTTPFetcher(ctx context.Context, fc *fetcherConfig) (*httpFetcher, int64
 		// Prepare transport with authorization functionality
 		tr := host.Client.Transport
 
+		timeout := host.Client.Timeout
 		if rt, ok := tr.(*rhttp.RoundTripper); ok {
 			rt.Client.RetryMax = fc.maxRetries
-			rt.Client.RetryWaitMin = fc.minWaitMSec
-			rt.Client.RetryWaitMax = fc.maxWaitMSec
+			rt.Client.RetryWaitMin = fc.minWait
+			rt.Client.RetryWaitMax = fc.maxWait
 			rt.Client.Backoff = backoffStrategy
 			rt.Client.CheckRetry = retryStrategy
+			timeout = rt.Client.HTTPClient.Timeout
 		}
 
-		timeout := host.Client.Timeout
 		if host.Authorizer != nil {
 			tr = &transport{
 				inner: tr,
@@ -400,9 +408,10 @@ func getSize(ctx context.Context, url string, tr http.RoundTripper, timeout time
 		res.Body.Close()
 	}()
 
-	if res.StatusCode == http.StatusOK {
+	switch res.StatusCode {
+	case http.StatusOK:
 		return strconv.ParseInt(res.Header.Get("Content-Length"), 10, 64)
-	} else if res.StatusCode == http.StatusPartialContent {
+	case http.StatusPartialContent:
 		_, size, err := parseRange(res.Header.Get("Content-Range"))
 		return size, err
 	}
@@ -550,9 +559,10 @@ func (f *httpFetcher) check() error {
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
 	}()
-	if res.StatusCode == http.StatusOK || res.StatusCode == http.StatusPartialContent {
+	switch res.StatusCode {
+	case http.StatusOK, http.StatusPartialContent:
 		return nil
-	} else if res.StatusCode == http.StatusForbidden {
+	case http.StatusForbidden:
 		// Try to re-redirect this blob
 		rCtx := context.Background()
 		if f.timeout > 0 {

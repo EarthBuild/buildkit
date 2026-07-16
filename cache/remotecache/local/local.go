@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/v2/core/content"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/session"
 	sessioncontent "github.com/moby/buildkit/session/content"
@@ -51,14 +51,17 @@ func ResolveCacheExporterFunc(sm *session.Manager) remotecache.ResolveCacheExpor
 			}
 			ociMediatypes = b
 		}
-		imageManifest := false
+		imageManifest := true
 		if v, ok := attrs[attrImageManifest]; ok {
 			b, err := strconv.ParseBool(v)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to parse %s", attrImageManifest)
 			}
 			imageManifest = b
+		} else if !ociMediatypes {
+			imageManifest = false
 		}
+
 		csID := contentStoreIDPrefix + store
 		cs, err := getContentStore(ctx, sm, g, csID)
 		if err != nil {
@@ -105,8 +108,9 @@ func getContentStore(ctx context.Context, sm *session.Manager, g session.Group, 
 	if sessionID == "" {
 		return nil, errors.New("local cache exporter/importer requires session")
 	}
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	timeoutCtx, cancel := context.WithCancelCause(ctx)
+	timeoutCtx, _ = context.WithTimeoutCause(timeoutCtx, 5*time.Second, errors.WithStack(context.DeadlineExceeded)) //nolint:govet
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	caller, err := sm.Get(timeoutCtx, sessionID, false)
 	if err != nil {

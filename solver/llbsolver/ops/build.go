@@ -8,11 +8,11 @@ import (
 	"github.com/containerd/continuity/fs"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/frontend"
-	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/llbsolver/ops/opsutils"
 	"github.com/moby/buildkit/solver/pb"
+	"github.com/moby/buildkit/util/cachedigest"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
@@ -39,7 +39,7 @@ func NewBuildOp(v solver.Vertex, op *pb.Op_Build, b frontend.FrontendLLBBridge, 
 	}, nil
 }
 
-func (b *BuildOp) CacheMap(ctx context.Context, g session.Group, index int) (*solver.CacheMap, bool, error) {
+func (b *BuildOp) CacheMap(ctx context.Context, job solver.JobContext, index int) (*solver.CacheMap, bool, error) {
 	dt, err := json.Marshal(struct {
 		Type string
 		Exec *pb.BuildOp
@@ -51,8 +51,12 @@ func (b *BuildOp) CacheMap(ctx context.Context, g session.Group, index int) (*so
 		return nil, false, err
 	}
 
+	dgst, err := cachedigest.FromBytes(dt, cachedigest.TypeJSON)
+	if err != nil {
+		return nil, false, err
+	}
 	return &solver.CacheMap{
-		Digest: digest.FromBytes(dt),
+		Digest: dgst,
 		Deps: make([]struct {
 			Selector          digest.Digest
 			ComputeDigestFunc solver.ResultBasedCacheFunc
@@ -61,8 +65,8 @@ func (b *BuildOp) CacheMap(ctx context.Context, g session.Group, index int) (*so
 	}, true, nil
 }
 
-func (b *BuildOp) Exec(ctx context.Context, g session.Group, inputs []solver.Result) (outputs []solver.Result, retErr error) {
-	if b.op.Builder != pb.LLBBuilder {
+func (b *BuildOp) Exec(ctx context.Context, job solver.JobContext, inputs []solver.Result) (outputs []solver.Result, retErr error) {
+	if b.op.Builder != int64(pb.LLBBuilder) {
 		return nil, errors.Errorf("only LLB builder is currently allowed")
 	}
 
@@ -83,6 +87,7 @@ func (b *BuildOp) Exec(ctx context.Context, g session.Group, inputs []solver.Res
 		return nil, errors.Errorf("invalid reference for build %T", inp.Sys())
 	}
 
+	g := job.Session()
 	mount, err := ref.ImmutableRef.Mount(ctx, true, g)
 	if err != nil {
 		return nil, err

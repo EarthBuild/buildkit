@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/docker/docker/pkg/idtools"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/sys/user"
 	"github.com/pkg/errors"
 	"github.com/tonistiigi/fsutil"
 	"github.com/tonistiigi/fsutil/types"
@@ -29,7 +29,7 @@ const SendFileMagicStr = "98325231-d2e6-931c-b12a-84273bca21db"
 // Mountable is from buildkit/snapshot; however the snapshot package wont build on darwin
 // so we must pull this in here to avoid pulling in linux-specific packages.
 type Mountable interface {
-	IdentityMapping() *idtools.IdentityMapping
+	IdentityMapping() *user.IdentityMapping
 }
 
 // LocalhostExec is called by buildkitd; it connects to the user's client to request the client execute a command localy.
@@ -56,7 +56,7 @@ func LocalhostExec(ctx context.Context, c session.Caller, args []string, dir str
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return errors.WithStack(err)
@@ -64,9 +64,9 @@ func LocalhostExec(ctx context.Context, c session.Caller, args []string, dir str
 		stdout.Write(msg.Stdout)
 		stderr.Write(msg.Stderr)
 		switch msg.Status {
-		case RUNNING:
-			//ignore
-		case DONE:
+		case OutputMessage_RUNNING:
+			// ignore
+		case OutputMessage_DONE:
 			if exitCodeSet {
 				panic("received multiple DONE messages (shouldn't happen)")
 			}
@@ -154,11 +154,11 @@ func receiveFile(stream Localhost_GetClient, dest string) (err error) {
 outer:
 	for {
 		msg, err := stream.Recv()
-		switch err {
-		case nil:
-		case io.EOF:
+		if err == nil {
+			// continue
+		} else if errors.Is(err, io.EOF) {
 			break outer
-		default:
+		} else {
 			return errors.WithStack(err)
 		}
 		_, err = f.Write(msg.Data)
@@ -185,15 +185,12 @@ func receiveDir(stream Localhost_GetClient, dest string, mount Mountable) error 
 	return errors.WithStack(fsutil.Receive(ctx, stream, dest, fsutil.ReceiveOpt{
 		Filter: func(p string, stat *types.Stat) bool {
 			if idmap := mount.IdentityMapping(); idmap != nil {
-				identity, err := idmap.ToHost(idtools.Identity{
-					UID: int(stat.Uid),
-					GID: int(stat.Gid),
-				})
+				uid, gid, err := idmap.ToHost(int(stat.Uid), int(stat.Gid))
 				if err != nil {
 					return false
 				}
-				stat.Uid = uint32(identity.UID)
-				stat.Gid = uint32(identity.GID)
+				stat.Uid = uint32(uid)
+				stat.Gid = uint32(gid)
 			}
 			// whatever permissions the user has, give them to group and others as well
 			// this matches behavior of gitsource, given that umask is 0
@@ -273,7 +270,7 @@ func localhostPutSendFile(stream Localhost_PutClient, src, dst string) error {
 	for {
 		n, err := f.Read(buf)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return errors.Wrapf(err, "failed to read from %s", src)
@@ -325,7 +322,7 @@ func localhostPutSendDir(stream Localhost_GetClient, src, dst string) error {
 		return err
 	}
 
-	err = fsutil.Send(stream.Context(), stream, fs, nil, nil)
+	err = fsutil.Send(stream.Context(), stream, fs, nil)
 	if err != nil {
 		return errors.Wrap(err, "fsutil.Send failed")
 	}

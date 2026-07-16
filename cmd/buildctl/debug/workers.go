@@ -3,12 +3,13 @@ package debug
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
-	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/client"
 	bccommon "github.com/moby/buildkit/cmd/buildctl/common"
 	"github.com/moby/buildkit/util/bklog"
@@ -82,6 +83,23 @@ func printWorkersVerbose(tw *tabwriter.Writer, winfo []*client.WorkerInfo) {
 			v := wi.Labels[k]
 			fmt.Fprintf(tw, "\t%s:\t%s\n", k, v)
 		}
+		if len(wi.CDIDevices) > 0 {
+			fmt.Fprint(tw, "Devices:\n")
+			for _, d := range wi.CDIDevices {
+				fmt.Fprintf(tw, "\tName:\t%s\n", d.Name)
+				if d.OnDemand {
+					fmt.Fprintf(tw, "\tOnDemand:\t%v\n", d.OnDemand)
+				} else {
+					fmt.Fprintf(tw, "\tAutoAllow:\t%v\n", d.AutoAllow)
+				}
+
+				for _, k := range sortedKeys(d.Annotations) {
+					v := d.Annotations[k]
+					fmt.Fprintf(tw, "\tAnnotations:\t%s:\t%s\n", k, v)
+				}
+			}
+			fmt.Fprint(tw, "\n")
+		}
 		for i, rule := range wi.GCPolicy {
 			fmt.Fprintf(tw, "GC Policy rule#%d:\n", i)
 			fmt.Fprintf(tw, "\tAll:\t%v\n", rule.All)
@@ -89,10 +107,16 @@ func printWorkersVerbose(tw *tabwriter.Writer, winfo []*client.WorkerInfo) {
 				fmt.Fprintf(tw, "\tFilters:\t%s\n", strings.Join(rule.Filter, " "))
 			}
 			if rule.KeepDuration > 0 {
-				fmt.Fprintf(tw, "\tKeep Duration:\t%v\n", rule.KeepDuration.String())
+				fmt.Fprintf(tw, "\tKeep duration:\t%v\n", rule.KeepDuration.String())
 			}
-			if rule.KeepBytes > 0 {
-				fmt.Fprintf(tw, "\tKeep Bytes:\t%g\n", units.Bytes(rule.KeepBytes))
+			if rule.ReservedSpace > 0 {
+				fmt.Fprintf(tw, "\tReserved space:\t%g\n", units.Bytes(rule.ReservedSpace))
+			}
+			if rule.MinFreeSpace > 0 {
+				fmt.Fprintf(tw, "\tMinimum free space:\t%g\n", units.Bytes(rule.MinFreeSpace))
+			}
+			if rule.MaxUsedSpace > 0 {
+				fmt.Fprintf(tw, "\tMaximum used space:\t%g\n", units.Bytes(rule.MaxUsedSpace))
 			}
 		}
 		fmt.Fprintf(tw, "\n")
@@ -112,15 +136,8 @@ func printWorkersTable(tw *tabwriter.Writer, winfo []*client.WorkerInfo) {
 	tw.Flush()
 }
 
-func sortedKeys(m map[string]string) []string {
-	s := make([]string, len(m))
-	i := 0
-	for k := range m {
-		s[i] = k
-		i++
-	}
-	sort.Strings(s)
-	return s
+func sortedKeys[T any](m map[string]T) []string {
+	return slices.Sorted(maps.Keys(m))
 }
 
 func commandContext(c *cli.Context) context.Context {

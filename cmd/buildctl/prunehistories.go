@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"text/tabwriter"
 	"time"
 
-	"github.com/hashicorp/go-multierror"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	bccommon "github.com/moby/buildkit/cmd/buildctl/common"
 	"github.com/moby/buildkit/util/appcontext"
@@ -42,12 +42,12 @@ func pruneHistories(clicontext *cli.Context) error {
 		return err
 	}
 
-	var rerr error
 	if format := clicontext.String("format"); format != "" {
 		tmpl, err := bccommon.ParseTemplate(format)
 		if err != nil {
 			return err
 		}
+		var errs []error
 		for {
 			ev, err := resp.Recv()
 			if errors.Is(err, io.EOF) {
@@ -62,7 +62,7 @@ func pruneHistories(clicontext *cli.Context) error {
 				Ref:    ev.Record.Ref,
 				Delete: true,
 			}); err != nil {
-				rerr = multierror.Append(rerr, err).ErrorOrNil()
+				errs = append(errs, err)
 				continue
 			}
 			if err := tmpl.Execute(clicontext.App.Writer, ev); err != nil {
@@ -72,16 +72,17 @@ func pruneHistories(clicontext *cli.Context) error {
 				return err
 			}
 		}
-		return rerr
+		return stderrors.Join(errs...)
 	}
 	return pruneHistoriesWithTableOutput(ctx, clicontext.App.Writer, controlClient, resp)
 }
 
 func pruneHistoriesWithTableOutput(ctx context.Context, w io.Writer, controlClient controlapi.ControlClient,
-	eventReceiver controlapi.Control_ListenBuildHistoryClient) error {
+	eventReceiver controlapi.Control_ListenBuildHistoryClient,
+) error {
 	tw := tabwriter.NewWriter(w, 1, 8, 1, '\t', 0)
 	fmt.Fprintln(tw, "TYPE\tREF\tCREATED\tCOMPLETED\tGENERATION")
-	var rerr error
+	var errs []error
 	for {
 		ev, err := eventReceiver.Recv()
 		if errors.Is(err, io.EOF) {
@@ -97,7 +98,7 @@ func pruneHistoriesWithTableOutput(ctx context.Context, w io.Writer, controlClie
 			Ref:    ev.Record.Ref,
 			Delete: true,
 		}); err != nil {
-			rerr = multierror.Append(rerr, err).ErrorOrNil()
+			errs = append(errs, err)
 			continue
 		}
 		var (
@@ -105,14 +106,14 @@ func pruneHistoriesWithTableOutput(ctx context.Context, w io.Writer, controlClie
 			completedAt string
 		)
 		if r.CreatedAt != nil {
-			createdAt = r.CreatedAt.Local().Format(time.RFC3339)
+			createdAt = r.CreatedAt.AsTime().Local().Format(time.RFC3339)
 		}
 		if r.CompletedAt != nil {
-			completedAt = r.CompletedAt.Local().Format(time.RFC3339)
+			completedAt = r.CompletedAt.AsTime().Local().Format(time.RFC3339)
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\n", ev.Type, r.Ref, createdAt, completedAt, r.Generation)
 		tw.Flush()
 	}
 	tw.Flush()
-	return rerr
+	return stderrors.Join(errs...)
 }

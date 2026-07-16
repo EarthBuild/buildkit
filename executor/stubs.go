@@ -5,11 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/containerd/continuity/fs"
 	"github.com/moby/buildkit/util/bklog"
-	"github.com/moby/buildkit/util/system"
 )
 
 func MountStubsCleaner(ctx context.Context, dir string, mounts []Mount, recursive bool) func() {
@@ -33,7 +33,7 @@ func MountStubsCleaner(ctx context.Context, dir string, mounts []Mount, recursiv
 
 		for {
 			_, err = os.Lstat(realPath)
-			if !(errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)) {
+			if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
 				break
 			}
 			paths = append(paths, realPath)
@@ -43,7 +43,7 @@ func MountStubsCleaner(ctx context.Context, dir string, mounts []Mount, recursiv
 			}
 
 			realPathNext := filepath.Dir(realPath)
-			if realPath == realPathNext {
+			if realPath == realPathNext || realPathNext == dir {
 				break
 			}
 			realPath = realPathNext
@@ -52,6 +52,11 @@ func MountStubsCleaner(ctx context.Context, dir string, mounts []Mount, recursiv
 
 	return func() {
 		for _, p := range paths {
+			p, err := fs.RootPath(dir, strings.TrimPrefix(p, dir))
+			if err != nil {
+				continue
+			}
+
 			st, err := os.Lstat(p)
 			if err != nil {
 				continue
@@ -70,14 +75,18 @@ func MountStubsCleaner(ctx context.Context, dir string, mounts []Mount, recursiv
 
 			// Back up the timestamps of the dir for reproducible builds
 			// https://github.com/moby/buildkit/issues/3148
-			dir := filepath.Dir(p)
-			dirSt, err := os.Stat(dir)
+			parent := filepath.Dir(p)
+			if realPath, err := fs.RootPath(dir, strings.TrimPrefix(parent, dir)); err != nil || realPath != parent {
+				continue
+			}
+
+			dirSt, err := os.Stat(parent)
 			if err != nil {
 				bklog.G(ctx).WithError(err).Warnf("Failed to stat %q (parent of mount stub %q)", dir, p)
 				continue
 			}
 			mtime := dirSt.ModTime()
-			atime, err := system.Atime(dirSt)
+			atime, err := fs.Atime(dirSt)
 			if err != nil {
 				bklog.G(ctx).WithError(err).Warnf("Failed to stat atime of %q (parent of mount stub %q)", dir, p)
 				atime = mtime
@@ -88,7 +97,7 @@ func MountStubsCleaner(ctx context.Context, dir string, mounts []Mount, recursiv
 			}
 
 			// Restore the timestamps of the dir
-			if err := os.Chtimes(dir, atime, mtime); err != nil {
+			if err := os.Chtimes(parent, atime, mtime); err != nil {
 				bklog.G(ctx).WithError(err).Warnf("Failed to restore time time mount stub timestamp (os.Chtimes(%q, %v, %v))", dir, atime, mtime)
 			}
 		}

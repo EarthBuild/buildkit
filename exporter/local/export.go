@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/exporter/util/epoch"
@@ -35,8 +36,10 @@ func New(opt Opt) (exporter.Exporter, error) {
 	return le, nil
 }
 
-func (e *localExporter) Resolve(ctx context.Context, opt map[string]string) (exporter.ExporterInstance, error) {
+func (e *localExporter) Resolve(ctx context.Context, id int, opt map[string]string) (exporter.ExporterInstance, error) {
 	i := &localExporterInstance{
+		id:            id,
+		attrs:         opt,
 		localExporter: e,
 	}
 	_, err := i.opts.Load(opt)
@@ -49,46 +52,62 @@ func (e *localExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 
 type localExporterInstance struct {
 	*localExporter
+	id    int
+	attrs map[string]string
+
 	opts CreateFSOpts
+}
+
+func (e *localExporterInstance) ID() int {
+	return e.id
 }
 
 func (e *localExporterInstance) Name() string {
 	return "exporting to client directory"
 }
 
+func (e *localExporterInstance) Type() string {
+	return client.ExporterLocal
+}
+
+func (e *localExporterInstance) Attrs() map[string]string {
+	return e.attrs
+}
+
 func (e *localExporter) Config() *exporter.Config {
 	return exporter.NewConfig()
 }
 
-func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source, sessionID string) (map[string]string, exporter.DescriptorReference, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source, buildInfo exporter.ExportBuildInfo) (map[string]string, exporter.FinalizeFunc, exporter.DescriptorReference, error) {
+	timeoutCtx, cancel := context.WithCancelCause(ctx)
+	timeoutCtx, _ = context.WithTimeoutCause(timeoutCtx, 5*time.Second, errors.WithStack(context.DeadlineExceeded)) //nolint:govet
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	if e.opts.Epoch == nil {
-		if tm, ok, err := epoch.ParseSource(inp); err != nil {
-			return nil, nil, err
-		} else if ok {
-			e.opts.Epoch = tm
+		if tm, err := epoch.ParseSource(inp, nil); err != nil {
+			return nil, nil, nil, err
+		} else if tm != nil {
+			e.opts.Epoch = &epoch.Epoch{Value: tm}
 		}
 	}
 
-	caller, err := e.opt.SessionManager.Get(timeoutCtx, sessionID, false)
+	caller, err := e.opt.SessionManager.Get(timeoutCtx, buildInfo.SessionID, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	isMap := len(inp.Refs) > 0
 
 	if _, ok := inp.Metadata[exptypes.ExporterPlatformsKey]; isMap && !ok {
-		return nil, nil, errors.Errorf("unable to export multiple refs, missing platforms mapping")
+		return nil, nil, nil, errors.Errorf("unable to export multiple refs, missing platforms mapping")
 	}
 	p, err := exptypes.ParsePlatforms(inp.Metadata)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if !isMap && len(p.Platforms) > 1 {
-		return nil, nil, errors.Errorf("unable to export multiple platforms without map")
+		return nil, nil, nil, errors.Errorf("unable to export multiple platforms without map")
 	}
 
 	now := time.Now().Truncate(time.Second)
@@ -96,9 +115,9 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 	visitedPath := map[string]string{}
 	var visitedMu sync.Mutex
 
-	export := func(ctx context.Context, k string, ref cache.ImmutableRef, attestations []exporter.Attestation) func() error {
+	export := func(ctx context.Context, k string, ref cache.ImmutableRef, attestations []exporter.Attestation, opt CreateFSOpts) func() error {
 		return func() error {
-			outputFS, cleanup, err := CreateFS(ctx, sessionID, k, ref, attestations, now, e.opts)
+			outputFS, cleanup, err := CreateFS(ctx, buildInfo.SessionID, k, ref, attestations, now, isMap, opt)
 			if err != nil {
 				return err
 			}
@@ -106,9 +125,10 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 				defer cleanup()
 			}
 
-			if !e.opts.PlatformSplit {
+			lbl := "copying files"
+			if !e.opts.UsePlatformSplit(isMap) {
 				// check for duplicate paths
-				err = outputFS.Walk(ctx, "", func(p string, entry os.DirEntry, err error) error {
+				err = fsWalk(ctx, outputFS, "", func(p string, entry os.DirEntry, err error) error {
 					if entry.IsDir() {
 						return nil
 					}
@@ -126,28 +146,23 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 				if err != nil {
 					return err
 				}
-			}
-
-			lbl := "copying files"
-			if isMap {
+			} else {
 				lbl += " " + k
-				if e.opts.PlatformSplit {
-					st := fstypes.Stat{
-						Mode: uint32(os.ModeDir | 0755),
-						Path: strings.Replace(k, "/", "_", -1),
-					}
-					if e.opts.Epoch != nil {
-						st.ModTime = e.opts.Epoch.UnixNano()
-					}
-					outputFS, err = fsutil.SubDirFS([]fsutil.Dir{{FS: outputFS, Stat: st}})
-					if err != nil {
-						return err
-					}
+				st := &fstypes.Stat{
+					Mode: uint32(os.ModeDir | 0755),
+					Path: strings.ReplaceAll(k, "/", "_"),
+				}
+				if opt.Epoch != nil && opt.Epoch.Value != nil {
+					st.ModTime = opt.Epoch.Value.UnixNano()
+				}
+				outputFS, err = fsutil.SubDirFS([]fsutil.Dir{{FS: outputFS, Stat: st}})
+				if err != nil {
+					return err
 				}
 			}
 
 			progress := NewProgressHandler(ctx, lbl)
-			if err := filesync.CopyToCaller(ctx, outputFS, caller, progress); err != nil {
+			if err := filesync.CopyToCaller(ctx, outputFS, e.id, caller, progress); err != nil {
 				return err
 			}
 			return nil
@@ -160,18 +175,26 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 		for _, p := range p.Platforms {
 			r, ok := inp.FindRef(p.ID)
 			if !ok {
-				return nil, nil, errors.Errorf("failed to find ref for ID %s", p.ID)
+				return nil, nil, nil, errors.Errorf("failed to find ref for ID %s", p.ID)
 			}
-			eg.Go(export(ctx, p.ID, r, inp.Attestations[p.ID]))
+			opt := e.opts
+			if e.opts.Epoch == nil {
+				tm, err := epoch.ParseSource(inp, &p)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				opt.Epoch = &epoch.Epoch{Value: tm}
+			}
+			eg.Go(export(ctx, p.ID, r, inp.Attestations[p.ID], opt))
 		}
 	} else {
-		eg.Go(export(ctx, "", inp.Ref, nil))
+		eg.Go(export(ctx, "", inp.Ref, nil, e.opts))
 	}
 
 	if err := eg.Wait(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return nil, nil, nil
+	return nil, nil, nil, nil
 }
 
 func NewProgressHandler(ctx context.Context, id string) func(int, bool) {

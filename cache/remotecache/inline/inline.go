@@ -3,10 +3,12 @@ package inline
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
-	"github.com/containerd/containerd/labels"
+	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/moby/buildkit/cache/remotecache"
 	v1 "github.com/moby/buildkit/cache/remotecache/v1"
+	cacheimporttypes "github.com/moby/buildkit/cache/remotecache/v1/types"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/util/bklog"
@@ -57,20 +59,19 @@ func (ce *exporter) ExportForLayers(ctx context.Context, layers []digest.Digest)
 		return nil, err
 	}
 
-	layerBlobDigests := make([]digest.Digest, len(layers))
+	layerBlobDigests := make([][]digest.Digest, len(layers))
 
 	descs2 := map[digest.Digest]v1.DescriptorProviderPair{}
 	for i, k := range layers {
 		if v, ok := descs[k]; ok {
 			descs2[k] = v
-			layerBlobDigests[i] = k
-			continue
+			layerBlobDigests[i] = append(layerBlobDigests[i], k)
 		}
 		// fallback for uncompressed digests
 		for _, v := range descs {
 			if uc := v.Descriptor.Annotations[labels.LabelUncompressed]; uc == string(k) {
 				descs2[v.Descriptor.Digest] = v
-				layerBlobDigests[i] = v.Descriptor.Digest
+				layerBlobDigests[i] = append(layerBlobDigests[i], v.Descriptor.Digest)
 			}
 		}
 	}
@@ -92,8 +93,10 @@ func (ce *exporter) ExportForLayers(ctx context.Context, layers []digest.Digest)
 
 	// reorder layers based on the order in the image
 	blobIndexes := make(map[digest.Digest]int, len(layers))
-	for i, blob := range layerBlobDigests {
-		blobIndexes[blob] = i
+	for i, blobs := range layerBlobDigests {
+		for _, blob := range blobs {
+			blobIndexes[blob] = i
+		}
 	}
 
 	for i, r := range cfg.Records {
@@ -104,8 +107,8 @@ func (ce *exporter) ExportForLayers(ctx context.Context, layers []digest.Digest)
 			if len(resultBlobs) <= len(layers) {
 				match = true
 				for k, resultBlob := range resultBlobs {
-					layerBlob := layers[k]
-					if resultBlob != layerBlob {
+					matchesBlob := slices.Contains(layerBlobDigests[k], resultBlob)
+					if !matchesBlob {
 						match = false
 						break
 					}
@@ -120,7 +123,7 @@ func (ce *exporter) ExportForLayers(ctx context.Context, layers []digest.Digest)
 			} else {
 				// The layers of the result are not in the same order as the image, so we
 				// have to use ChainedResult to specify each layer of the result individually.
-				chainedResult := v1.ChainedResult{}
+				chainedResult := cacheimporttypes.ChainedResult{}
 				for _, resultBlob := range resultBlobs {
 					idx, ok := blobIndexes[resultBlob]
 					if !ok {
@@ -128,13 +131,13 @@ func (ce *exporter) ExportForLayers(ctx context.Context, layers []digest.Digest)
 					}
 					chainedResult.LayerIndexes = append(chainedResult.LayerIndexes, idx)
 				}
-				r.Results[j] = v1.CacheResult{}
+				r.Results[j] = cacheimporttypes.CacheResult{}
 				r.ChainedResults = append(r.ChainedResults, chainedResult)
 			}
 			// remove any CacheResults that had to be converted to the ChainedResult format.
-			var filteredResults []v1.CacheResult
+			var filteredResults []cacheimporttypes.CacheResult
 			for _, rr := range r.Results {
-				if rr != (v1.CacheResult{}) {
+				if rr != (cacheimporttypes.CacheResult{}) {
 					filteredResults = append(filteredResults, rr)
 				}
 			}
@@ -152,7 +155,7 @@ func (ce *exporter) ExportForLayers(ctx context.Context, layers []digest.Digest)
 	return dt, nil
 }
 
-func layerToBlobs(idx int, layers []v1.CacheLayer) []digest.Digest {
+func layerToBlobs(idx int, layers []cacheimporttypes.CacheLayer) []digest.Digest {
 	var ds []digest.Digest
 	for idx != -1 {
 		layer := layers[idx]
@@ -160,8 +163,6 @@ func layerToBlobs(idx int, layers []v1.CacheLayer) []digest.Digest {
 		idx = layer.ParentIndex
 	}
 	// reverse so they go lowest to highest
-	for i, j := 0, len(ds)-1; i < j; i, j = i+1, j-1 {
-		ds[i], ds[j] = ds[j], ds[i]
-	}
+	slices.Reverse(ds)
 	return ds
 }

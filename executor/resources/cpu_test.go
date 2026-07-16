@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/moby/buildkit/executor/resources/types"
+	resourcestypes "github.com/moby/buildkit/executor/resources/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,7 +57,7 @@ func TestReadPressureFile(t *testing.T) {
 full avg10=0.12 avg60=0.34 avg300=0.56 total=9876`
 
 	tmpFile := filepath.Join(t.TempDir(), "pressure_test")
-	err := os.WriteFile(tmpFile, []byte(pressureContents), os.ModePerm)
+	err := os.WriteFile(tmpFile, []byte(pressureContents), os.ModePerm) //nolint:gosec
 	require.NoError(t, err)
 
 	pressure, err := parsePressureFile(tmpFile)
@@ -72,14 +72,14 @@ full avg10=0.12 avg60=0.34 avg300=0.56 total=9876`
 	full56 := 0.56
 	full9876 := uint64(9876)
 
-	expected := &types.Pressure{
-		Some: &types.PressureValues{
+	expected := &resourcestypes.Pressure{
+		Some: &resourcestypes.PressureValues{
 			Avg10:  &some123,
 			Avg60:  &some456,
 			Avg300: &some789,
 			Total:  &some3031,
 		},
-		Full: &types.PressureValues{
+		Full: &resourcestypes.PressureValues{
 			Avg10:  &full12,
 			Avg60:  &full34,
 			Avg300: &full56,

@@ -13,6 +13,7 @@ import (
 	"github.com/moby/buildkit/util/testutil/workers"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
+	"github.com/tonistiigi/fsutil"
 )
 
 var hdTests = integration.TestFuncs(
@@ -32,6 +33,7 @@ func init() {
 }
 
 func testCopyHeredoc(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
@@ -70,7 +72,7 @@ COPY --from=build /dest /
 
 	dir := integration.Tmpdir(
 		t,
-		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
 
 	c, err := client.New(sb.Context(), sb.Address())
@@ -86,7 +88,7 @@ COPY --from=build /dest /
 				OutputDir: destDir,
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -140,7 +142,7 @@ EOF
 
 	dir := integration.Tmpdir(
 		t,
-		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
 
 	c, err := client.New(sb.Context(), sb.Address())
@@ -156,7 +158,7 @@ EOF
 				OutputDir: destDir,
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -193,6 +195,7 @@ EOF
 }
 
 func testRunBasicHeredoc(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
@@ -209,7 +212,7 @@ COPY --from=build /dest /dest
 
 	dir := integration.Tmpdir(
 		t,
-		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
 
 	c, err := client.New(sb.Context(), sb.Address())
@@ -225,7 +228,7 @@ COPY --from=build /dest /dest
 				OutputDir: destDir,
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -238,6 +241,7 @@ COPY --from=build /dest /dest
 }
 
 func testRunFakeHeredoc(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
@@ -256,7 +260,7 @@ COPY --from=build /dest /dest
 
 	dir := integration.Tmpdir(
 		t,
-		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
 
 	c, err := client.New(sb.Context(), sb.Address())
@@ -272,7 +276,7 @@ COPY --from=build /dest /dest
 				OutputDir: destDir,
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -285,26 +289,37 @@ COPY --from=build /dest /dest
 }
 
 func testRunShebangHeredoc(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
 FROM busybox AS build
 
+WORKDIR /dest
+
 RUN <<EOF
 #!/bin/awk -f
 BEGIN {
-	print "hello" >> "/dest"
-	print "world" >> "/dest"
+	print "hello" >> "./out1"
+	print "world" >> "./out1"
 }
 EOF
 
+RUN <<-EOF
+	#!/bin/awk -f
+	BEGIN {
+		print "hello" >> "./out2"
+		print "world" >> "./out2"
+	}
+EOF
+
 FROM scratch
-COPY --from=build /dest /dest
+COPY --from=build /dest /
 `)
 
 	dir := integration.Tmpdir(
 		t,
-		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
 
 	c, err := client.New(sb.Context(), sb.Address())
@@ -320,19 +335,27 @@ COPY --from=build /dest /dest
 				OutputDir: destDir,
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
 	}, nil)
 	require.NoError(t, err)
 
-	dt, err := os.ReadFile(filepath.Join(destDir, "dest"))
-	require.NoError(t, err)
-	require.Equal(t, "hello\nworld\n", string(dt))
+	contents := map[string]string{
+		"out1": "hello\nworld\n",
+		"out2": "hello\nworld\n",
+	}
+
+	for name, content := range contents {
+		dt, err := os.ReadFile(filepath.Join(destDir, name))
+		require.NoError(t, err)
+		require.Equal(t, content, string(dt))
+	}
 }
 
 func testRunComplexHeredoc(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
@@ -366,7 +389,7 @@ COPY --from=build /dest /
 
 	dir := integration.Tmpdir(
 		t,
-		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
 
 	c, err := client.New(sb.Context(), sb.Address())
@@ -382,7 +405,7 @@ COPY --from=build /dest /
 				OutputDir: destDir,
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -404,6 +427,7 @@ COPY --from=build /dest /
 }
 
 func testHeredocIndent(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
@@ -455,7 +479,7 @@ COPY --from=build /dest /
 
 	dir := integration.Tmpdir(
 		t,
-		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
 
 	c, err := client.New(sb.Context(), sb.Address())
@@ -471,7 +495,7 @@ COPY --from=build /dest /
 				OutputDir: destDir,
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -497,6 +521,7 @@ COPY --from=build /dest /
 }
 
 func testHeredocVarSubstitution(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	f := getFrontend(t, sb)
 
 	dockerfile := []byte(`
@@ -548,7 +573,7 @@ COPY --from=build /dest /
 
 	dir := integration.Tmpdir(
 		t,
-		fstest.CreateFile("Dockerfile", []byte(dockerfile), 0600),
+		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
 
 	c, err := client.New(sb.Context(), sb.Address())
@@ -564,7 +589,7 @@ COPY --from=build /dest /
 				OutputDir: destDir,
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -602,12 +627,16 @@ func testOnBuildHeredoc(t *testing.T, sb integration.Sandbox) {
 	}
 	require.NoError(t, err)
 
-	dockerfile := []byte(`
-FROM busybox
-ONBUILD RUN <<EOF
-echo "hello world" >> /dest
+	baseImage := integration.UnixOrWindows("busybox", "nanoserver:latest")
+	echoCmd := integration.UnixOrWindows(`echo "hello world" >> /dest`, `echo hello world > /dest`)
+	userDirective := integration.UnixOrWindows("", "USER ContainerAdministrator\n")
+
+	dockerfile := fmt.Appendf(nil, `
+FROM %s
+%sONBUILD RUN <<EOF
+%s
 EOF
-`)
+`, baseImage, userDirective, echoCmd)
 
 	dir := integration.Tmpdir(
 		t,
@@ -629,18 +658,18 @@ EOF
 				},
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
 	}, nil)
 	require.NoError(t, err)
 
-	dockerfile = []byte(fmt.Sprintf(`
+	dockerfile = fmt.Appendf(nil, `
 	FROM %s AS base
 	FROM scratch
 	COPY --from=base /dest /dest
-	`, target))
+	`, target)
 
 	dir = integration.Tmpdir(
 		t,
@@ -656,7 +685,7 @@ EOF
 				OutputDir: destDir,
 			},
 		},
-		LocalDirs: map[string]string{
+		LocalMounts: map[string]fsutil.FS{
 			dockerui.DefaultLocalNameDockerfile: dir,
 			dockerui.DefaultLocalNameContext:    dir,
 		},
@@ -665,5 +694,7 @@ EOF
 
 	dt, err := os.ReadFile(filepath.Join(destDir, "dest"))
 	require.NoError(t, err)
-	require.Equal(t, "hello world\n", string(dt))
+	// Windows cmd echo adds trailing space and uses CRLF line endings
+	expectedContent := integration.UnixOrWindows("hello world\n", "hello world \r\n")
+	require.Equal(t, expectedContent, string(dt))
 }

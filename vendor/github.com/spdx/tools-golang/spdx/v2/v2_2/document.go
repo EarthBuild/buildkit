@@ -21,7 +21,7 @@ type ExternalDocumentRef struct {
 	// DocumentRefID is the ID string defined in the start of the
 	// reference. It should _not_ contain the "DocumentRef-" part
 	// of the mandatory ID string.
-	DocumentRefID string `json:"externalDocumentId"`
+	DocumentRefID common.DocumentID `json:"externalDocumentId"`
 
 	// URI is the URI defined for the external document
 	URI string `json:"spdxDocument"`
@@ -101,7 +101,31 @@ func (d *Document) UnmarshalJSON(b []byte) error {
 
 	relationshipExists := map[string]bool{}
 	serializeRel := func(r *Relationship) string {
-		return fmt.Sprintf("%v-%v->%v", common.RenderDocElementID(r.RefA), r.Relationship, common.RenderDocElementID(r.RefB))
+		refA := r.RefA
+		refB := r.RefB
+		rel := r.Relationship
+
+		// we need to serialize the opposite for CONTAINED_BY and DESCRIBED_BY
+		// so that it will match when we try to de-duplicate during deserialization.
+		switch r.Relationship {
+		case common.TypeRelationshipContainedBy:
+			rel = common.TypeRelationshipContains
+			refA = r.RefB
+			refB = r.RefA
+		case common.TypeRelationshipDescribeBy:
+			rel = common.TypeRelationshipDescribe
+			refA = r.RefB
+			refB = r.RefA
+		}
+		return fmt.Sprintf("%v-%v->%v", common.RenderDocElementID(refA), rel, common.RenderDocElementID(refB))
+	}
+
+	// remove null relationships
+	for i := 0; i < len(d.Relationships); i++ {
+		if d.Relationships[i] == nil {
+			d.Relationships = append(d.Relationships[0:i], d.Relationships[i+1:]...)
+			i--
+		}
 	}
 
 	// index current list of relationships to ensure no duplication

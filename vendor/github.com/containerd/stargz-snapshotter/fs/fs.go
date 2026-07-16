@@ -39,14 +39,13 @@ package fs
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/remotes/docker"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
+	"github.com/containerd/containerd/v2/pkg/reference"
+	"github.com/containerd/log"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/containerd/stargz-snapshotter/fs/config"
 	"github.com/containerd/stargz-snapshotter/fs/layer"
@@ -63,7 +62,6 @@ import (
 	"github.com/hanwen/go-fuse/v2/fuse"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 )
 
@@ -72,7 +70,12 @@ const (
 	defaultMaxConcurrency = 2
 )
 
-var fusermountBin = []string{"fusermount", "fusermount3"}
+var (
+	nsLock = sync.Mutex{}
+
+	ns         *metrics.Namespace
+	metricsCtr *layermetrics.Controller
+)
 
 type Option func(*options)
 
@@ -80,7 +83,7 @@ type options struct {
 	getSources              source.GetSources
 	resolveHandlers         map[string]remote.Handler
 	metadataStore           metadata.Store
-	metricsLogLevel         *logrus.Level
+	metricsLogLevel         *log.Level
 	overlayOpaqueType       layer.OverlayOpaqueType
 	additionalDecompressors func(context.Context, source.RegistryHosts, reference.Spec, ocispec.Descriptor) []metadata.Decompressor
 }
@@ -106,7 +109,7 @@ func WithMetadataStore(metadataStore metadata.Store) Option {
 	}
 }
 
-func WithMetricsLogLevel(logLevel logrus.Level) Option {
+func WithMetricsLogLevel(logLevel log.Level) Option {
 	return func(opts *options) {
 		opts.metricsLogLevel = &logLevel
 	}
@@ -134,12 +137,12 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		maxConcurrency = defaultMaxConcurrency
 	}
 
-	attrTimeout := time.Duration(cfg.FuseConfig.AttrTimeout) * time.Second
+	attrTimeout := time.Duration(cfg.AttrTimeout) * time.Second
 	if attrTimeout == 0 {
 		attrTimeout = defaultFuseTimeout
 	}
 
-	entryTimeout := time.Duration(cfg.FuseConfig.EntryTimeout) * time.Second
+	entryTimeout := time.Duration(cfg.EntryTimeout) * time.Second
 	if entryTimeout == 0 {
 		entryTimeout = defaultFuseTimeout
 	}
@@ -161,18 +164,20 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		return nil, fmt.Errorf("failed to setup resolver: %w", err)
 	}
 
-	var ns *metrics.Namespace
-	if !cfg.NoPrometheus {
+	nsLock.Lock()
+	defer nsLock.Unlock()
+
+	if !cfg.NoPrometheus && ns == nil {
 		ns = metrics.NewNamespace("stargz", "fs", nil)
-		logLevel := logrus.DebugLevel
+		logLevel := log.DebugLevel
 		if fsOpts.metricsLogLevel != nil {
 			logLevel = *fsOpts.metricsLogLevel
 		}
 		commonmetrics.Register(logLevel) // Register common metrics. This will happen only once.
+		metrics.Register(ns)             // Register layer metrics.
 	}
-	c := layermetrics.NewLayerMetrics(ns)
-	if ns != nil {
-		metrics.Register(ns) // Register layer metrics.
+	if metricsCtr == nil {
+		metricsCtr = layermetrics.NewLayerMetrics(ns)
 	}
 
 	return &filesystem{
@@ -186,7 +191,7 @@ func NewFilesystem(root string, cfg config.Config, opts ...Option) (_ snapshot.F
 		backgroundTaskManager: tm,
 		allowNoVerification:   cfg.AllowNoVerification,
 		disableVerification:   cfg.DisableVerification,
-		metricsController:     c,
+		metricsController:     metricsCtr,
 		attrTimeout:           attrTimeout,
 		entryTimeout:          entryTimeout,
 	}, nil
@@ -342,16 +347,10 @@ func (fs *filesystem) Mount(ctx context.Context, mountpoint string, labels map[s
 		NullPermissions: true,
 	})
 	mountOpts := &fuse.MountOptions{
-		AllowOther: true,     // allow users other than root&mounter to access fs
-		FsName:     "stargz", // name this filesystem as "stargz"
-		Debug:      fs.debug,
-	}
-	if isFusermountBinExist() {
-		log.G(ctx).Infof("fusermount detected")
-		mountOpts.Options = []string{"suid"} // option for fusermount; allow setuid inside container
-	} else {
-		log.G(ctx).WithError(err).Infof("%s not installed; trying direct mount", fusermountBin)
-		mountOpts.DirectMount = true
+		AllowOther:  true,     // allow users other than root&mounter to access fs
+		FsName:      "stargz", // name this filesystem as "stargz"
+		Debug:       fs.debug,
+		DirectMount: true,
 	}
 	server, err := fuse.NewServer(rawFS, mountpoint, mountOpts)
 	if err != nil {
@@ -382,10 +381,13 @@ func (fs *filesystem) Check(ctx context.Context, mountpoint string, labels map[s
 		return fmt.Errorf("layer not registered")
 	}
 
-	// Check the blob connectivity and try to refresh the connection on failure
-	if err := fs.check(ctx, l, labels); err != nil {
-		log.G(ctx).WithError(err).Warn("check failed")
-		return err
+	if l.Info().FetchedSize < l.Info().Size {
+		// Image contents hasn't fully cached yet.
+		// Check the blob connectivity and try to refresh the connection on failure
+		if err := fs.check(ctx, l, labels); err != nil {
+			log.G(ctx).WithError(err).Warn("check failed")
+			return err
+		}
 	}
 
 	// Wait for prefetch compeletion
@@ -440,8 +442,10 @@ func (fs *filesystem) Unmount(ctx context.Context, mountpoint string) error {
 		fs.layerMu.Unlock()
 		return fmt.Errorf("specified path %q isn't a mountpoint", mountpoint)
 	}
-	delete(fs.layer, mountpoint) // unregisters the corresponding layer
-	l.Done()
+	delete(fs.layer, mountpoint)      // unregisters the corresponding layer
+	if err := l.Close(); err != nil { // Cleanup associated resources
+		log.G(ctx).WithError(err).Warn("failed to release resources of the layer")
+	}
 	fs.layerMu.Unlock()
 	fs.metricsController.Remove(mountpoint)
 
@@ -492,13 +496,4 @@ func neighboringLayers(manifest ocispec.Manifest, target ocispec.Descriptor) (de
 		}
 	}
 	return
-}
-
-func isFusermountBinExist() bool {
-	for _, b := range fusermountBin {
-		if _, err := exec.LookPath(b); err == nil {
-			return true
-		}
-	}
-	return false
 }

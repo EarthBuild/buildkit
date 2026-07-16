@@ -9,6 +9,7 @@ import (
 	"github.com/moby/buildkit/util/testutil/integration"
 	"github.com/moby/buildkit/util/testutil/workers"
 	"github.com/stretchr/testify/require"
+	"github.com/tonistiigi/fsutil"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -23,7 +24,7 @@ func TestJobsIntegration(t *testing.T) {
 		testParallelism,
 	),
 		mirrors,
-		integration.WithMatrix("max-parallelism", map[string]interface{}{
+		integration.WithMatrix("max-parallelism", map[string]any{
 			"single":    maxParallelismSingle,
 			"unlimited": maxParallelismUnlimited,
 		}),
@@ -31,6 +32,7 @@ func TestJobsIntegration(t *testing.T) {
 }
 
 func testParallelism(t *testing.T, sb integration.Sandbox) {
+	integration.SkipOnPlatform(t, "windows")
 	ctx := sb.Context()
 
 	c, err := client.New(ctx, sb.Address())
@@ -62,7 +64,7 @@ func testParallelism(t *testing.T, sb integration.Sandbox) {
 	timeStart := time.Now()
 	eg, egCtx := errgroup.WithContext(ctx)
 	solveOpt := client.SolveOpt{
-		LocalDirs: map[string]string{"cache": t.TempDir()},
+		LocalMounts: map[string]fsutil.FS{"cache": integration.Tmpdir(t)},
 	}
 	eg.Go(func() error {
 		_, err := c.Solve(egCtx, d1, solveOpt, nil)
@@ -78,25 +80,26 @@ func testParallelism(t *testing.T, sb integration.Sandbox) {
 	elapsed := time.Since(timeStart)
 
 	maxParallelism := sb.Value("max-parallelism")
-	if maxParallelism == maxParallelismSingle {
+	switch maxParallelism {
+	case maxParallelismSingle:
 		require.Greater(t, elapsed, 10*time.Second, "parallelism not restricted")
-	} else if maxParallelism == maxParallelismUnlimited {
+	case maxParallelismUnlimited:
 		require.Less(t, elapsed, 10*time.Second, "parallelism hindered")
 	}
 }
 
 type parallelismSetterSingle struct{}
 
-func (*parallelismSetterSingle) UpdateConfigFile(in string) string {
-	return in + "\n\n[worker.oci]\n  max-parallelism = 1\n\n[worker.containerd]\n  max-parallelism = 1\n"
+func (*parallelismSetterSingle) UpdateConfigFile(in string) (string, func() error) {
+	return in + "\n\n[worker.oci]\n  max-parallelism = 1\n\n[worker.containerd]\n  max-parallelism = 1\n", nil
 }
 
 var maxParallelismSingle integration.ConfigUpdater = &parallelismSetterSingle{}
 
 type parallelismSetterUnlimited struct{}
 
-func (*parallelismSetterUnlimited) UpdateConfigFile(in string) string {
-	return in
+func (*parallelismSetterUnlimited) UpdateConfigFile(in string) (string, func() error) {
+	return in, nil
 }
 
 var maxParallelismUnlimited integration.ConfigUpdater = &parallelismSetterUnlimited{}
