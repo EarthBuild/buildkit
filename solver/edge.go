@@ -970,8 +970,13 @@ func (e *edge) execOp(ctx context.Context) (any, error) {
 	// execOp runs as f.NewFuncRequest(e.execOp) — a goroutine, NOT under the
 	// scheduler mutex — so an op that blocks here waiting for a peer cannot stall
 	// the scheduler.
+	// LeaseKey returns "" when the graph has no cross-machine identity (a dep whose
+	// only key is a per-run random: one). Then there is nothing to coordinate on,
+	// and we simply build it — exactly as unmodified buildkit would.
 	if len(cacheKeys) > 0 {
-		ctx = WithSingleFlightKey(ctx, LeaseKey(cacheKeys[0]))
+		if key := LeaseKey(cacheKeys[0]); key != "" {
+			ctx = WithSingleFlightKey(ctx, key)
+		}
 	}
 
 	results, subExporters, ctxOpts, err := e.op.Exec(ctx, toResultSlice(inputs))

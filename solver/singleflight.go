@@ -74,16 +74,33 @@ type Coordinator interface {
 // The one identity that IS content-addressed and machine-stable is the shape the
 // exported cache manifest already uses: a record is rootKey(digest, output) and
 // its dependencies are links (see exporter.ExportTo, exporter.go:127 and :234).
-// So we hash exactly that chain. Content enters through the leaves — a local
-// source's cacheMap digest is its content checksum — which is why `COPY src/`
-// over different sources yields a different key here even though the op digest
-// is identical.
+// So we hash exactly that chain.
+//
+// But NOT every key in that chain carries identity, and this is the trap that
+// made the first version of this function silently useless. A local source's
+// cache key is "session:<name>:<hash(SessionID,...)>"
+// (source/local/source.go), and SourceOp.CacheMap then stamps the digest with a
+// "random:" prefix (llbsolver/ops/source.go:97) — buildkit's marker for "never
+// match this by identity". It is random PER RUN, so anything downstream of a
+// COPY got a lease key no other machine could ever compute. Measured: two
+// earthbuild instances building one target produced four keys and zero merges.
+//
+// BuildKit does not care, because it identifies local sources by CONTENT
+// instead, via the slow cache: commitOptions (edge.go) puts that content key in
+// the same dep slot, right beside the random one. So we drop the random keys and
+// keep the content ones.
+//
+// If a dep has ONLY a random key, we have no cross-machine identity for it and
+// return "" — no lease, build locally. That is the safe direction: a key we
+// cannot compute identically elsewhere is at best useless, and a key that
+// pretended otherwise would hand a follower the wrong layer.
 //
 // Dependencies within a slot are sorted, so two machines that discovered the
 // same deps in a different order still agree. Memoized: a diamond-shaped DAG
 // would otherwise be walked exponentially.
 func LeaseKey(k *CacheKey) digest.Digest {
 	memo := map[*CacheKey]string{}
+	noIdentity := false
 	var walk func(k *CacheKey) string
 	walk = func(k *CacheKey) string {
 		if s, ok := memo[k]; ok {
@@ -92,12 +109,27 @@ func LeaseKey(k *CacheKey) digest.Digest {
 		// Placeholder before recursing: a malformed cyclic graph must not hang.
 		memo[k] = ""
 
+		if isRandomDigest(k.Digest()) {
+			noIdentity = true
+			return ""
+		}
+
 		var b strings.Builder
 		fmt.Fprintf(&b, "k:%s@%d", k.Digest(), k.Output())
 		for i, deps := range k.Deps() {
 			parts := make([]string, 0, len(deps))
 			for _, d := range deps {
+				// A random: key is per-run noise. Its slot's content key (the slow
+				// cache) is what actually identifies this dep across machines.
+				if isRandomDigest(d.CacheKey.CacheKey.Digest()) {
+					continue
+				}
 				parts = append(parts, d.Selector.String()+"="+walk(d.CacheKey.CacheKey))
+			}
+			// Every key for this dep was noise: nothing identifies it. Refuse.
+			if len(deps) > 0 && len(parts) == 0 {
+				noIdentity = true
+				return ""
 			}
 			sort.Strings(parts)
 			fmt.Fprintf(&b, "|d%d:%s", i, strings.Join(parts, ","))
@@ -106,7 +138,18 @@ func LeaseKey(k *CacheKey) digest.Digest {
 		memo[k] = s
 		return s
 	}
-	return digest.FromString(walk(k))
+	out := walk(k)
+	if noIdentity {
+		return ""
+	}
+	return digest.FromString(out)
+}
+
+// isRandomDigest reports buildkit's "never match this by identity" marker,
+// stamped on any source whose cache key is session-scoped — i.e. every local
+// source. See llbsolver/ops/source.go:97 and cachemanager.go:453.
+func isRandomDigest(d digest.Digest) bool {
+	return strings.HasPrefix(string(d), "random:")
 }
 
 type singleFlightKeyT struct{}
