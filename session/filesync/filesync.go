@@ -248,31 +248,31 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 }
 
 // NewFSSyncTargetDir allows writing into a directory
-// earthly-specific: notifyFn reports each received file (stock fsutil NotifyHashed)
-func NewFSSyncTargetDir(outdir string, notifyFn fsutil.ChangeFunc) session.Attachable {
+// earthly-specific: progressFn reports cumulative received bytes (fsutil ProgressCb)
+func NewFSSyncTargetDir(outdir string, progressFn func(bytes int, done bool)) session.Attachable {
 	p := &earthlySyncTarget{
-		outdir:   outdir,
-		notifyFn: notifyFn,
+		outdir:     outdir,
+		progressFn: progressFn,
 	}
 	return p
 }
 
 // NewFSSyncMultiTarget allows writing into an io.WriteCloser; it is earthly-specific
-func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), notifyFn fsutil.ChangeFunc) session.Attachable {
+func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progressFn func(bytes int, done bool)) session.Attachable {
 	p := &earthlySyncTarget{
 		f:          f,
 		outdirFunc: outdirFunc,
-		notifyFn:   notifyFn,
+		progressFn: progressFn,
 	}
 	return p
 }
 
-// earthlySyncTarget is earthly-specific, supports a per-file notify callback and outdirFunc
+// earthlySyncTarget is earthly-specific: a byte-progress callback plus outdirFunc
 type earthlySyncTarget struct {
 	outdir     string
 	outdirFunc func(map[string]string) (string, error)
 	f          func(map[string]string) (io.WriteCloser, error)
-	notifyFn   fsutil.ChangeFunc
+	progressFn func(bytes int, done bool)
 }
 
 func (sp *earthlySyncTarget) Register(server *grpc.Server) {
@@ -281,7 +281,7 @@ func (sp *earthlySyncTarget) Register(server *grpc.Server) {
 
 func (sp *earthlySyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 	if sp.outdir != "" {
-		return syncTargetDiffCopy(stream, sp.outdir, sp.notifyFn)
+		return syncTargetDiffCopy(stream, sp.outdir, sp.progressFn)
 	}
 
 	opts, _ := metadata.FromIncomingContext(stream.Context())
@@ -297,7 +297,7 @@ func (sp *earthlySyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error
 			return err
 		}
 		if outdir != "" {
-			return syncTargetDiffCopy(stream, outdir, sp.notifyFn)
+			return syncTargetDiffCopy(stream, outdir, sp.progressFn)
 		}
 	}
 	wc, err := sp.f(md)
