@@ -88,7 +88,7 @@ jobs:
               core.setOutput('tags', JSON.stringify(matrix));
             });
             await core.group(`Set includes`, async () => {
-              const includes = yaml.load(core.getInput('includes'));
+              const includes = yaml.load(core.getInput('includes') || '[]');
               core.info(JSON.stringify(includes, null, 2));
               core.setOutput('includes', JSON.stringify(includes ?? []));
             });
