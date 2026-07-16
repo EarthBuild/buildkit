@@ -1472,8 +1472,8 @@ func grpcClientConn(ctx context.Context) (context.Context, *grpc.ClientConn, err
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor),
 		grpc.WithStreamInterceptor(grpcerrors.StreamClientInterceptor),
-		grpc.WithInitialWindowSize(65535 * 32),                                           // earthly-specific
-		grpc.WithInitialConnWindowSize(65535 * 16),                                       // earthly-specific
+		grpc.WithInitialWindowSize(65535 * 32),     // earthly-specific
+		grpc.WithInitialConnWindowSize(65535 * 16), // earthly-specific
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
 	}

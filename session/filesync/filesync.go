@@ -248,31 +248,31 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 }
 
 // NewFSSyncTargetDir allows writing into a directory
-// earthly-specific: preserves verboseProgressCB support
-func NewFSSyncTargetDir(outdir string, verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
+// earthly-specific: progressFn reports cumulative received bytes (fsutil ProgressCb)
+func NewFSSyncTargetDir(outdir string, progressFn func(bytes int, done bool)) session.Attachable {
 	p := &earthlySyncTarget{
-		outdir:            outdir,
-		verboseProgressCB: verboseProgressCB,
+		outdir:     outdir,
+		progressFn: progressFn,
 	}
 	return p
 }
 
 // NewFSSyncMultiTarget allows writing into an io.WriteCloser; it is earthly-specific
-func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
+func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progressFn func(bytes int, done bool)) session.Attachable {
 	p := &earthlySyncTarget{
-		f:                 f,
-		outdirFunc:        outdirFunc,
-		verboseProgressCB: verboseProgressCB,
+		f:          f,
+		outdirFunc: outdirFunc,
+		progressFn: progressFn,
 	}
 	return p
 }
 
-// earthlySyncTarget is earthly-specific, supports verboseProgressCB and outdirFunc
+// earthlySyncTarget is earthly-specific: a byte-progress callback plus outdirFunc
 type earthlySyncTarget struct {
-	outdir            string
-	outdirFunc        func(map[string]string) (string, error)
-	f                 func(map[string]string) (io.WriteCloser, error)
-	verboseProgressCB fsutil.VerboseProgressCB
+	outdir     string
+	outdirFunc func(map[string]string) (string, error)
+	f          func(map[string]string) (io.WriteCloser, error)
+	progressFn func(bytes int, done bool)
 }
 
 func (sp *earthlySyncTarget) Register(server *grpc.Server) {
@@ -281,7 +281,7 @@ func (sp *earthlySyncTarget) Register(server *grpc.Server) {
 
 func (sp *earthlySyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 	if sp.outdir != "" {
-		return syncTargetDiffCopy(stream, sp.outdir, sp.verboseProgressCB)
+		return syncTargetDiffCopy(stream, sp.outdir, sp.progressFn)
 	}
 
 	opts, _ := metadata.FromIncomingContext(stream.Context())
@@ -297,7 +297,7 @@ func (sp *earthlySyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error
 			return err
 		}
 		if outdir != "" {
-			return syncTargetDiffCopy(stream, outdir, sp.verboseProgressCB)
+			return syncTargetDiffCopy(stream, outdir, sp.progressFn)
 		}
 	}
 	wc, err := sp.f(md)
@@ -321,11 +321,9 @@ type FSSyncTarget interface {
 }
 
 type fsSyncTarget struct {
-	id                int
-	outdir            string
-	outdirFunc        func(map[string]string) (string, error) // earthly-specific
-	f                 FileOutputFunc
-	verboseProgressCB fsutil.VerboseProgressCB // earthly-specific
+	id     int
+	outdir string
+	f      FileOutputFunc
 }
 
 func (target *fsSyncTarget) target() *fsSyncTarget {

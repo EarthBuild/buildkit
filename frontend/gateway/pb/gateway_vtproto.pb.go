@@ -6,7 +6,6 @@ package moby_buildkit_v1_frontend
 
 import (
 	fmt "fmt"
-	gogoproto "github.com/gogo/protobuf/proto"
 	timestamp "github.com/golang/protobuf/ptypes/timestamp"
 	types1 "github.com/moby/buildkit/api/types"
 	pb "github.com/moby/buildkit/solver/pb"
@@ -818,7 +817,7 @@ func (m *ReadDirResponse) CloneVT() *ReadDirResponse {
 			if vtpb, ok := interface{}(v).(interface{ CloneVT() *types.Stat }); ok {
 				tmpContainer[k] = vtpb.CloneVT()
 			} else {
-				tmpContainer[k] = gogoproto.Clone(v).(*types.Stat)
+				tmpContainer[k] = proto.Clone(v).(*types.Stat)
 			}
 		}
 		r.Entries = tmpContainer
@@ -831,6 +830,48 @@ func (m *ReadDirResponse) CloneVT() *ReadDirResponse {
 }
 
 func (m *ReadDirResponse) CloneMessageVT() proto.Message {
+	return m.CloneVT()
+}
+
+func (m *ExportRequest) CloneVT() *ExportRequest {
+	if m == nil {
+		return (*ExportRequest)(nil)
+	}
+	r := new(ExportRequest)
+	r.Refs = m.Refs.CloneVT()
+	if rhs := m.Metadata; rhs != nil {
+		tmpContainer := make(map[string][]byte, len(rhs))
+		for k, v := range rhs {
+			tmpBytes := make([]byte, len(v))
+			copy(tmpBytes, v)
+			tmpContainer[k] = tmpBytes
+		}
+		r.Metadata = tmpContainer
+	}
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = make([]byte, len(m.unknownFields))
+		copy(r.unknownFields, m.unknownFields)
+	}
+	return r
+}
+
+func (m *ExportRequest) CloneMessageVT() proto.Message {
+	return m.CloneVT()
+}
+
+func (m *ExportResponse) CloneVT() *ExportResponse {
+	if m == nil {
+		return (*ExportResponse)(nil)
+	}
+	r := new(ExportResponse)
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = make([]byte, len(m.unknownFields))
+		copy(r.unknownFields, m.unknownFields)
+	}
+	return r
+}
+
+func (m *ExportResponse) CloneMessageVT() proto.Message {
 	return m.CloneVT()
 }
 
@@ -862,7 +903,7 @@ func (m *StatFileResponse) CloneVT() *StatFileResponse {
 		if vtpb, ok := interface{}(rhs).(interface{ CloneVT() *types.Stat }); ok {
 			r.Stat = vtpb.CloneVT()
 		} else {
-			r.Stat = gogoproto.Clone(rhs).(*types.Stat)
+			r.Stat = proto.Clone(rhs).(*types.Stat)
 		}
 	}
 	if len(m.unknownFields) > 0 {
@@ -2518,7 +2559,7 @@ func (this *ReadDirResponse) EqualVT(that *ReadDirResponse) bool {
 				if !equal.EqualVT(q) {
 					return false
 				}
-			} else if !gogoproto.Equal(p, q) {
+			} else if !proto.Equal(p, q) {
 				return false
 			}
 		}
@@ -2528,6 +2569,53 @@ func (this *ReadDirResponse) EqualVT(that *ReadDirResponse) bool {
 
 func (this *ReadDirResponse) EqualMessageVT(thatMsg proto.Message) bool {
 	that, ok := thatMsg.(*ReadDirResponse)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *ExportRequest) EqualVT(that *ExportRequest) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if !this.Refs.EqualVT(that.Refs) {
+		return false
+	}
+	if len(this.Metadata) != len(that.Metadata) {
+		return false
+	}
+	for i, vx := range this.Metadata {
+		vy, ok := that.Metadata[i]
+		if !ok {
+			return false
+		}
+		if string(vx) != string(vy) {
+			return false
+		}
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *ExportRequest) EqualMessageVT(thatMsg proto.Message) bool {
+	that, ok := thatMsg.(*ExportRequest)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *ExportResponse) EqualVT(that *ExportResponse) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *ExportResponse) EqualMessageVT(thatMsg proto.Message) bool {
+	that, ok := thatMsg.(*ExportResponse)
 	if !ok {
 		return false
 	}
@@ -2568,7 +2656,7 @@ func (this *StatFileResponse) EqualVT(that *StatFileResponse) bool {
 		if !equal.EqualVT(that.Stat) {
 			return false
 		}
-	} else if !gogoproto.Equal(this.Stat, that.Stat) {
+	} else if !proto.Equal(this.Stat, that.Stat) {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -5397,7 +5485,7 @@ func (m *ReadDirResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 				i -= size
 				i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
 			} else {
-				encoded, err := gogoproto.Marshal(m.Entries[iNdEx])
+				encoded, err := proto.Marshal(m.Entries[iNdEx])
 				if err != nil {
 					return 0, err
 				}
@@ -5408,6 +5496,101 @@ func (m *ReadDirResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 			i--
 			dAtA[i] = 0xa
 		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ExportRequest) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ExportRequest) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *ExportRequest) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i -= len(m.unknownFields)
+		copy(dAtA[i:], m.unknownFields)
+	}
+	if len(m.Metadata) > 0 {
+		for k := range m.Metadata {
+			v := m.Metadata[k]
+			baseI := i
+			i -= len(v)
+			copy(dAtA[i:], v)
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(len(v)))
+			i--
+			dAtA[i] = 0x12
+			i -= len(k)
+			copy(dAtA[i:], k)
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(len(k)))
+			i--
+			dAtA[i] = 0xa
+			i = protohelpers.EncodeVarint(dAtA, i, uint64(baseI-i))
+			i--
+			dAtA[i] = 0x12
+		}
+	}
+	if m.Refs != nil {
+		size, err := m.Refs.MarshalToSizedBufferVT(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ExportResponse) MarshalVT() (dAtA []byte, err error) {
+	if m == nil {
+		return nil, nil
+	}
+	size := m.SizeVT()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBufferVT(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ExportResponse) MarshalToVT(dAtA []byte) (int, error) {
+	size := m.SizeVT()
+	return m.MarshalToSizedBufferVT(dAtA[:size])
+}
+
+func (m *ExportResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
+	if m == nil {
+		return 0, nil
+	}
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.unknownFields != nil {
+		i -= len(m.unknownFields)
+		copy(dAtA[i:], m.unknownFields)
 	}
 	return len(dAtA) - i, nil
 }
@@ -5505,7 +5688,7 @@ func (m *StatFileResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 			i -= size
 			i = protohelpers.EncodeVarint(dAtA, i, uint64(size))
 		} else {
-			encoded, err := gogoproto.Marshal(m.Stat)
+			encoded, err := proto.Marshal(m.Stat)
 			if err != nil {
 				return 0, err
 			}
@@ -7541,11 +7724,44 @@ func (m *ReadDirResponse) SizeVT() (n int) {
 			}); ok {
 				l = size.SizeVT()
 			} else {
-				l = gogoproto.Size(e)
+				l = proto.Size(e)
 			}
 			n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 		}
 	}
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *ExportRequest) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Refs != nil {
+		l = m.Refs.SizeVT()
+		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
+	}
+	if len(m.Metadata) > 0 {
+		for k, v := range m.Metadata {
+			_ = k
+			_ = v
+			l = 1 + len(v) + protohelpers.SizeOfVarint(uint64(len(v)))
+			mapEntrySize := 1 + len(k) + protohelpers.SizeOfVarint(uint64(len(k))) + l
+			n += mapEntrySize + 1 + protohelpers.SizeOfVarint(uint64(mapEntrySize))
+		}
+	}
+	n += len(m.unknownFields)
+	return n
+}
+
+func (m *ExportResponse) SizeVT() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
 	n += len(m.unknownFields)
 	return n
 }
@@ -7583,7 +7799,7 @@ func (m *StatFileResponse) SizeVT() (n int) {
 		}); ok {
 			l = size.SizeVT()
 		} else {
-			l = gogoproto.Size(m.Stat)
+			l = proto.Size(m.Stat)
 		}
 		n += 1 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
@@ -13775,11 +13991,277 @@ func (m *ReadDirResponse) UnmarshalVT(dAtA []byte) error {
 					return err
 				}
 			} else {
-				if err := gogoproto.Unmarshal(dAtA[iNdEx:postIndex], m.Entries[len(m.Entries)-1]); err != nil {
+				if err := proto.Unmarshal(dAtA[iNdEx:postIndex], m.Entries[len(m.Entries)-1]); err != nil {
 					return err
 				}
 			}
 			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := protohelpers.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ExportRequest) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return protohelpers.ErrIntOverflow
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ExportRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ExportRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Refs", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Refs == nil {
+				m.Refs = &RefMap{}
+			}
+			if err := m.Refs.UnmarshalVT(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Metadata", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Metadata == nil {
+				m.Metadata = make(map[string][]byte)
+			}
+			var mapkey string
+			var mapvalue []byte
+			for iNdEx < postIndex {
+				entryPreIndex := iNdEx
+				var wire uint64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return protohelpers.ErrIntOverflow
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					wire |= uint64(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				fieldNum := int32(wire >> 3)
+				if fieldNum == 1 {
+					var stringLenmapkey uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return protohelpers.ErrIntOverflow
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						stringLenmapkey |= uint64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intStringLenmapkey := int(stringLenmapkey)
+					if intStringLenmapkey < 0 {
+						return protohelpers.ErrInvalidLength
+					}
+					postStringIndexmapkey := iNdEx + intStringLenmapkey
+					if postStringIndexmapkey < 0 {
+						return protohelpers.ErrInvalidLength
+					}
+					if postStringIndexmapkey > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
+					iNdEx = postStringIndexmapkey
+				} else if fieldNum == 2 {
+					var mapbyteLen uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return protohelpers.ErrIntOverflow
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						mapbyteLen |= uint64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intMapbyteLen := int(mapbyteLen)
+					if intMapbyteLen < 0 {
+						return protohelpers.ErrInvalidLength
+					}
+					postbytesIndex := iNdEx + intMapbyteLen
+					if postbytesIndex < 0 {
+						return protohelpers.ErrInvalidLength
+					}
+					if postbytesIndex > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapvalue = make([]byte, mapbyteLen)
+					copy(mapvalue, dAtA[iNdEx:postbytesIndex])
+					iNdEx = postbytesIndex
+				} else {
+					iNdEx = entryPreIndex
+					skippy, err := protohelpers.Skip(dAtA[iNdEx:])
+					if err != nil {
+						return err
+					}
+					if (skippy < 0) || (iNdEx+skippy) < 0 {
+						return protohelpers.ErrInvalidLength
+					}
+					if (iNdEx + skippy) > postIndex {
+						return io.ErrUnexpectedEOF
+					}
+					iNdEx += skippy
+				}
+			}
+			m.Metadata[mapkey] = mapvalue
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := protohelpers.Skip(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return protohelpers.ErrInvalidLength
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ExportResponse) UnmarshalVT(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return protohelpers.ErrIntOverflow
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ExportResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ExportResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
 		default:
 			iNdEx = preIndex
 			skippy, err := protohelpers.Skip(dAtA[iNdEx:])
@@ -14004,7 +14486,7 @@ func (m *StatFileResponse) UnmarshalVT(dAtA []byte) error {
 					return err
 				}
 			} else {
-				if err := gogoproto.Unmarshal(dAtA[iNdEx:postIndex], m.Stat); err != nil {
+				if err := proto.Unmarshal(dAtA[iNdEx:postIndex], m.Stat); err != nil {
 					return err
 				}
 			}

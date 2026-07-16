@@ -29,6 +29,7 @@ const (
 	LLBBridge_Ping_FullMethodName               = "/moby.buildkit.v1.frontend.LLBBridge/Ping"
 	LLBBridge_Return_FullMethodName             = "/moby.buildkit.v1.frontend.LLBBridge/Return"
 	LLBBridge_Inputs_FullMethodName             = "/moby.buildkit.v1.frontend.LLBBridge/Inputs"
+	LLBBridge_Export_FullMethodName             = "/moby.buildkit.v1.frontend.LLBBridge/Export"
 	LLBBridge_NewContainer_FullMethodName       = "/moby.buildkit.v1.frontend.LLBBridge/NewContainer"
 	LLBBridge_ReleaseContainer_FullMethodName   = "/moby.buildkit.v1.frontend.LLBBridge/ReleaseContainer"
 	LLBBridge_ExecProcess_FullMethodName        = "/moby.buildkit.v1.frontend.LLBBridge/ExecProcess"
@@ -36,7 +37,6 @@ const (
 	LLBBridge_ReadDirContainer_FullMethodName   = "/moby.buildkit.v1.frontend.LLBBridge/ReadDirContainer"
 	LLBBridge_StatFileContainer_FullMethodName  = "/moby.buildkit.v1.frontend.LLBBridge/StatFileContainer"
 	LLBBridge_Warn_FullMethodName               = "/moby.buildkit.v1.frontend.LLBBridge/Warn"
-	LLBBridge_Export_FullMethodName              = "/moby.buildkit.v1.frontend.LLBBridge/Export"
 )
 
 // LLBBridgeClient is the client API for LLBBridge service.
@@ -61,6 +61,7 @@ type LLBBridgeClient interface {
 	Return(ctx context.Context, in *ReturnRequest, opts ...grpc.CallOption) (*ReturnResponse, error)
 	// apicaps:CapFrontendInputs
 	Inputs(ctx context.Context, in *InputsRequest, opts ...grpc.CallOption) (*InputsResponse, error)
+	Export(ctx context.Context, in *ExportRequest, opts ...grpc.CallOption) (*ExportResponse, error)
 	NewContainer(ctx context.Context, in *NewContainerRequest, opts ...grpc.CallOption) (*NewContainerResponse, error)
 	ReleaseContainer(ctx context.Context, in *ReleaseContainerRequest, opts ...grpc.CallOption) (*ReleaseContainerResponse, error)
 	ExecProcess(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ExecMessage, ExecMessage], error)
@@ -70,7 +71,6 @@ type LLBBridgeClient interface {
 	StatFileContainer(ctx context.Context, in *StatFileRequest, opts ...grpc.CallOption) (*StatFileResponse, error)
 	// apicaps:CapGatewayWarnings
 	Warn(ctx context.Context, in *WarnRequest, opts ...grpc.CallOption) (*WarnResponse, error)
-	Export(ctx context.Context, in *ExportRequest, opts ...grpc.CallOption) (*ExportResponse, error)
 }
 
 type lLBBridgeClient struct {
@@ -181,6 +181,16 @@ func (c *lLBBridgeClient) Inputs(ctx context.Context, in *InputsRequest, opts ..
 	return out, nil
 }
 
+func (c *lLBBridgeClient) Export(ctx context.Context, in *ExportRequest, opts ...grpc.CallOption) (*ExportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExportResponse)
+	err := c.cc.Invoke(ctx, LLBBridge_Export_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *lLBBridgeClient) NewContainer(ctx context.Context, in *NewContainerRequest, opts ...grpc.CallOption) (*NewContainerResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(NewContainerResponse)
@@ -254,16 +264,6 @@ func (c *lLBBridgeClient) Warn(ctx context.Context, in *WarnRequest, opts ...grp
 	return out, nil
 }
 
-func (c *lLBBridgeClient) Export(ctx context.Context, in *ExportRequest, opts ...grpc.CallOption) (*ExportResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ExportResponse)
-	err := c.cc.Invoke(ctx, LLBBridge_Export_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // LLBBridgeServer is the server API for LLBBridge service.
 // All implementations should embed UnimplementedLLBBridgeServer
 // for forward compatibility.
@@ -286,6 +286,7 @@ type LLBBridgeServer interface {
 	Return(context.Context, *ReturnRequest) (*ReturnResponse, error)
 	// apicaps:CapFrontendInputs
 	Inputs(context.Context, *InputsRequest) (*InputsResponse, error)
+	Export(context.Context, *ExportRequest) (*ExportResponse, error)
 	NewContainer(context.Context, *NewContainerRequest) (*NewContainerResponse, error)
 	ReleaseContainer(context.Context, *ReleaseContainerRequest) (*ReleaseContainerResponse, error)
 	ExecProcess(grpc.BidiStreamingServer[ExecMessage, ExecMessage]) error
@@ -295,7 +296,6 @@ type LLBBridgeServer interface {
 	StatFileContainer(context.Context, *StatFileRequest) (*StatFileResponse, error)
 	// apicaps:CapGatewayWarnings
 	Warn(context.Context, *WarnRequest) (*WarnResponse, error)
-	Export(context.Context, *ExportRequest) (*ExportResponse, error)
 }
 
 // UnimplementedLLBBridgeServer should be embedded to have
@@ -335,6 +335,9 @@ func (UnimplementedLLBBridgeServer) Return(context.Context, *ReturnRequest) (*Re
 func (UnimplementedLLBBridgeServer) Inputs(context.Context, *InputsRequest) (*InputsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Inputs not implemented")
 }
+func (UnimplementedLLBBridgeServer) Export(context.Context, *ExportRequest) (*ExportResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Export not implemented")
+}
 func (UnimplementedLLBBridgeServer) NewContainer(context.Context, *NewContainerRequest) (*NewContainerResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NewContainer not implemented")
 }
@@ -355,9 +358,6 @@ func (UnimplementedLLBBridgeServer) StatFileContainer(context.Context, *StatFile
 }
 func (UnimplementedLLBBridgeServer) Warn(context.Context, *WarnRequest) (*WarnResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Warn not implemented")
-}
-func (UnimplementedLLBBridgeServer) Export(context.Context, *ExportRequest) (*ExportResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Export not implemented")
 }
 func (UnimplementedLLBBridgeServer) testEmbeddedByValue() {}
 
@@ -559,6 +559,24 @@ func _LLBBridge_Inputs_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LLBBridge_Export_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LLBBridgeServer).Export(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LLBBridge_Export_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LLBBridgeServer).Export(ctx, req.(*ExportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _LLBBridge_NewContainer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(NewContainerRequest)
 	if err := dec(in); err != nil {
@@ -674,24 +692,6 @@ func _LLBBridge_Warn_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
-func _LLBBridge_Export_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ExportRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LLBBridgeServer).Export(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: LLBBridge_Export_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LLBBridgeServer).Export(ctx, req.(*ExportRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // LLBBridge_ServiceDesc is the grpc.ServiceDesc for LLBBridge service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -740,6 +740,10 @@ var LLBBridge_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _LLBBridge_Inputs_Handler,
 		},
 		{
+			MethodName: "Export",
+			Handler:    _LLBBridge_Export_Handler,
+		},
+		{
 			MethodName: "NewContainer",
 			Handler:    _LLBBridge_NewContainer_Handler,
 		},
@@ -762,10 +766,6 @@ var LLBBridge_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Warn",
 			Handler:    _LLBBridge_Warn_Handler,
-		},
-		{
-			MethodName: "Export",
-			Handler:    _LLBBridge_Export_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

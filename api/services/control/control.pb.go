@@ -738,7 +738,7 @@ func (x *SolveResponse) GetExporterResponse() map[string]string {
 type StatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ref           string                 `protobuf:"bytes,1,opt,name=Ref,proto3" json:"Ref,omitempty"`
-	StatsStream   bool                   `protobuf:"varint,99,opt,name=statsStream,proto3" json:"statsStream,omitempty"` // earthly-specific
+	StatsStream   bool                   `protobuf:"varint,99,opt,name=statsStream,proto3" json:"statsStream,omitempty"` // earthly
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -780,7 +780,6 @@ func (x *StatusRequest) GetRef() string {
 	return ""
 }
 
-// GetStatsStream is earthly-specific.
 func (x *StatusRequest) GetStatsStream() bool {
 	if x != nil {
 		return x.StatsStream
@@ -1387,10 +1386,11 @@ func (*InfoRequest) Descriptor() ([]byte, []int) {
 type InfoResponse struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	BuildkitVersion *types.BuildkitVersion `protobuf:"bytes,1,opt,name=buildkitVersion,proto3" json:"buildkitVersion,omitempty"`
-	NumSessions     uint64                 `protobuf:"varint,101,opt,name=numSessions,proto3" json:"numSessions,omitempty"`  // earthly-specific
-	SecondsIdle     uint64                 `protobuf:"varint,102,opt,name=secondsIdle,proto3" json:"secondsIdle,omitempty"` // earthly-specific
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Earthly-specific.
+	NumSessions   uint64 `protobuf:"varint,101,opt,name=numSessions,proto3" json:"numSessions,omitempty"`
+	SecondsIdle   uint64 `protobuf:"varint,102,opt,name=secondsIdle,proto3" json:"secondsIdle,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *InfoResponse) Reset() {
@@ -1430,7 +1430,6 @@ func (x *InfoResponse) GetBuildkitVersion() *types.BuildkitVersion {
 	return nil
 }
 
-// GetNumSessions is earthly-specific.
 func (x *InfoResponse) GetNumSessions() uint64 {
 	if x != nil {
 		return x.NumSessions
@@ -1438,12 +1437,251 @@ func (x *InfoResponse) GetNumSessions() uint64 {
 	return 0
 }
 
-// GetSecondsIdle is earthly-specific.
 func (x *InfoResponse) GetSecondsIdle() uint64 {
 	if x != nil {
 		return x.SecondsIdle
 	}
 	return 0
+}
+
+type ShutdownIfIdleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownIfIdleRequest) Reset() {
+	*x = ShutdownIfIdleRequest{}
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownIfIdleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownIfIdleRequest) ProtoMessage() {}
+
+func (x *ShutdownIfIdleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownIfIdleRequest.ProtoReflect.Descriptor instead.
+func (*ShutdownIfIdleRequest) Descriptor() ([]byte, []int) {
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{19}
+}
+
+type ShutdownIfIdleResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WillShutdown  bool                   `protobuf:"varint,1,opt,name=willShutdown,proto3" json:"willShutdown,omitempty"`
+	NumSessions   uint64                 `protobuf:"varint,2,opt,name=numSessions,proto3" json:"numSessions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownIfIdleResponse) Reset() {
+	*x = ShutdownIfIdleResponse{}
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownIfIdleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownIfIdleResponse) ProtoMessage() {}
+
+func (x *ShutdownIfIdleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownIfIdleResponse.ProtoReflect.Descriptor instead.
+func (*ShutdownIfIdleResponse) Descriptor() ([]byte, []int) {
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ShutdownIfIdleResponse) GetWillShutdown() bool {
+	if x != nil {
+		return x.WillShutdown
+	}
+	return false
+}
+
+func (x *ShutdownIfIdleResponse) GetNumSessions() uint64 {
+	if x != nil {
+		return x.NumSessions
+	}
+	return 0
+}
+
+type ReserveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReserveRequest) Reset() {
+	*x = ReserveRequest{}
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReserveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReserveRequest) ProtoMessage() {}
+
+func (x *ReserveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReserveRequest.ProtoReflect.Descriptor instead.
+func (*ReserveRequest) Descriptor() ([]byte, []int) {
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{21}
+}
+
+type ReserveResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReserveResponse) Reset() {
+	*x = ReserveResponse{}
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReserveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReserveResponse) ProtoMessage() {}
+
+func (x *ReserveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReserveResponse.ProtoReflect.Descriptor instead.
+func (*ReserveResponse) Descriptor() ([]byte, []int) {
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{22}
+}
+
+type SessionHistoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionHistoryRequest) Reset() {
+	*x = SessionHistoryRequest{}
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionHistoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionHistoryRequest) ProtoMessage() {}
+
+func (x *SessionHistoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionHistoryRequest.ProtoReflect.Descriptor instead.
+func (*SessionHistoryRequest) Descriptor() ([]byte, []int) {
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{23}
+}
+
+type SessionHistoryResponse struct {
+	state         protoimpl.MessageState            `protogen:"open.v1"`
+	History       []*SessionHistoryResponse_History `protobuf:"bytes,1,rep,name=history,proto3" json:"history,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionHistoryResponse) Reset() {
+	*x = SessionHistoryResponse{}
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionHistoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionHistoryResponse) ProtoMessage() {}
+
+func (x *SessionHistoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionHistoryResponse.ProtoReflect.Descriptor instead.
+func (*SessionHistoryResponse) Descriptor() ([]byte, []int) {
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *SessionHistoryResponse) GetHistory() []*SessionHistoryResponse_History {
+	if x != nil {
+		return x.History
+	}
+	return nil
 }
 
 type BuildHistoryRequest struct {
@@ -1459,7 +1697,7 @@ type BuildHistoryRequest struct {
 
 func (x *BuildHistoryRequest) Reset() {
 	*x = BuildHistoryRequest{}
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[19]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1471,7 +1709,7 @@ func (x *BuildHistoryRequest) String() string {
 func (*BuildHistoryRequest) ProtoMessage() {}
 
 func (x *BuildHistoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[19]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1484,7 +1722,7 @@ func (x *BuildHistoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildHistoryRequest.ProtoReflect.Descriptor instead.
 func (*BuildHistoryRequest) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{19}
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *BuildHistoryRequest) GetActiveOnly() bool {
@@ -1532,7 +1770,7 @@ type BuildHistoryEvent struct {
 
 func (x *BuildHistoryEvent) Reset() {
 	*x = BuildHistoryEvent{}
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[20]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1544,7 +1782,7 @@ func (x *BuildHistoryEvent) String() string {
 func (*BuildHistoryEvent) ProtoMessage() {}
 
 func (x *BuildHistoryEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[20]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1557,7 +1795,7 @@ func (x *BuildHistoryEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildHistoryEvent.ProtoReflect.Descriptor instead.
 func (*BuildHistoryEvent) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{20}
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *BuildHistoryEvent) GetType() BuildHistoryEventType {
@@ -1601,7 +1839,7 @@ type BuildHistoryRecord struct {
 
 func (x *BuildHistoryRecord) Reset() {
 	*x = BuildHistoryRecord{}
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[21]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1613,7 +1851,7 @@ func (x *BuildHistoryRecord) String() string {
 func (*BuildHistoryRecord) ProtoMessage() {}
 
 func (x *BuildHistoryRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[21]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1626,7 +1864,7 @@ func (x *BuildHistoryRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildHistoryRecord.ProtoReflect.Descriptor instead.
 func (*BuildHistoryRecord) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{21}
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *BuildHistoryRecord) GetRef() string {
@@ -1774,7 +2012,7 @@ type UpdateBuildHistoryRequest struct {
 
 func (x *UpdateBuildHistoryRequest) Reset() {
 	*x = UpdateBuildHistoryRequest{}
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[22]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1786,7 +2024,7 @@ func (x *UpdateBuildHistoryRequest) String() string {
 func (*UpdateBuildHistoryRequest) ProtoMessage() {}
 
 func (x *UpdateBuildHistoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[22]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1799,7 +2037,7 @@ func (x *UpdateBuildHistoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateBuildHistoryRequest.ProtoReflect.Descriptor instead.
 func (*UpdateBuildHistoryRequest) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{22}
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *UpdateBuildHistoryRequest) GetRef() string {
@@ -1838,7 +2076,7 @@ type UpdateBuildHistoryResponse struct {
 
 func (x *UpdateBuildHistoryResponse) Reset() {
 	*x = UpdateBuildHistoryResponse{}
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[23]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1850,7 +2088,7 @@ func (x *UpdateBuildHistoryResponse) String() string {
 func (*UpdateBuildHistoryResponse) ProtoMessage() {}
 
 func (x *UpdateBuildHistoryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[23]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1863,7 +2101,7 @@ func (x *UpdateBuildHistoryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateBuildHistoryResponse.ProtoReflect.Descriptor instead.
 func (*UpdateBuildHistoryResponse) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{23}
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{29}
 }
 
 type Descriptor struct {
@@ -1878,7 +2116,7 @@ type Descriptor struct {
 
 func (x *Descriptor) Reset() {
 	*x = Descriptor{}
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[24]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1890,7 +2128,7 @@ func (x *Descriptor) String() string {
 func (*Descriptor) ProtoMessage() {}
 
 func (x *Descriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[24]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1903,7 +2141,7 @@ func (x *Descriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Descriptor.ProtoReflect.Descriptor instead.
 func (*Descriptor) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{24}
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *Descriptor) GetMediaType() string {
@@ -1945,7 +2183,7 @@ type BuildResultInfo struct {
 
 func (x *BuildResultInfo) Reset() {
 	*x = BuildResultInfo{}
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[25]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1957,7 +2195,7 @@ func (x *BuildResultInfo) String() string {
 func (*BuildResultInfo) ProtoMessage() {}
 
 func (x *BuildResultInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[25]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1970,7 +2208,7 @@ func (x *BuildResultInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildResultInfo.ProtoReflect.Descriptor instead.
 func (*BuildResultInfo) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{25}
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *BuildResultInfo) GetResultDeprecated() *Descriptor {
@@ -2007,7 +2245,7 @@ type Exporter struct {
 
 func (x *Exporter) Reset() {
 	*x = Exporter{}
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[26]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2019,7 +2257,7 @@ func (x *Exporter) String() string {
 func (*Exporter) ProtoMessage() {}
 
 func (x *Exporter) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[26]
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2032,7 +2270,7 @@ func (x *Exporter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Exporter.ProtoReflect.Descriptor instead.
 func (*Exporter) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{26}
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *Exporter) GetType() string {
@@ -2045,6 +2283,66 @@ func (x *Exporter) GetType() string {
 func (x *Exporter) GetAttrs() map[string]string {
 	if x != nil {
 		return x.Attrs
+	}
+	return nil
+}
+
+type SessionHistoryResponse_History struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionID     string                 `protobuf:"bytes,1,opt,name=sessionID,proto3" json:"sessionID,omitempty"`
+	Start         *timestamp.Timestamp   `protobuf:"bytes,2,opt,name=start,proto3" json:"start,omitempty"`
+	End           *timestamp.Timestamp   `protobuf:"bytes,3,opt,name=end,proto3" json:"end,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionHistoryResponse_History) Reset() {
+	*x = SessionHistoryResponse_History{}
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionHistoryResponse_History) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionHistoryResponse_History) ProtoMessage() {}
+
+func (x *SessionHistoryResponse_History) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionHistoryResponse_History.ProtoReflect.Descriptor instead.
+func (*SessionHistoryResponse_History) Descriptor() ([]byte, []int) {
+	return file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZIP(), []int{24, 0}
+}
+
+func (x *SessionHistoryResponse_History) GetSessionID() string {
+	if x != nil {
+		return x.SessionID
+	}
+	return ""
+}
+
+func (x *SessionHistoryResponse_History) GetStart() *timestamp.Timestamp {
+	if x != nil {
+		return x.Start
+	}
+	return nil
+}
+
+func (x *SessionHistoryResponse_History) GetEnd() *timestamp.Timestamp {
+	if x != nil {
+		return x.End
 	}
 	return nil
 }
@@ -2134,9 +2432,10 @@ const file_github_com_moby_buildkit_api_services_control_control_proto_rawDesc =
 	"\x10ExporterResponse\x18\x01 \x03(\v25.moby.buildkit.v1.SolveResponse.ExporterResponseEntryR\x10ExporterResponse\x1aC\n" +
 	"\x15ExporterResponseEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"!\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"C\n" +
 	"\rStatusRequest\x12\x10\n" +
-	"\x03Ref\x18\x01 \x01(\tR\x03Ref\"\xf0\x01\n" +
+	"\x03Ref\x18\x01 \x01(\tR\x03Ref\x12 \n" +
+	"\vstatsStream\x18c \x01(\bR\vstatsStream\"\xf0\x01\n" +
 	"\x0eStatusResponse\x124\n" +
 	"\bvertexes\x18\x01 \x03(\v2\x18.moby.buildkit.v1.VertexR\bvertexes\x12:\n" +
 	"\bstatuses\x18\x02 \x03(\v2\x1e.moby.buildkit.v1.VertexStatusR\bstatuses\x12/\n" +
@@ -2179,9 +2478,24 @@ const file_github_com_moby_buildkit_api_services_control_control_proto_rawDesc =
 	"\x06filter\x18\x01 \x03(\tR\x06filter\"S\n" +
 	"\x13ListWorkersResponse\x12<\n" +
 	"\x06record\x18\x01 \x03(\v2$.moby.buildkit.v1.types.WorkerRecordR\x06record\"\r\n" +
-	"\vInfoRequest\"a\n" +
+	"\vInfoRequest\"\xa5\x01\n" +
 	"\fInfoResponse\x12Q\n" +
-	"\x0fbuildkitVersion\x18\x01 \x01(\v2'.moby.buildkit.v1.types.BuildkitVersionR\x0fbuildkitVersion\"\x93\x01\n" +
+	"\x0fbuildkitVersion\x18\x01 \x01(\v2'.moby.buildkit.v1.types.BuildkitVersionR\x0fbuildkitVersion\x12 \n" +
+	"\vnumSessions\x18e \x01(\x04R\vnumSessions\x12 \n" +
+	"\vsecondsIdle\x18f \x01(\x04R\vsecondsIdle\"\x17\n" +
+	"\x15ShutdownIfIdleRequest\"^\n" +
+	"\x16ShutdownIfIdleResponse\x12\"\n" +
+	"\fwillShutdown\x18\x01 \x01(\bR\fwillShutdown\x12 \n" +
+	"\vnumSessions\x18\x02 \x01(\x04R\vnumSessions\"\x10\n" +
+	"\x0eReserveRequest\"\x11\n" +
+	"\x0fReserveResponse\"\x17\n" +
+	"\x15SessionHistoryRequest\"\xee\x01\n" +
+	"\x16SessionHistoryResponse\x12J\n" +
+	"\ahistory\x18\x01 \x03(\v20.moby.buildkit.v1.SessionHistoryResponse.HistoryR\ahistory\x1a\x87\x01\n" +
+	"\aHistory\x12\x1c\n" +
+	"\tsessionID\x18\x01 \x01(\tR\tsessionID\x120\n" +
+	"\x05start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05start\x12,\n" +
+	"\x03end\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x03end\"\x93\x01\n" +
 	"\x13BuildHistoryRequest\x12\x1e\n" +
 	"\n" +
 	"ActiveOnly\x18\x01 \x01(\bR\n" +
@@ -2258,7 +2572,7 @@ const file_github_com_moby_buildkit_api_services_control_control_proto_rawDesc =
 	"\x15BuildHistoryEventType\x12\v\n" +
 	"\aSTARTED\x10\x00\x12\f\n" +
 	"\bCOMPLETE\x10\x01\x12\v\n" +
-	"\aDELETED\x10\x022\x89\x06\n" +
+	"\aDELETED\x10\x022\xa3\b\n" +
 	"\aControl\x12T\n" +
 	"\tDiskUsage\x12\".moby.buildkit.v1.DiskUsageRequest\x1a#.moby.buildkit.v1.DiskUsageResponse\x12H\n" +
 	"\x05Prune\x12\x1e.moby.buildkit.v1.PruneRequest\x1a\x1d.moby.buildkit.v1.UsageRecord0\x01\x12H\n" +
@@ -2266,7 +2580,10 @@ const file_github_com_moby_buildkit_api_services_control_control_proto_rawDesc =
 	"\x06Status\x12\x1f.moby.buildkit.v1.StatusRequest\x1a .moby.buildkit.v1.StatusResponse0\x01\x12M\n" +
 	"\aSession\x12\x1e.moby.buildkit.v1.BytesMessage\x1a\x1e.moby.buildkit.v1.BytesMessage(\x010\x01\x12Z\n" +
 	"\vListWorkers\x12$.moby.buildkit.v1.ListWorkersRequest\x1a%.moby.buildkit.v1.ListWorkersResponse\x12E\n" +
-	"\x04Info\x12\x1d.moby.buildkit.v1.InfoRequest\x1a\x1e.moby.buildkit.v1.InfoResponse\x12b\n" +
+	"\x04Info\x12\x1d.moby.buildkit.v1.InfoRequest\x1a\x1e.moby.buildkit.v1.InfoResponse\x12c\n" +
+	"\x0eShutdownIfIdle\x12'.moby.buildkit.v1.ShutdownIfIdleRequest\x1a(.moby.buildkit.v1.ShutdownIfIdleResponse\x12N\n" +
+	"\aReserve\x12 .moby.buildkit.v1.ReserveRequest\x1a!.moby.buildkit.v1.ReserveResponse\x12c\n" +
+	"\x0eSessionHistory\x12'.moby.buildkit.v1.SessionHistoryRequest\x1a(.moby.buildkit.v1.SessionHistoryResponse\x12b\n" +
 	"\x12ListenBuildHistory\x12%.moby.buildkit.v1.BuildHistoryRequest\x1a#.moby.buildkit.v1.BuildHistoryEvent0\x01\x12o\n" +
 	"\x12UpdateBuildHistory\x12+.moby.buildkit.v1.UpdateBuildHistoryRequest\x1a,.moby.buildkit.v1.UpdateBuildHistoryResponseB@Z>github.com/moby/buildkit/api/services/control;moby_buildkit_v1b\x06proto3"
 
@@ -2283,133 +2600,149 @@ func file_github_com_moby_buildkit_api_services_control_control_proto_rawDescGZI
 }
 
 var file_github_com_moby_buildkit_api_services_control_control_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
+var file_github_com_moby_buildkit_api_services_control_control_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_github_com_moby_buildkit_api_services_control_control_proto_goTypes = []any{
-	(BuildHistoryEventType)(0),         // 0: moby.buildkit.v1.BuildHistoryEventType
-	(*PruneRequest)(nil),               // 1: moby.buildkit.v1.PruneRequest
-	(*DiskUsageRequest)(nil),           // 2: moby.buildkit.v1.DiskUsageRequest
-	(*DiskUsageResponse)(nil),          // 3: moby.buildkit.v1.DiskUsageResponse
-	(*UsageRecord)(nil),                // 4: moby.buildkit.v1.UsageRecord
-	(*SolveRequest)(nil),               // 5: moby.buildkit.v1.SolveRequest
-	(*CacheOptions)(nil),               // 6: moby.buildkit.v1.CacheOptions
-	(*CacheOptionsEntry)(nil),          // 7: moby.buildkit.v1.CacheOptionsEntry
-	(*SolveResponse)(nil),              // 8: moby.buildkit.v1.SolveResponse
-	(*StatusRequest)(nil),              // 9: moby.buildkit.v1.StatusRequest
-	(*StatusResponse)(nil),             // 10: moby.buildkit.v1.StatusResponse
-	(*Vertex)(nil),                     // 11: moby.buildkit.v1.Vertex
-	(*VertexStatus)(nil),               // 12: moby.buildkit.v1.VertexStatus
-	(*VertexLog)(nil),                  // 13: moby.buildkit.v1.VertexLog
-	(*VertexWarning)(nil),              // 14: moby.buildkit.v1.VertexWarning
-	(*BytesMessage)(nil),               // 15: moby.buildkit.v1.BytesMessage
-	(*ListWorkersRequest)(nil),         // 16: moby.buildkit.v1.ListWorkersRequest
-	(*ListWorkersResponse)(nil),        // 17: moby.buildkit.v1.ListWorkersResponse
-	(*InfoRequest)(nil),                // 18: moby.buildkit.v1.InfoRequest
-	(*InfoResponse)(nil),               // 19: moby.buildkit.v1.InfoResponse
-	(*BuildHistoryRequest)(nil),        // 20: moby.buildkit.v1.BuildHistoryRequest
-	(*BuildHistoryEvent)(nil),          // 21: moby.buildkit.v1.BuildHistoryEvent
-	(*BuildHistoryRecord)(nil),         // 22: moby.buildkit.v1.BuildHistoryRecord
-	(*UpdateBuildHistoryRequest)(nil),  // 23: moby.buildkit.v1.UpdateBuildHistoryRequest
-	(*UpdateBuildHistoryResponse)(nil), // 24: moby.buildkit.v1.UpdateBuildHistoryResponse
-	(*Descriptor)(nil),                 // 25: moby.buildkit.v1.Descriptor
-	(*BuildResultInfo)(nil),            // 26: moby.buildkit.v1.BuildResultInfo
-	(*Exporter)(nil),                   // 27: moby.buildkit.v1.Exporter
-	nil,                                // 28: moby.buildkit.v1.SolveRequest.ExporterAttrsDeprecatedEntry
-	nil,                                // 29: moby.buildkit.v1.SolveRequest.FrontendAttrsEntry
-	nil,                                // 30: moby.buildkit.v1.SolveRequest.FrontendInputsEntry
-	nil,                                // 31: moby.buildkit.v1.CacheOptions.ExportAttrsDeprecatedEntry
-	nil,                                // 32: moby.buildkit.v1.CacheOptionsEntry.AttrsEntry
-	nil,                                // 33: moby.buildkit.v1.SolveResponse.ExporterResponseEntry
-	nil,                                // 34: moby.buildkit.v1.BuildHistoryRecord.FrontendAttrsEntry
-	nil,                                // 35: moby.buildkit.v1.BuildHistoryRecord.ExporterResponseEntry
-	nil,                                // 36: moby.buildkit.v1.BuildHistoryRecord.ResultsEntry
-	nil,                                // 37: moby.buildkit.v1.Descriptor.AnnotationsEntry
-	nil,                                // 38: moby.buildkit.v1.BuildResultInfo.ResultsEntry
-	nil,                                // 39: moby.buildkit.v1.Exporter.AttrsEntry
-	(*timestamp.Timestamp)(nil),        // 40: google.protobuf.Timestamp
-	(*pb.Definition)(nil),              // 41: pb.Definition
-	(*pb1.Policy)(nil),                 // 42: moby.buildkit.v1.sourcepolicy.Policy
-	(*pb.ProgressGroup)(nil),           // 43: pb.ProgressGroup
-	(*pb.SourceInfo)(nil),              // 44: pb.SourceInfo
-	(*pb.Range)(nil),                   // 45: pb.Range
-	(*types.WorkerRecord)(nil),         // 46: moby.buildkit.v1.types.WorkerRecord
-	(*types.BuildkitVersion)(nil),      // 47: moby.buildkit.v1.types.BuildkitVersion
-	(*status.Status)(nil),              // 48: google.rpc.Status
+	(BuildHistoryEventType)(0),             // 0: moby.buildkit.v1.BuildHistoryEventType
+	(*PruneRequest)(nil),                   // 1: moby.buildkit.v1.PruneRequest
+	(*DiskUsageRequest)(nil),               // 2: moby.buildkit.v1.DiskUsageRequest
+	(*DiskUsageResponse)(nil),              // 3: moby.buildkit.v1.DiskUsageResponse
+	(*UsageRecord)(nil),                    // 4: moby.buildkit.v1.UsageRecord
+	(*SolveRequest)(nil),                   // 5: moby.buildkit.v1.SolveRequest
+	(*CacheOptions)(nil),                   // 6: moby.buildkit.v1.CacheOptions
+	(*CacheOptionsEntry)(nil),              // 7: moby.buildkit.v1.CacheOptionsEntry
+	(*SolveResponse)(nil),                  // 8: moby.buildkit.v1.SolveResponse
+	(*StatusRequest)(nil),                  // 9: moby.buildkit.v1.StatusRequest
+	(*StatusResponse)(nil),                 // 10: moby.buildkit.v1.StatusResponse
+	(*Vertex)(nil),                         // 11: moby.buildkit.v1.Vertex
+	(*VertexStatus)(nil),                   // 12: moby.buildkit.v1.VertexStatus
+	(*VertexLog)(nil),                      // 13: moby.buildkit.v1.VertexLog
+	(*VertexWarning)(nil),                  // 14: moby.buildkit.v1.VertexWarning
+	(*BytesMessage)(nil),                   // 15: moby.buildkit.v1.BytesMessage
+	(*ListWorkersRequest)(nil),             // 16: moby.buildkit.v1.ListWorkersRequest
+	(*ListWorkersResponse)(nil),            // 17: moby.buildkit.v1.ListWorkersResponse
+	(*InfoRequest)(nil),                    // 18: moby.buildkit.v1.InfoRequest
+	(*InfoResponse)(nil),                   // 19: moby.buildkit.v1.InfoResponse
+	(*ShutdownIfIdleRequest)(nil),          // 20: moby.buildkit.v1.ShutdownIfIdleRequest
+	(*ShutdownIfIdleResponse)(nil),         // 21: moby.buildkit.v1.ShutdownIfIdleResponse
+	(*ReserveRequest)(nil),                 // 22: moby.buildkit.v1.ReserveRequest
+	(*ReserveResponse)(nil),                // 23: moby.buildkit.v1.ReserveResponse
+	(*SessionHistoryRequest)(nil),          // 24: moby.buildkit.v1.SessionHistoryRequest
+	(*SessionHistoryResponse)(nil),         // 25: moby.buildkit.v1.SessionHistoryResponse
+	(*BuildHistoryRequest)(nil),            // 26: moby.buildkit.v1.BuildHistoryRequest
+	(*BuildHistoryEvent)(nil),              // 27: moby.buildkit.v1.BuildHistoryEvent
+	(*BuildHistoryRecord)(nil),             // 28: moby.buildkit.v1.BuildHistoryRecord
+	(*UpdateBuildHistoryRequest)(nil),      // 29: moby.buildkit.v1.UpdateBuildHistoryRequest
+	(*UpdateBuildHistoryResponse)(nil),     // 30: moby.buildkit.v1.UpdateBuildHistoryResponse
+	(*Descriptor)(nil),                     // 31: moby.buildkit.v1.Descriptor
+	(*BuildResultInfo)(nil),                // 32: moby.buildkit.v1.BuildResultInfo
+	(*Exporter)(nil),                       // 33: moby.buildkit.v1.Exporter
+	nil,                                    // 34: moby.buildkit.v1.SolveRequest.ExporterAttrsDeprecatedEntry
+	nil,                                    // 35: moby.buildkit.v1.SolveRequest.FrontendAttrsEntry
+	nil,                                    // 36: moby.buildkit.v1.SolveRequest.FrontendInputsEntry
+	nil,                                    // 37: moby.buildkit.v1.CacheOptions.ExportAttrsDeprecatedEntry
+	nil,                                    // 38: moby.buildkit.v1.CacheOptionsEntry.AttrsEntry
+	nil,                                    // 39: moby.buildkit.v1.SolveResponse.ExporterResponseEntry
+	(*SessionHistoryResponse_History)(nil), // 40: moby.buildkit.v1.SessionHistoryResponse.History
+	nil,                                    // 41: moby.buildkit.v1.BuildHistoryRecord.FrontendAttrsEntry
+	nil,                                    // 42: moby.buildkit.v1.BuildHistoryRecord.ExporterResponseEntry
+	nil,                                    // 43: moby.buildkit.v1.BuildHistoryRecord.ResultsEntry
+	nil,                                    // 44: moby.buildkit.v1.Descriptor.AnnotationsEntry
+	nil,                                    // 45: moby.buildkit.v1.BuildResultInfo.ResultsEntry
+	nil,                                    // 46: moby.buildkit.v1.Exporter.AttrsEntry
+	(*timestamp.Timestamp)(nil),            // 47: google.protobuf.Timestamp
+	(*pb.Definition)(nil),                  // 48: pb.Definition
+	(*pb1.Policy)(nil),                     // 49: moby.buildkit.v1.sourcepolicy.Policy
+	(*pb.ProgressGroup)(nil),               // 50: pb.ProgressGroup
+	(*pb.SourceInfo)(nil),                  // 51: pb.SourceInfo
+	(*pb.Range)(nil),                       // 52: pb.Range
+	(*types.WorkerRecord)(nil),             // 53: moby.buildkit.v1.types.WorkerRecord
+	(*types.BuildkitVersion)(nil),          // 54: moby.buildkit.v1.types.BuildkitVersion
+	(*status.Status)(nil),                  // 55: google.rpc.Status
 }
 var file_github_com_moby_buildkit_api_services_control_control_proto_depIdxs = []int32{
 	4,  // 0: moby.buildkit.v1.DiskUsageResponse.record:type_name -> moby.buildkit.v1.UsageRecord
-	40, // 1: moby.buildkit.v1.UsageRecord.CreatedAt:type_name -> google.protobuf.Timestamp
-	40, // 2: moby.buildkit.v1.UsageRecord.LastUsedAt:type_name -> google.protobuf.Timestamp
-	41, // 3: moby.buildkit.v1.SolveRequest.Definition:type_name -> pb.Definition
-	28, // 4: moby.buildkit.v1.SolveRequest.ExporterAttrsDeprecated:type_name -> moby.buildkit.v1.SolveRequest.ExporterAttrsDeprecatedEntry
-	29, // 5: moby.buildkit.v1.SolveRequest.FrontendAttrs:type_name -> moby.buildkit.v1.SolveRequest.FrontendAttrsEntry
+	47, // 1: moby.buildkit.v1.UsageRecord.CreatedAt:type_name -> google.protobuf.Timestamp
+	47, // 2: moby.buildkit.v1.UsageRecord.LastUsedAt:type_name -> google.protobuf.Timestamp
+	48, // 3: moby.buildkit.v1.SolveRequest.Definition:type_name -> pb.Definition
+	34, // 4: moby.buildkit.v1.SolveRequest.ExporterAttrsDeprecated:type_name -> moby.buildkit.v1.SolveRequest.ExporterAttrsDeprecatedEntry
+	35, // 5: moby.buildkit.v1.SolveRequest.FrontendAttrs:type_name -> moby.buildkit.v1.SolveRequest.FrontendAttrsEntry
 	6,  // 6: moby.buildkit.v1.SolveRequest.Cache:type_name -> moby.buildkit.v1.CacheOptions
-	30, // 7: moby.buildkit.v1.SolveRequest.FrontendInputs:type_name -> moby.buildkit.v1.SolveRequest.FrontendInputsEntry
-	42, // 8: moby.buildkit.v1.SolveRequest.SourcePolicy:type_name -> moby.buildkit.v1.sourcepolicy.Policy
-	27, // 9: moby.buildkit.v1.SolveRequest.Exporters:type_name -> moby.buildkit.v1.Exporter
-	31, // 10: moby.buildkit.v1.CacheOptions.ExportAttrsDeprecated:type_name -> moby.buildkit.v1.CacheOptions.ExportAttrsDeprecatedEntry
+	36, // 7: moby.buildkit.v1.SolveRequest.FrontendInputs:type_name -> moby.buildkit.v1.SolveRequest.FrontendInputsEntry
+	49, // 8: moby.buildkit.v1.SolveRequest.SourcePolicy:type_name -> moby.buildkit.v1.sourcepolicy.Policy
+	33, // 9: moby.buildkit.v1.SolveRequest.Exporters:type_name -> moby.buildkit.v1.Exporter
+	37, // 10: moby.buildkit.v1.CacheOptions.ExportAttrsDeprecated:type_name -> moby.buildkit.v1.CacheOptions.ExportAttrsDeprecatedEntry
 	7,  // 11: moby.buildkit.v1.CacheOptions.Exports:type_name -> moby.buildkit.v1.CacheOptionsEntry
 	7,  // 12: moby.buildkit.v1.CacheOptions.Imports:type_name -> moby.buildkit.v1.CacheOptionsEntry
-	32, // 13: moby.buildkit.v1.CacheOptionsEntry.Attrs:type_name -> moby.buildkit.v1.CacheOptionsEntry.AttrsEntry
-	33, // 14: moby.buildkit.v1.SolveResponse.ExporterResponse:type_name -> moby.buildkit.v1.SolveResponse.ExporterResponseEntry
+	38, // 13: moby.buildkit.v1.CacheOptionsEntry.Attrs:type_name -> moby.buildkit.v1.CacheOptionsEntry.AttrsEntry
+	39, // 14: moby.buildkit.v1.SolveResponse.ExporterResponse:type_name -> moby.buildkit.v1.SolveResponse.ExporterResponseEntry
 	11, // 15: moby.buildkit.v1.StatusResponse.vertexes:type_name -> moby.buildkit.v1.Vertex
 	12, // 16: moby.buildkit.v1.StatusResponse.statuses:type_name -> moby.buildkit.v1.VertexStatus
 	13, // 17: moby.buildkit.v1.StatusResponse.logs:type_name -> moby.buildkit.v1.VertexLog
 	14, // 18: moby.buildkit.v1.StatusResponse.warnings:type_name -> moby.buildkit.v1.VertexWarning
-	40, // 19: moby.buildkit.v1.Vertex.started:type_name -> google.protobuf.Timestamp
-	40, // 20: moby.buildkit.v1.Vertex.completed:type_name -> google.protobuf.Timestamp
-	43, // 21: moby.buildkit.v1.Vertex.progressGroup:type_name -> pb.ProgressGroup
-	40, // 22: moby.buildkit.v1.VertexStatus.timestamp:type_name -> google.protobuf.Timestamp
-	40, // 23: moby.buildkit.v1.VertexStatus.started:type_name -> google.protobuf.Timestamp
-	40, // 24: moby.buildkit.v1.VertexStatus.completed:type_name -> google.protobuf.Timestamp
-	40, // 25: moby.buildkit.v1.VertexLog.timestamp:type_name -> google.protobuf.Timestamp
-	44, // 26: moby.buildkit.v1.VertexWarning.info:type_name -> pb.SourceInfo
-	45, // 27: moby.buildkit.v1.VertexWarning.ranges:type_name -> pb.Range
-	46, // 28: moby.buildkit.v1.ListWorkersResponse.record:type_name -> moby.buildkit.v1.types.WorkerRecord
-	47, // 29: moby.buildkit.v1.InfoResponse.buildkitVersion:type_name -> moby.buildkit.v1.types.BuildkitVersion
-	0,  // 30: moby.buildkit.v1.BuildHistoryEvent.type:type_name -> moby.buildkit.v1.BuildHistoryEventType
-	22, // 31: moby.buildkit.v1.BuildHistoryEvent.record:type_name -> moby.buildkit.v1.BuildHistoryRecord
-	34, // 32: moby.buildkit.v1.BuildHistoryRecord.FrontendAttrs:type_name -> moby.buildkit.v1.BuildHistoryRecord.FrontendAttrsEntry
-	27, // 33: moby.buildkit.v1.BuildHistoryRecord.Exporters:type_name -> moby.buildkit.v1.Exporter
-	48, // 34: moby.buildkit.v1.BuildHistoryRecord.error:type_name -> google.rpc.Status
-	40, // 35: moby.buildkit.v1.BuildHistoryRecord.CreatedAt:type_name -> google.protobuf.Timestamp
-	40, // 36: moby.buildkit.v1.BuildHistoryRecord.CompletedAt:type_name -> google.protobuf.Timestamp
-	25, // 37: moby.buildkit.v1.BuildHistoryRecord.logs:type_name -> moby.buildkit.v1.Descriptor
-	35, // 38: moby.buildkit.v1.BuildHistoryRecord.ExporterResponse:type_name -> moby.buildkit.v1.BuildHistoryRecord.ExporterResponseEntry
-	26, // 39: moby.buildkit.v1.BuildHistoryRecord.Result:type_name -> moby.buildkit.v1.BuildResultInfo
-	36, // 40: moby.buildkit.v1.BuildHistoryRecord.Results:type_name -> moby.buildkit.v1.BuildHistoryRecord.ResultsEntry
-	25, // 41: moby.buildkit.v1.BuildHistoryRecord.trace:type_name -> moby.buildkit.v1.Descriptor
-	25, // 42: moby.buildkit.v1.BuildHistoryRecord.externalError:type_name -> moby.buildkit.v1.Descriptor
-	37, // 43: moby.buildkit.v1.Descriptor.annotations:type_name -> moby.buildkit.v1.Descriptor.AnnotationsEntry
-	25, // 44: moby.buildkit.v1.BuildResultInfo.ResultDeprecated:type_name -> moby.buildkit.v1.Descriptor
-	25, // 45: moby.buildkit.v1.BuildResultInfo.Attestations:type_name -> moby.buildkit.v1.Descriptor
-	38, // 46: moby.buildkit.v1.BuildResultInfo.Results:type_name -> moby.buildkit.v1.BuildResultInfo.ResultsEntry
-	39, // 47: moby.buildkit.v1.Exporter.Attrs:type_name -> moby.buildkit.v1.Exporter.AttrsEntry
-	41, // 48: moby.buildkit.v1.SolveRequest.FrontendInputsEntry.value:type_name -> pb.Definition
-	26, // 49: moby.buildkit.v1.BuildHistoryRecord.ResultsEntry.value:type_name -> moby.buildkit.v1.BuildResultInfo
-	25, // 50: moby.buildkit.v1.BuildResultInfo.ResultsEntry.value:type_name -> moby.buildkit.v1.Descriptor
-	2,  // 51: moby.buildkit.v1.Control.DiskUsage:input_type -> moby.buildkit.v1.DiskUsageRequest
-	1,  // 52: moby.buildkit.v1.Control.Prune:input_type -> moby.buildkit.v1.PruneRequest
-	5,  // 53: moby.buildkit.v1.Control.Solve:input_type -> moby.buildkit.v1.SolveRequest
-	9,  // 54: moby.buildkit.v1.Control.Status:input_type -> moby.buildkit.v1.StatusRequest
-	15, // 55: moby.buildkit.v1.Control.Session:input_type -> moby.buildkit.v1.BytesMessage
-	16, // 56: moby.buildkit.v1.Control.ListWorkers:input_type -> moby.buildkit.v1.ListWorkersRequest
-	18, // 57: moby.buildkit.v1.Control.Info:input_type -> moby.buildkit.v1.InfoRequest
-	20, // 58: moby.buildkit.v1.Control.ListenBuildHistory:input_type -> moby.buildkit.v1.BuildHistoryRequest
-	23, // 59: moby.buildkit.v1.Control.UpdateBuildHistory:input_type -> moby.buildkit.v1.UpdateBuildHistoryRequest
-	3,  // 60: moby.buildkit.v1.Control.DiskUsage:output_type -> moby.buildkit.v1.DiskUsageResponse
-	4,  // 61: moby.buildkit.v1.Control.Prune:output_type -> moby.buildkit.v1.UsageRecord
-	8,  // 62: moby.buildkit.v1.Control.Solve:output_type -> moby.buildkit.v1.SolveResponse
-	10, // 63: moby.buildkit.v1.Control.Status:output_type -> moby.buildkit.v1.StatusResponse
-	15, // 64: moby.buildkit.v1.Control.Session:output_type -> moby.buildkit.v1.BytesMessage
-	17, // 65: moby.buildkit.v1.Control.ListWorkers:output_type -> moby.buildkit.v1.ListWorkersResponse
-	19, // 66: moby.buildkit.v1.Control.Info:output_type -> moby.buildkit.v1.InfoResponse
-	21, // 67: moby.buildkit.v1.Control.ListenBuildHistory:output_type -> moby.buildkit.v1.BuildHistoryEvent
-	24, // 68: moby.buildkit.v1.Control.UpdateBuildHistory:output_type -> moby.buildkit.v1.UpdateBuildHistoryResponse
-	60, // [60:69] is the sub-list for method output_type
-	51, // [51:60] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	47, // 19: moby.buildkit.v1.Vertex.started:type_name -> google.protobuf.Timestamp
+	47, // 20: moby.buildkit.v1.Vertex.completed:type_name -> google.protobuf.Timestamp
+	50, // 21: moby.buildkit.v1.Vertex.progressGroup:type_name -> pb.ProgressGroup
+	47, // 22: moby.buildkit.v1.VertexStatus.timestamp:type_name -> google.protobuf.Timestamp
+	47, // 23: moby.buildkit.v1.VertexStatus.started:type_name -> google.protobuf.Timestamp
+	47, // 24: moby.buildkit.v1.VertexStatus.completed:type_name -> google.protobuf.Timestamp
+	47, // 25: moby.buildkit.v1.VertexLog.timestamp:type_name -> google.protobuf.Timestamp
+	51, // 26: moby.buildkit.v1.VertexWarning.info:type_name -> pb.SourceInfo
+	52, // 27: moby.buildkit.v1.VertexWarning.ranges:type_name -> pb.Range
+	53, // 28: moby.buildkit.v1.ListWorkersResponse.record:type_name -> moby.buildkit.v1.types.WorkerRecord
+	54, // 29: moby.buildkit.v1.InfoResponse.buildkitVersion:type_name -> moby.buildkit.v1.types.BuildkitVersion
+	40, // 30: moby.buildkit.v1.SessionHistoryResponse.history:type_name -> moby.buildkit.v1.SessionHistoryResponse.History
+	0,  // 31: moby.buildkit.v1.BuildHistoryEvent.type:type_name -> moby.buildkit.v1.BuildHistoryEventType
+	28, // 32: moby.buildkit.v1.BuildHistoryEvent.record:type_name -> moby.buildkit.v1.BuildHistoryRecord
+	41, // 33: moby.buildkit.v1.BuildHistoryRecord.FrontendAttrs:type_name -> moby.buildkit.v1.BuildHistoryRecord.FrontendAttrsEntry
+	33, // 34: moby.buildkit.v1.BuildHistoryRecord.Exporters:type_name -> moby.buildkit.v1.Exporter
+	55, // 35: moby.buildkit.v1.BuildHistoryRecord.error:type_name -> google.rpc.Status
+	47, // 36: moby.buildkit.v1.BuildHistoryRecord.CreatedAt:type_name -> google.protobuf.Timestamp
+	47, // 37: moby.buildkit.v1.BuildHistoryRecord.CompletedAt:type_name -> google.protobuf.Timestamp
+	31, // 38: moby.buildkit.v1.BuildHistoryRecord.logs:type_name -> moby.buildkit.v1.Descriptor
+	42, // 39: moby.buildkit.v1.BuildHistoryRecord.ExporterResponse:type_name -> moby.buildkit.v1.BuildHistoryRecord.ExporterResponseEntry
+	32, // 40: moby.buildkit.v1.BuildHistoryRecord.Result:type_name -> moby.buildkit.v1.BuildResultInfo
+	43, // 41: moby.buildkit.v1.BuildHistoryRecord.Results:type_name -> moby.buildkit.v1.BuildHistoryRecord.ResultsEntry
+	31, // 42: moby.buildkit.v1.BuildHistoryRecord.trace:type_name -> moby.buildkit.v1.Descriptor
+	31, // 43: moby.buildkit.v1.BuildHistoryRecord.externalError:type_name -> moby.buildkit.v1.Descriptor
+	44, // 44: moby.buildkit.v1.Descriptor.annotations:type_name -> moby.buildkit.v1.Descriptor.AnnotationsEntry
+	31, // 45: moby.buildkit.v1.BuildResultInfo.ResultDeprecated:type_name -> moby.buildkit.v1.Descriptor
+	31, // 46: moby.buildkit.v1.BuildResultInfo.Attestations:type_name -> moby.buildkit.v1.Descriptor
+	45, // 47: moby.buildkit.v1.BuildResultInfo.Results:type_name -> moby.buildkit.v1.BuildResultInfo.ResultsEntry
+	46, // 48: moby.buildkit.v1.Exporter.Attrs:type_name -> moby.buildkit.v1.Exporter.AttrsEntry
+	48, // 49: moby.buildkit.v1.SolveRequest.FrontendInputsEntry.value:type_name -> pb.Definition
+	47, // 50: moby.buildkit.v1.SessionHistoryResponse.History.start:type_name -> google.protobuf.Timestamp
+	47, // 51: moby.buildkit.v1.SessionHistoryResponse.History.end:type_name -> google.protobuf.Timestamp
+	32, // 52: moby.buildkit.v1.BuildHistoryRecord.ResultsEntry.value:type_name -> moby.buildkit.v1.BuildResultInfo
+	31, // 53: moby.buildkit.v1.BuildResultInfo.ResultsEntry.value:type_name -> moby.buildkit.v1.Descriptor
+	2,  // 54: moby.buildkit.v1.Control.DiskUsage:input_type -> moby.buildkit.v1.DiskUsageRequest
+	1,  // 55: moby.buildkit.v1.Control.Prune:input_type -> moby.buildkit.v1.PruneRequest
+	5,  // 56: moby.buildkit.v1.Control.Solve:input_type -> moby.buildkit.v1.SolveRequest
+	9,  // 57: moby.buildkit.v1.Control.Status:input_type -> moby.buildkit.v1.StatusRequest
+	15, // 58: moby.buildkit.v1.Control.Session:input_type -> moby.buildkit.v1.BytesMessage
+	16, // 59: moby.buildkit.v1.Control.ListWorkers:input_type -> moby.buildkit.v1.ListWorkersRequest
+	18, // 60: moby.buildkit.v1.Control.Info:input_type -> moby.buildkit.v1.InfoRequest
+	20, // 61: moby.buildkit.v1.Control.ShutdownIfIdle:input_type -> moby.buildkit.v1.ShutdownIfIdleRequest
+	22, // 62: moby.buildkit.v1.Control.Reserve:input_type -> moby.buildkit.v1.ReserveRequest
+	24, // 63: moby.buildkit.v1.Control.SessionHistory:input_type -> moby.buildkit.v1.SessionHistoryRequest
+	26, // 64: moby.buildkit.v1.Control.ListenBuildHistory:input_type -> moby.buildkit.v1.BuildHistoryRequest
+	29, // 65: moby.buildkit.v1.Control.UpdateBuildHistory:input_type -> moby.buildkit.v1.UpdateBuildHistoryRequest
+	3,  // 66: moby.buildkit.v1.Control.DiskUsage:output_type -> moby.buildkit.v1.DiskUsageResponse
+	4,  // 67: moby.buildkit.v1.Control.Prune:output_type -> moby.buildkit.v1.UsageRecord
+	8,  // 68: moby.buildkit.v1.Control.Solve:output_type -> moby.buildkit.v1.SolveResponse
+	10, // 69: moby.buildkit.v1.Control.Status:output_type -> moby.buildkit.v1.StatusResponse
+	15, // 70: moby.buildkit.v1.Control.Session:output_type -> moby.buildkit.v1.BytesMessage
+	17, // 71: moby.buildkit.v1.Control.ListWorkers:output_type -> moby.buildkit.v1.ListWorkersResponse
+	19, // 72: moby.buildkit.v1.Control.Info:output_type -> moby.buildkit.v1.InfoResponse
+	21, // 73: moby.buildkit.v1.Control.ShutdownIfIdle:output_type -> moby.buildkit.v1.ShutdownIfIdleResponse
+	23, // 74: moby.buildkit.v1.Control.Reserve:output_type -> moby.buildkit.v1.ReserveResponse
+	25, // 75: moby.buildkit.v1.Control.SessionHistory:output_type -> moby.buildkit.v1.SessionHistoryResponse
+	27, // 76: moby.buildkit.v1.Control.ListenBuildHistory:output_type -> moby.buildkit.v1.BuildHistoryEvent
+	30, // 77: moby.buildkit.v1.Control.UpdateBuildHistory:output_type -> moby.buildkit.v1.UpdateBuildHistoryResponse
+	66, // [66:78] is the sub-list for method output_type
+	54, // [54:66] is the sub-list for method input_type
+	54, // [54:54] is the sub-list for extension type_name
+	54, // [54:54] is the sub-list for extension extendee
+	0,  // [0:54] is the sub-list for field type_name
 }
 
 func init() { file_github_com_moby_buildkit_api_services_control_control_proto_init() }
@@ -2423,7 +2756,7 @@ func file_github_com_moby_buildkit_api_services_control_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_github_com_moby_buildkit_api_services_control_control_proto_rawDesc), len(file_github_com_moby_buildkit_api_services_control_control_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   39,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

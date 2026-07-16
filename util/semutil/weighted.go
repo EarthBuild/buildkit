@@ -63,7 +63,7 @@ func (s *Weighted) Acquire(ctx context.Context, n int64) error {
 		// Don't make other Acquire calls block on one that's doomed to fail.
 		s.mu.Unlock()
 		<-ctx.Done()
-		return ctx.Err()
+		return context.Cause(ctx)
 	}
 
 	ready := make(chan struct{})
@@ -73,7 +73,7 @@ func (s *Weighted) Acquire(ctx context.Context, n int64) error {
 
 	select {
 	case <-ctx.Done():
-		err := ctx.Err()
+		err := context.Cause(ctx)
 		s.mu.Lock()
 		select {
 		case <-ready:

@@ -147,17 +147,18 @@ func (lp *localhostProvider) Exec(stream localhost.Localhost_ExecServer) error {
 	}
 
 	var exitCode int
-	status := localhost.DONE
+	status := localhost.OutputMessage_DONE
 	err = cmd.Wait()
 	if err != nil {
-		if exiterr, ok := err.(*exec.ExitError); ok {
+		var exiterr *exec.ExitError
+		if errors.As(err, &exiterr) {
 			if waitStatus, ok := exiterr.Sys().(syscall.WaitStatus); ok {
 				exitCode = waitStatus.ExitStatus()
 			} else {
-				status = localhost.KILLED
+				status = localhost.OutputMessage_KILLED
 			}
 		} else {
-			status = localhost.KILLED
+			status = localhost.OutputMessage_KILLED
 		}
 	}
 
@@ -231,11 +232,11 @@ func sendFile(stream localhost.Localhost_GetServer, path string) error {
 				Data: buf[:n],
 			})
 		}
-		switch err {
-		case nil:
-		case io.EOF:
+		if err == nil {
+			// continue
+		} else if errors.Is(err, io.EOF) {
 			return nil
-		default:
+		} else {
 			return err
 		}
 	}
@@ -259,7 +260,7 @@ func sendDir(stream localhost.Localhost_GetServer, path string) error {
 	if err != nil {
 		return err
 	}
-	err = fsutil.Send(stream.Context(), stream, fs, nil, nil)
+	err = fsutil.Send(stream.Context(), stream, fs, nil)
 	if err != nil {
 		return errors.Wrap(err, "fsutil.Send failed")
 	}
@@ -326,12 +327,11 @@ func receiveFile(stream localhost.Localhost_PutServer) (err error) {
 outer:
 	for {
 		msg, err := stream.Recv()
-		switch err {
-		case nil:
-			// ignore
-		case io.EOF:
+		if err == nil {
+			// continue
+		} else if errors.Is(err, io.EOF) {
 			break outer
-		default:
+		} else {
 			return errors.WithStack(err)
 		}
 		_, err = f.Write(msg.Data)

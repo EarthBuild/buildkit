@@ -1,13 +1,13 @@
 package socketforward
 
 import (
+	"context"
 	"net"
 	"os"
 	"path/filepath"
 
 	"github.com/moby/buildkit/session"
 	"github.com/pkg/errors"
-	context "golang.org/x/net/context"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/metadata"
 )
@@ -23,7 +23,7 @@ func (s *server) run(ctx context.Context, l net.Listener, id string) error {
 
 	eg.Go(func() error {
 		<-ctx.Done()
-		return ctx.Err()
+		return context.Cause(ctx)
 	})
 
 	eg.Go(func() error {
@@ -37,15 +37,15 @@ func (s *server) run(ctx context.Context, l net.Listener, id string) error {
 
 			opts := make(map[string][]string)
 			opts[SocketIDKey] = []string{id}
-			ctx = metadata.NewOutgoingContext(ctx, opts)
+			reqCtx := metadata.NewOutgoingContext(ctx, opts)
 
-			stream, err := client.Proxy(ctx)
+			stream, err := client.Proxy(reqCtx)
 			if err != nil {
 				conn.Close()
 				return err
 			}
 
-			go Copy(ctx, conn, stream, stream.CloseSend)
+			go Copy(reqCtx, conn, stream, stream.CloseSend)
 		}
 	})
 
@@ -77,7 +77,7 @@ func MountSocket(ctx context.Context, c session.Caller, opt SocketOpt) (sockPath
 
 	sockPath = filepath.Join(dir, "sock")
 
-	l, err := net.Listen("unix", sockPath)
+	l, err := (&net.ListenConfig{}).Listen(ctx, "unix", sockPath)
 	if err != nil {
 		return "", nil, errors.WithStack(err)
 	}

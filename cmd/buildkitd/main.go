@@ -121,6 +121,11 @@ func registerWorkerInitializer(wi workerInitializer, flags ...cli.Flag) {
 }
 
 func main() {
+	// Disable gRPC ALPN enforcement to allow mixed grpc-go versions
+	// between earthly client and buildkitd during the upgrade transition.
+	// TODO: remove once all released earthly binaries use grpc-go >= 1.67
+	os.Setenv("GRPC_ENFORCE_ALPN_ENABLED", "false")
+
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Println(c.App.Name, version.Package, c.App.Version, version.Revision)
 	}
@@ -389,8 +394,8 @@ func main() {
 		reflection.Register(server)
 
 		// Earthly specific.
-		ctxReg, cancelReg := context.WithCancel(ctx)
-		defer cancelReg()
+		ctxReg, cancelReg := context.WithCancelCause(ctx)
+		defer cancelReg(nil)
 		lrPort, ok := os.LookupEnv("BUILDKIT_LOCAL_REGISTRY_LISTEN_PORT")
 		lrAddr := fmt.Sprintf("0.0.0.0:%s", lrPort)
 		if ok {
@@ -400,7 +405,7 @@ func main() {
 				for {
 					select {
 					case <-shutdownCh:
-						cancelReg()
+						cancelReg(nil)
 					case err := <-serveErr:
 						if err != nil {
 							bklog.G(ctx).Errorf("Registry serve error: %s\n", err.Error())
@@ -451,7 +456,7 @@ func main() {
 		case <-ctx.Done():
 			err = context.Cause(ctx)
 		case <-shutdownCh:
-			cancelReg()
+			cancelReg(nil)
 			err = nil
 		}
 

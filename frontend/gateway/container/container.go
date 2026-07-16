@@ -190,7 +190,7 @@ func PrepareMounts(ctx context.Context, mm *mounts.MountManager, cm cache.Manage
 		}
 
 		switch m.MountType {
-		case opspb.MountType_HOST_BIND: //earthly
+		case opspb.MountType_HOST_BIND: // earthly
 			mountable = mm.MountableHostBind(ctx, m)
 
 		case opspb.MountType_BIND:
@@ -698,7 +698,7 @@ func mkstat(fsys fs.FS, path, relpath string, fi os.FileInfo) (*fstypes.Stat, er
 	}
 
 	if !fi.IsDir() {
-		stat.Size_ = fi.Size()
+		stat.Size = fi.Size()
 		if fi.Mode()&os.ModeSymlink != 0 {
 			link, err := readlink(fsys, path)
 			if err != nil {

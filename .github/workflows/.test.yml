@@ -88,13 +88,13 @@ jobs:
               core.setOutput('tags', JSON.stringify(matrix));
             });
             await core.group(`Set includes`, async () => {
-              const includes = yaml.load(core.getInput('includes'));
+              const includes = yaml.load(core.getInput('includes') || '[]');
               core.info(JSON.stringify(includes, null, 2));
               core.setOutput('includes', JSON.stringify(includes ?? []));
             });
       -
         name: Build
-        uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7 # v7.0.0
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
         with:
           provenance: false
           targets: integration-tests-base
@@ -164,7 +164,7 @@ jobs:
           buildkitd-flags: --debug
       -
         name: Build test image
-        uses: docker/bake-action@82490499d2e5613fcead7e128237ef0b0ea210f7 # v7.0.0
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b # v7.3.0
         with:
           provenance: false
           targets: integration-tests

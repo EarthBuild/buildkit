@@ -60,8 +60,8 @@ func grpcClientConn(ctx context.Context, conn net.Conn, healthCfg ManagerHealthC
 		return ctx, nil, errors.Wrap(err, "failed to create grpc client")
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	go configurableMonitorHealth(ctx, cc, cancel, healthCfg)
+	ctx, cancel := context.WithCancelCause(ctx)
+	go configurableMonitorHealth(ctx, cc, func() { cancel(nil) }, healthCfg)
 
 	return ctx, cc, nil
 }

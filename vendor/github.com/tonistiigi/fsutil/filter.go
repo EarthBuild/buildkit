@@ -30,8 +30,7 @@ type FilterOpt struct {
 	// Map is called for each path that is included in the result.
 	// The function can modify the stat info for each element, while the result
 	// of the function controls both how Walk continues.
-	Map               MapFunc
-	VerboseProgressCB VerboseProgressCB // earthly-specific
+	Map MapFunc
 }
 
 type MapFunc func(string, *types.Stat) MapResult
@@ -62,15 +61,14 @@ type filterFS struct {
 	onlyPrefixIncludes          bool
 	onlyPrefixExcludeExceptions bool
 
-	mapFn             MapFunc
-	verboseProgressCB VerboseProgressCB // earthly-specific
+	mapFn MapFunc
 }
 
 // NewFilterFS creates a new FS that filters the given FS using the given
 // FilterOpt.
-
+//
 // The returned FS will not contain any paths that do not match the provided
-// include and exclude patterns, or that are are exlcluded using the mapping
+// include and exclude patterns, or that are are excluded using the mapping
 // function.
 //
 // The FS is assumed to be a snapshot of the filesystem at the time of the
@@ -98,7 +96,7 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 	}
 
 	patternChars := "*[]?^"
-	if os.PathSeparator != '\\' {
+	if filepath.Separator != '\\' {
 		patternChars += `\`
 	}
 
@@ -113,7 +111,7 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 	if len(includePatterns) > 0 {
 		includeMatcher, err = patternmatcher.New(includePatterns)
 		if err != nil {
-			return nil, errors.Wrapf(err, "invalid includepatterns: %s", opt.IncludePatterns)
+			return nil, errors.Wrapf(err, "invalid includepatterns: %s", includePatterns)
 		}
 
 		for _, p := range includeMatcher.Patterns() {
@@ -146,7 +144,6 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 		onlyPrefixIncludes:          onlyPrefixIncludes,
 		onlyPrefixExcludeExceptions: onlyPrefixExcludeExceptions,
 		mapFn:                       opt.Map,
-		verboseProgressCB:           opt.VerboseProgressCB, // earthly-specific
 	}, nil
 }
 
@@ -179,6 +176,7 @@ func (fs *filterFS) Walk(ctx context.Context, target string, fn gofs.WalkDirFunc
 		includeMatchInfo patternmatcher.MatchInfo
 		excludeMatchInfo patternmatcher.MatchInfo
 		calledFn         bool
+		skipFn           bool
 	}
 
 	// used only for include/exclude handling
@@ -268,9 +266,6 @@ func (fs *filterFS) Walk(ctx context.Context, target string, fn gofs.WalkDirFunc
 			}
 
 			if m {
-				if fs.verboseProgressCB != nil { // earthly-specific
-					fs.verboseProgressCB(path, StatusSkipped, 0)
-				}
 				if isDir && fs.onlyPrefixExcludeExceptions {
 					// Optimization: we can skip walking this dir if no
 					// exceptions to exclude patterns could match anything
@@ -339,6 +334,9 @@ func (fs *filterFS) Walk(ctx context.Context, target string, fn gofs.WalkDirFunc
 				}
 			}
 			for i, parentDir := range parentDirs {
+				if parentDir.skipFn {
+					return filepath.SkipDir
+				}
 				if parentDir.calledFn {
 					continue
 				}
@@ -358,15 +356,21 @@ func (fs *filterFS) Walk(ctx context.Context, target string, fn gofs.WalkDirFunc
 				}
 				if fs.mapFn != nil {
 					result := fs.mapFn(parentStat.Path, parentStat)
-					if result == MapResultSkipDir || result == MapResultExclude {
+					if result == MapResultExclude {
 						continue
+					} else if result == MapResultSkipDir {
+						parentDirs[i].skipFn = true
+						return filepath.SkipDir
 					}
 				}
 
-				if err := fn(parentStat.Path, &DirEntryInfo{Stat: parentStat}, nil); err != nil {
+				parentDirs[i].calledFn = true
+				if err := fn(parentStat.Path, &DirEntryInfo{Stat: parentStat}, nil); err == filepath.SkipDir {
+					parentDirs[i].skipFn = true
+					return filepath.SkipDir
+				} else if err != nil {
 					return err
 				}
-				parentDirs[i].calledFn = true
 			}
 			if err := fn(stat.Path, &DirEntryInfo{Stat: stat}, nil); err != nil {
 				return err

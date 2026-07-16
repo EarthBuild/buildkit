@@ -45,12 +45,12 @@ type ClientOpt interface {
 // New returns a new buildkit client. Address can be empty for the system-default address.
 func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error) {
 	gopts := []grpc.DialOption{
-		grpc.WithInitialWindowSize(65535 * 32),     //earthly
-		grpc.WithInitialConnWindowSize(65535 * 16), //earthly
+		grpc.WithInitialWindowSize(65535 * 32),     // earthly
+		grpc.WithInitialConnWindowSize(65535 * 16), // earthly
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
-		grpc.WithDefaultCallOptions(grpc_retry.WithMax(8)),                                                                     //earthly
-		grpc.WithDefaultCallOptions(grpc_retry.WithBackoff(grpc_retry.BackoffExponentialWithJitter(10*time.Millisecond, 0.1))), //earthly
+		grpc.WithDefaultCallOptions(grpc_retry.WithMax(8)),                                                                     // earthly
+		grpc.WithDefaultCallOptions(grpc_retry.WithBackoff(grpc_retry.BackoffExponentialWithJitter(10*time.Millisecond, 0.1))), // earthly
 	}
 	needDialer := true
 	useDefaultDialer := false // earthly-specific

@@ -31,7 +31,7 @@ func init() {
 }
 
 func unaryTimeoutInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if sessionTimeout > 0 {
 			// TODO we should replace the following code with context.WithTimeoutCause
 			//   when it is is released in a future version of Go
@@ -43,7 +43,7 @@ func unaryTimeoutInterceptor() grpc.UnaryServerInterceptor {
 			go handleTimeout(done, cancel)
 			// End of TODO
 			resp, err := handler(ctx, req)
-			if errors.Is(err, context.Canceled) && context.Cause(ctx) == errSessionTimeout {
+			if errors.Is(err, context.Canceled) && errors.Is(context.Cause(ctx), errSessionTimeout) {
 				return resp, errors.Errorf("build exceeded max duration of %s", sessionTimeout.String())
 			}
 			return resp, err
@@ -53,7 +53,7 @@ func unaryTimeoutInterceptor() grpc.UnaryServerInterceptor {
 }
 
 func streamTimeoutInterceptor() grpc.StreamServerInterceptor {
-	return func(srv interface{}, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return func(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		if sessionTimeout > 0 {
 			// TODO we should replace the following code with context.WithTimeoutCause
 			//   when it is is released in a future version of Go
@@ -65,7 +65,7 @@ func streamTimeoutInterceptor() grpc.StreamServerInterceptor {
 			go handleTimeout(done, cancel)
 			// End of TODO
 			err := handler(srv, newWrappedStream(ctx, stream))
-			if errors.Is(err, context.Canceled) && context.Cause(ctx) == errSessionTimeout {
+			if errors.Is(err, context.Canceled) && errors.Is(context.Cause(ctx), errSessionTimeout) {
 				return errors.Errorf("build exceeded max duration of %s", sessionTimeout.String())
 			}
 			return err
@@ -90,11 +90,11 @@ type wrappedStream struct {
 	ctx context.Context
 }
 
-func (w *wrappedStream) RecvMsg(m interface{}) error {
+func (w *wrappedStream) RecvMsg(m any) error {
 	return w.s.RecvMsg(m)
 }
 
-func (w *wrappedStream) SendMsg(m interface{}) error {
+func (w *wrappedStream) SendMsg(m any) error {
 	return w.s.SendMsg(m)
 }
 

@@ -326,6 +326,7 @@ func (m *Mount) CloneVT() *Mount {
 	r.SSHOpt = m.SSHOpt.CloneVT()
 	r.ResultID = m.ResultID
 	r.ContentCache = m.ContentCache
+	r.SockOpt = m.SockOpt.CloneVT()
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = make([]byte, len(m.unknownFields))
 		copy(r.unknownFields, m.unknownFields)
@@ -411,6 +412,26 @@ func (m *SSHOpt) CloneVT() *SSHOpt {
 }
 
 func (m *SSHOpt) CloneMessageVT() proto.Message {
+	return m.CloneVT()
+}
+
+func (m *SockOpt) CloneVT() *SockOpt {
+	if m == nil {
+		return (*SockOpt)(nil)
+	}
+	r := new(SockOpt)
+	r.ID = m.ID
+	r.Uid = m.Uid
+	r.Gid = m.Gid
+	r.Mode = m.Mode
+	if len(m.unknownFields) > 0 {
+		r.unknownFields = make([]byte, len(m.unknownFields))
+		copy(r.unknownFields, m.unknownFields)
+	}
+	return r
+}
+
+func (m *SockOpt) CloneMessageVT() proto.Message {
 	return m.CloneVT()
 }
 
@@ -1717,6 +1738,9 @@ func (this *Mount) EqualVT(that *Mount) bool {
 	if this.ContentCache != that.ContentCache {
 		return false
 	}
+	if !this.SockOpt.EqualVT(that.SockOpt) {
+		return false
+	}
 	return string(this.unknownFields) == string(that.unknownFields)
 }
 
@@ -1825,6 +1849,34 @@ func (this *SSHOpt) EqualVT(that *SSHOpt) bool {
 
 func (this *SSHOpt) EqualMessageVT(thatMsg proto.Message) bool {
 	that, ok := thatMsg.(*SSHOpt)
+	if !ok {
+		return false
+	}
+	return this.EqualVT(that)
+}
+func (this *SockOpt) EqualVT(that *SockOpt) bool {
+	if this == that {
+		return true
+	} else if this == nil || that == nil {
+		return false
+	}
+	if this.ID != that.ID {
+		return false
+	}
+	if this.Uid != that.Uid {
+		return false
+	}
+	if this.Gid != that.Gid {
+		return false
+	}
+	if this.Mode != that.Mode {
+		return false
+	}
+	return string(this.unknownFields) == string(that.unknownFields)
+}
+
+func (this *SockOpt) EqualMessageVT(thatMsg proto.Message) bool {
+	that, ok := thatMsg.(*SockOpt)
 	if !ok {
 		return false
 	}
@@ -3735,7 +3787,7 @@ func (m *Mount) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
 	}
-	if m.SockOpt != nil { // earthly: field 100, wire type 2
+	if m.SockOpt != nil {
 		size, err := m.SockOpt.MarshalToSizedBufferVT(dAtA[:i])
 		if err != nil {
 			return 0, err
@@ -4066,7 +4118,6 @@ func (m *SSHOpt) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
-// earthly-specific SockOpt vtproto methods
 func (m *SockOpt) MarshalVT() (dAtA []byte, err error) {
 	if m == nil {
 		return nil, nil
@@ -4093,6 +4144,10 @@ func (m *SockOpt) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.unknownFields != nil {
+		i -= len(m.unknownFields)
+		copy(dAtA[i:], m.unknownFields)
+	}
 	if m.Mode != 0 {
 		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.Mode))
 		i--
@@ -6437,7 +6492,7 @@ func (m *Mount) SizeVT() (n int) {
 	if m.ContentCache != 0 {
 		n += 2 + protohelpers.SizeOfVarint(uint64(m.ContentCache))
 	}
-	if m.SockOpt != nil { // earthly
+	if m.SockOpt != nil {
 		l = m.SockOpt.SizeVT()
 		n += 2 + l + protohelpers.SizeOfVarint(uint64(l))
 	}
@@ -6527,7 +6582,6 @@ func (m *SSHOpt) SizeVT() (n int) {
 	return n
 }
 
-// earthly-specific SockOpt SizeVT
 func (m *SockOpt) SizeVT() (n int) {
 	if m == nil {
 		return 0
@@ -6547,6 +6601,7 @@ func (m *SockOpt) SizeVT() (n int) {
 	if m.Mode != 0 {
 		n += 1 + protohelpers.SizeOfVarint(uint64(m.Mode))
 	}
+	n += len(m.unknownFields)
 	return n
 }
 
@@ -9545,7 +9600,7 @@ func (m *Mount) UnmarshalVT(dAtA []byte) error {
 					break
 				}
 			}
-		case 100: // earthly: SockOpt
+		case 100:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field SockOpt", wireType)
 			}
@@ -10095,7 +10150,6 @@ func (m *SSHOpt) UnmarshalVT(dAtA []byte) error {
 	}
 	return nil
 }
-// earthly-specific SockOpt UnmarshalVT
 func (m *SockOpt) UnmarshalVT(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -10226,6 +10280,7 @@ func (m *SockOpt) UnmarshalVT(dAtA []byte) error {
 			if (iNdEx + skippy) > l {
 				return io.ErrUnexpectedEOF
 			}
+			m.unknownFields = append(m.unknownFields, dAtA[iNdEx:iNdEx+skippy]...)
 			iNdEx += skippy
 		}
 	}
@@ -10235,7 +10290,6 @@ func (m *SockOpt) UnmarshalVT(dAtA []byte) error {
 	}
 	return nil
 }
-
 func (m *SourceOp) UnmarshalVT(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0

@@ -61,7 +61,7 @@ func (mmp *MultiMultiProvider) Get(ctx context.Context, imgName string) (*conten
 	return mmp.getNoLock(ctx, imgName)
 }
 
-func (mmp *MultiMultiProvider) getNoLock(ctx context.Context, imgName string) (*contentutil.MultiProvider, digest.Digest, error) {
+func (mmp *MultiMultiProvider) getNoLock(_ context.Context, imgName string) (*contentutil.MultiProvider, digest.Digest, error) {
 	imgData, ok := mmp.imgs[imgName]
 	if !ok {
 		return nil, "", errors.Wrapf(cerrdefs.ErrNotFound, "img name %v", imgName)

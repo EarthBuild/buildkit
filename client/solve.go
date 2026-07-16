@@ -65,7 +65,7 @@ type ExportEntry struct {
 	OutputDirFunc      func(map[string]string) (string, error)         // for ExporterEarthly
 	OutputPullCallback pullping.PullCallback                           // for ExporterEarthly
 	OutputStore        content.Store
-	VerboseProgressCB  fsutil.VerboseProgressCB
+	OnReceiveProgress  func(bytes int, done bool) // earthly-specific: cumulative received-bytes callback (fsutil ProgressCb)
 }
 
 type CacheOptionsEntry struct {
@@ -194,7 +194,7 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 					if ex.OutputPullCallback != nil {
 						s.Allow(pullping.NewPullPing(ex.OutputPullCallback))
 					}
-					s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.VerboseProgressCB))
+					s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.OnReceiveProgress))
 				} else {
 					syncTargets = append(syncTargets, filesync.WithFSSync(exID, ex.Output))
 				}
@@ -249,6 +249,9 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 	}
 
 	frontendAttrs := maps.Clone(opt.FrontendAttrs)
+	if frontendAttrs == nil {
+		frontendAttrs = map[string]string{}
+	}
 	maps.Copy(frontendAttrs, cacheOpt.frontendAttrs)
 
 	const statusInactivityTimeout = 5 * time.Second

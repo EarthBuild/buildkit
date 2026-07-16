@@ -338,7 +338,7 @@ func ociWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([]worker
 		})
 	}
 
-	opt, err := runc.NewWorkerOpt(common.config.Root, snFactory, cfg.Rootless, processMode, cfg.Labels, idmapping, nc, dns, cfg.Binary, cfg.ApparmorProfile, cfg.SELinux, parallelismSem, common.traceSocket, cfg.DefaultCgroupParent, cdiManager, ociHooks, cfg.SampleFrequency)
+	opt, err := runc.NewWorkerOpt(common.config.Root, snFactory, cfg.Rootless, processMode, cfg.Labels, idmapping, nc, dns, cfg.Binary, cfg.ApparmorProfile, cfg.SELinux, parallelismSem, common.traceSocket, cfg.DefaultCgroupParent, ociHooks, cfg.SampleFrequency, cdiManager)
 	if err != nil {
 		return nil, err
 	}
