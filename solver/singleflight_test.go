@@ -166,3 +166,70 @@ func TestLeaseKeyRefusesRandomOpDigest(t *testing.T) {
 	k := NewCacheKey(digest.Digest("random:"+digest.FromString("x").Encoded()), "vtx", 0)
 	require.Empty(t, LeaseKey(k).String())
 }
+
+// ---------------------------------------------------------------------------
+// Invariants that must hold for ANY graph.
+//
+// Every test above builds a specific graph by hand, which only ever proves the
+// case I thought of. These state the properties instead — the ones whose failure
+// makes single-flight either useless (keys never match) or dangerous (keys match
+// when they must not).
+
+// THE property the whole feature rests on: a key must depend on nothing but the
+// content of the graph. Same shape, same content, built twice => same key. If
+// this can fail, single-flight silently does nothing, and no e2e that lacks a
+// COPY will tell you.
+func TestLeaseKeyIsAFunctionOfContentAlone(t *testing.T) {
+	build := func() *CacheKey {
+		leaf := depKey("leaf content")
+		mid := NewCacheKey(digest.FromString("mid op"), "vtx-mid", 0)
+		mid.deps = [][]CacheKeyWithSelector{{randomDepKey("a fresh session every time"), leaf}}
+		top := NewCacheKey(digest.FromString("top op"), "vtx-top", 0)
+		top.deps = [][]CacheKeyWithSelector{{CacheKeyWithSelector{CacheKey: ExportableCacheKey{CacheKey: mid}}}}
+		return top
+	}
+	// Distinct pointer graphs, distinct sessions, identical content.
+	require.Equal(t, LeaseKey(build()), LeaseKey(build()),
+		"two machines building the same thing must agree, whatever their session ids")
+}
+
+// Divergence must be traceable. When two machines disagree, the digest is opaque
+// and the pre-hash string is the only thing that says WHICH component differed —
+// that is how the random: bug was found, and it should stay findable.
+func TestLeaseKeyDebugStringExposesTheDivergence(t *testing.T) {
+	a := NewCacheKey(digest.FromString("op"), "vtx", 0)
+	a.deps = [][]CacheKeyWithSelector{{depKey("content A")}}
+	b := NewCacheKey(digest.FromString("op"), "vtx", 0)
+	b.deps = [][]CacheKeyWithSelector{{depKey("content B")}}
+
+	require.NotEqual(t, LeaseKeyDebugString(a), LeaseKeyDebugString(b))
+	require.Contains(t, LeaseKeyDebugString(a), digest.FromString("content A").String(),
+		"the string must name the dep that differs, or divergence is undebuggable")
+}
+
+// A random: key anywhere in the chain — not just in a direct dep — must not
+// leak into the key. Poison at depth is still poison, and real graphs are deep:
+// the COPY that taints `go build` is several hops down.
+func TestLeaseKeyRefusesRandomDeepInTheChain(t *testing.T) {
+	buried := NewCacheKey(digest.FromString("mid"), "vtx", 0)
+	buried.deps = [][]CacheKeyWithSelector{{randomDepKey("session")}} // no content key
+
+	top := NewCacheKey(digest.FromString("top"), "vtx", 0)
+	top.deps = [][]CacheKeyWithSelector{{CacheKeyWithSelector{CacheKey: ExportableCacheKey{CacheKey: buried}}}}
+
+	require.Empty(t, LeaseKey(top).String(),
+		"a dep with no content identity must refuse the lease however deep it sits")
+}
+
+// Selector is part of the identity: the same dep consumed under a different
+// selector (COPY --from a different path) is different work.
+func TestLeaseKeyDistinguishesSelector(t *testing.T) {
+	mk := func(sel string) *CacheKey {
+		k := NewCacheKey(digest.FromString("op"), "vtx", 0)
+		d := depKey("same content")
+		d.Selector = digest.FromString(sel)
+		k.deps = [][]CacheKeyWithSelector{{d}}
+		return k
+	}
+	require.NotEqual(t, LeaseKey(mk("/src")), LeaseKey(mk("/other")))
+}

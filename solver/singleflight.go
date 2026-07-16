@@ -99,6 +99,17 @@ type Coordinator interface {
 // same deps in a different order still agree. Memoized: a diamond-shaped DAG
 // would otherwise be walked exponentially.
 func LeaseKey(k *CacheKey) digest.Digest {
+	s, ok := leaseKeyString(k)
+	if !ok {
+		return ""
+	}
+	return digest.FromString(s)
+}
+
+// leaseKeyString is LeaseKey's pre-hash input. Split out because when two
+// machines disagree, the DIGEST tells you nothing — this string tells you which
+// component diverged.
+func leaseKeyString(k *CacheKey) (string, bool) {
 	memo := map[*CacheKey]string{}
 	noIdentity := false
 	var walk func(k *CacheKey) string
@@ -140,9 +151,16 @@ func LeaseKey(k *CacheKey) digest.Digest {
 	}
 	out := walk(k)
 	if noIdentity {
-		return ""
+		return "", false
 	}
-	return digest.FromString(out)
+	return out, true
+}
+
+// LeaseKeyDebugString exposes the pre-hash input for diagnosing why two machines
+// computed different keys for work that ought to be identical.
+func LeaseKeyDebugString(k *CacheKey) string {
+	s, _ := leaseKeyString(k)
+	return s
 }
 
 // isRandomDigest reports buildkit's "never match this by identity" marker,
