@@ -128,19 +128,40 @@ func leaseKeyString(k *CacheKey) (string, bool) {
 		var b strings.Builder
 		fmt.Fprintf(&b, "k:%s@%d", k.Digest(), k.Output())
 		for i, deps := range k.Deps() {
-			parts := make([]string, 0, len(deps))
+			// commitOptions puts up to two KINDS of key in one dep slot:
+			//   fast — the dep's own cache keys, output >= 0. What buildkit
+			//          matches on. Content-addressed for an image; "random:" for a
+			//          local source, where it is per-run noise.
+			//   slow — the contenthash of the dep's RESULT, output -1, no selector.
+			//          Only present when ContentBasedHash is set.
+			var fast, slow []CacheKeyWithSelector
 			for _, d := range deps {
-				// A random: key is per-run noise. Its slot's content key (the slow
-				// cache) is what actually identifies this dep across machines.
-				if isRandomDigest(d.CacheKey.CacheKey.Digest()) {
-					continue
+				switch {
+				case d.CacheKey.CacheKey.Output() == slowCacheOutput:
+					slow = append(slow, d)
+				case isRandomDigest(d.CacheKey.CacheKey.Digest()):
+					// per-run noise; the slow key is this dep's only identity
+				default:
+					fast = append(fast, d)
 				}
-				parts = append(parts, d.Selector.String()+"="+walk(d.CacheKey.CacheKey))
 			}
-			// Every key for this dep was noise: nothing identifies it. Refuse.
-			if len(deps) > 0 && len(parts) == 0 {
+			// The slow key is a FALLBACK, not an extra ingredient. If the fast key
+			// identifies the dep, buildkit caches on it ALONE — `RUN apt-get update`
+			// on a fixed base is a cache hit on a second run even though apt fetched
+			// different bytes, because the key is f(base, command) and never hashes
+			// the output. Mixing the contenthash in as well would poison a key that
+			// already agrees across machines, over bytes buildkit itself ignores.
+			use := fast
+			if len(use) == 0 {
+				use = slow
+			}
+			if len(deps) > 0 && len(use) == 0 {
 				noIdentity = true
 				return ""
+			}
+			parts := make([]string, 0, len(use))
+			for _, d := range use {
+				parts = append(parts, d.Selector.String()+"="+walk(d.CacheKey.CacheKey))
 			}
 			sort.Strings(parts)
 			fmt.Fprintf(&b, "|d%d:%s", i, strings.Join(parts, ","))
@@ -162,6 +183,11 @@ func LeaseKeyDebugString(k *CacheKey) string {
 	s, _ := leaseKeyString(k)
 	return s
 }
+
+// slowCacheOutput is the output index commitOptions gives the content-based
+// (slow) cache key: `NewCacheKey(dgst, "", -1)` in edge.go. Real outputs are
+// >= 0, so this identifies the slow key without guessing from the selector.
+const slowCacheOutput = -1
 
 // isRandomDigest reports buildkit's "never match this by identity" marker,
 // stamped on any source whose cache key is session-scoped — i.e. every local

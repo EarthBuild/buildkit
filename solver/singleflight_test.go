@@ -233,3 +233,62 @@ func TestLeaseKeyDistinguishesSelector(t *testing.T) {
 	}
 	require.NotEqual(t, LeaseKey(mk("/src")), LeaseKey(mk("/other")))
 }
+
+// ---------------------------------------------------------------------------
+// The slow (content) key is a FALLBACK, not an extra ingredient.
+//
+// `RUN apt-get update` on a fixed base image is cached by buildkit on
+// f(base image digest, command) -- it never hashes the OUTPUT, which is why the
+// second run on one machine is a cache hit even though apt fetched different
+// bytes. Two machines agree for exactly the same reason, so the layer is
+// perfectly shippable.
+//
+// But commitOptions ALSO attaches a content hash of the input rootfs
+// (ContentBasedHash), and if the lease key mixes that in, a vertex whose fast
+// key already agrees is poisoned by bytes buildkit itself does not care about.
+// Measured on +examples-1: three vertices differed by exactly ONE token, the
+// @-1 (slow) one -- their fast keys already matched.
+//
+// So: use the fast key when it identifies the dep, and fall back to the content
+// key only when the fast key is random: (a local source), where it is the only
+// identity there is.
+
+// slowKey is what commitOptions appends: no selector, output index -1.
+func slowKey(tag string) CacheKeyWithSelector {
+	return CacheKeyWithSelector{CacheKey: ExportableCacheKey{
+		CacheKey: NewCacheKey(digest.FromString(tag), "", -1)}}
+}
+
+// THE bug this test exists for. Same base image, same command; each machine ran
+// its own apt-get update so the rootfs content hashes differ. The fast key
+// agrees, so the lease key must agree.
+func TestLeaseKeyIgnoresContentHashWhenFastKeyIdentifiesTheDep(t *testing.T) {
+	op := digest.FromString("exec: apt-get update && apt-get install -y cmake")
+	mk := func(rootfsContent string) *CacheKey {
+		k := NewCacheKey(op, "vtx", 0)
+		// fast key = the ubuntu image: identical on both machines.
+		// slow key = contenthash of the rootfs: differs, and buildkit does not
+		// care -- it caches this vertex on the fast key alone.
+		k.deps = [][]CacheKeyWithSelector{{depKey("ubuntu:24.04 image"), slowKey(rootfsContent)}}
+		return k
+	}
+	require.Equal(t,
+		LeaseKey(mk("apt lists fetched at 10:00")),
+		LeaseKey(mk("apt lists fetched at 10:05")),
+		"the fast key identifies this dep; a content hash buildkit ignores must not poison the lease")
+}
+
+// The fallback still works: no usable fast key (a local source, stamped
+// random:) means the content key is the ONLY identity, and must be used.
+func TestLeaseKeyFallsBackToContentKeyForLocalSources(t *testing.T) {
+	op := digest.FromString("exec: go build")
+	mk := func(session, content string) *CacheKey {
+		k := NewCacheKey(op, "vtx", 0)
+		k.deps = [][]CacheKeyWithSelector{{randomDepKey(session), slowKey(content)}}
+		return k
+	}
+	// same content, different sessions => must agree
+	require.Equal(t, LeaseKey(mk("s-A", "src v1")), LeaseKey(mk("s-B", "src v1")))
+	// different content => must differ, or a follower adopts the wrong layer
+	require.NotEqual(t, LeaseKey(mk("s-A", "src v1")), LeaseKey(mk("s-A", "src v2")))
+}
