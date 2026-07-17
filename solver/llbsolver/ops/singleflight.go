@@ -361,12 +361,23 @@ func (e *ExecOp) publishable(ctx context.Context, jobCtx solver.JobContext, resu
 	return pub
 }
 
-// refCfg mirrors worker/cacheresult.go: the default compression, which is what
-// the registry cache exporter uses — so the layers a leader publishes are the
-// same blobs its --cache-to would have pushed anyway, and both sides of the
-// fleet agree on their digests.
+// refCfg: zstd, not the gzip default.
+//
+// Compression is the leader's single biggest publication cost and it runs on the
+// critical path — publish sits in Exec's defer, so the leader's OWN solve waits
+// for it (optimizations.md #2). Measured on examples/bazel+build with gzip:
+// 19.1s and 30.8s per layer, vs <1ms for everything else. zstd compresses
+// several times faster at similar ratio, and buildkit supports it natively on
+// both sides — the follower adopts by descriptor mediaType, so leader and
+// follower stay in agreement through the published chain regardless of codec.
+//
+// The trade, made knowingly: the gzip default matched what `--cache-to
+// type=registry` exports, so a layer published here and one exported there had
+// the SAME digest and deduped in the CAS. zstd forfeits that cross-path dedup.
+// That is a storage nicety, not correctness — nothing consumes both paths for
+// one blob — and 30s of leader stall bought it back many times over.
 func (e *ExecOp) refCfg() cacheconfig.RefConfig {
-	return cacheconfig.RefConfig{Compression: compression.New(compression.Default)}
+	return cacheconfig.RefConfig{Compression: compression.New(compression.Zstd)}
 }
 
 // remoteFor turns a leader's descriptor chain into a solver.Remote the local
