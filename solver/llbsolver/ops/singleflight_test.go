@@ -10,6 +10,8 @@ import (
 
 	"github.com/containerd/containerd/v2/core/content"
 
+	"github.com/moby/buildkit/solver/pb"
+
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/require"
@@ -236,3 +238,26 @@ func (r fakeReaderAt) ReadAt(p []byte, off int64) (int, error) {
 }
 func (r fakeReaderAt) Close() error { return nil }
 func (r fakeReaderAt) Size() int64  { return int64(len(r.b)) }
+
+// A vertex with a CACHE mount must never lease. Its published layer is not the
+// whole result: bazel (CACHE /root/.cache/bazel) keeps its real output tree in
+// the MOUNT and leaves only a symlink into it in the layer. A follower adopting
+// that layer gets a dangling symlink — measured on examples/bazel+build, where
+// instance 2's `readlink -f ./bazel-out` returned nothing and the build failed.
+// The lease KEY agrees (the mount is excluded from identity, correctly); it is
+// the ADOPTION that is unsound. Until cache mounts are fleet-shared (plan P3),
+// the only correct move is to build locally: fail open, never fail wrong.
+func TestCacheMountedExecsNeverLease(t *testing.T) {
+	withCache := &ExecOp{op: &pb.ExecOp{Mounts: []*pb.Mount{
+		{Dest: "/", MountType: pb.MountType_BIND},
+		{Dest: "/root/.cache/bazel", MountType: pb.MountType_CACHE,
+			CacheOpt: &pb.CacheOpt{ID: "bazel"}},
+	}}}
+	require.True(t, withCache.hasCacheMount(),
+		"a cache-mounted exec must be detected, or its adoption hands a follower a dangling result")
+
+	plain := &ExecOp{op: &pb.ExecOp{Mounts: []*pb.Mount{
+		{Dest: "/", MountType: pb.MountType_BIND},
+	}}}
+	require.False(t, plain.hasCacheMount(), "a plain exec must still lease")
+}

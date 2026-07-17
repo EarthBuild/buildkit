@@ -103,6 +103,22 @@ func (e *ExecOp) Digest() digest.Digest {
 	return e.digest
 }
 
+// hasCacheMount reports whether this exec uses a cache mount. Such a vertex
+// must never single-flight: its published layer is NOT the whole result — the
+// mount is machine-local mutable state the layer can reference (bazel leaves
+// only a symlink into its cache mount), so a follower adopting the layer gets a
+// dangling result. The lease key correctly excludes the mount from identity;
+// it is the adoption that is unsound. Build locally until mounts are
+// fleet-shared (buildkit-plan P3).
+func (e *ExecOp) hasCacheMount() bool {
+	for _, m := range e.op.Mounts {
+		if m.MountType == pb.MountType_CACHE {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *ExecOp) Proto() *pb.ExecOp {
 	return e.op
 }
@@ -400,7 +416,7 @@ func (e *ExecOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []so
 	// This blocks a follower for as long as the leader takes. That is safe here:
 	// execOp runs as f.NewFuncRequest, i.e. in a goroutine and NOT under the
 	// scheduler mutex, so a waiting op cannot stall the scheduler.
-	if c := e.sf; c != nil {
+	if c := e.sf; c != nil && !e.hasCacheMount() {
 		if key := solver.SingleFlightKey(ctx); key != "" {
 			pub, myLease, follower := c.claim(ctx, key.Encoded())
 			if follower {
