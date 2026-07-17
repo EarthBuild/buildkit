@@ -404,7 +404,9 @@ func (e *ExecOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []so
 		if key := solver.SingleFlightKey(ctx); key != "" {
 			pub, myLease, follower := c.claim(ctx, key.Encoded())
 			if follower {
+				t0 := time.Now()
 				if res, ferr := e.adoptLeaderResult(ctx, pub); ferr == nil {
+					bklog.G(ctx).Debugf("SFTIME\tadopt\t%s\t%s", time.Since(t0), key.Encoded())
 					return res, nil
 				}
 				// We could not materialize what the leader built (it published a
@@ -420,7 +422,12 @@ func (e *ExecOp) Exec(ctx context.Context, jobCtx solver.JobContext, inputs []so
 						c.give_up(ctx, myLease)
 						return
 					}
-					c.publish(ctx, myLease, e.publishable(ctx, jobCtx, results))
+					t0 := time.Now()
+					p := e.publishable(ctx, jobCtx, results)
+					t1 := time.Now()
+					c.publish(ctx, myLease, p)
+					bklog.G(ctx).Debugf("SFTIME\tpublishable=%s publish=%s\t%s",
+						t1.Sub(t0), time.Since(t1), key.Encoded())
 				}()
 			}
 		}
