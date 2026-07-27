@@ -292,3 +292,62 @@ func TestLeaseKeyFallsBackToContentKeyForLocalSources(t *testing.T) {
 	// different content => must differ, or a follower adopts the wrong layer
 	require.NotEqual(t, LeaseKey(mk("s-A", "src v1")), LeaseKey(mk("s-A", "src v2")))
 }
+
+// ---------------------------------------------------------------------------
+// Host-side execution (earthly's LOCALLY) and why the solver cannot save you.
+//
+// A LOCALLY step runs on the HOST. Its effect is not a function of its inputs --
+// it touches that machine's filesystem, its docker socket, its clock. Adopting
+// one machine's LOCALLY result on another means the side effect never happens
+// there: silent, and a direct violation of "the grid behaves as ONE machine".
+//
+// The solver has NO concept of this. A lease key is a function of content, and
+// two hosts running an identical command over identical inputs are, to LeaseKey,
+// the same work. The tests below pin that down rather than leaving it to be
+// rediscovered.
+//
+// What actually protects earthbuild today is INCIDENTAL: converter.runCommand
+// allocates the LOCALLY output file under os.MkdirTemp(os.TempDir(),
+// "earthlyexproutput"), and that randomised path is shell-wrapped into the
+// command string. So every LOCALLY op carries a per-run nonce in its args and
+// can never match across machines.
+//
+// That is a property of where a temp file lives, not a safety rule. Nothing
+// fails if it changes. These tests state the dependency so that a future
+// "let's make the output path deterministic" tidy-up trips over it here rather
+// than in a build that silently skipped someone's side effect.
+
+// The uncomfortable truth, asserted so nobody assumes otherwise: identical
+// content means identical key, side effects or not. Host-locality must be
+// expressed IN the content, upstream, or it is not expressed at all.
+func TestLeaseKeyHasNoConceptOfHostLocalExecution(t *testing.T) {
+	// Two machines, same command, same (scratch) root. Nothing here says "this
+	// runs on the host and must not be shared".
+	mk := func() *CacheKey {
+		k := NewCacheKey(digest.FromString("exec: ./scripts/tag-release.sh"), "vtx", 0)
+		k.deps = [][]CacheKeyWithSelector{{depKey("scratch")}}
+		return k
+	}
+	require.Equal(t, LeaseKey(mk()), LeaseKey(mk()),
+		"LeaseKey is content-addressed and cannot see host locality; "+
+			"a LOCALLY op made deterministic WOULD be adopted across machines")
+}
+
+// The mechanism earthbuild actually relies on. The per-run temp path reaches the
+// op digest, so the two machines' ops differ and no lease can coalesce them.
+// If this ever fails, LOCALLY steps have become cross-machine adoptable.
+func TestLeaseKeyDistinguishesOpsCarryingAPerRunNonce(t *testing.T) {
+	// What withShellAndEnvVarsOutput bakes in: .../earthlyexproutput<random>/output
+	mk := func(tmpdir string) *CacheKey {
+		k := NewCacheKey(
+			digest.FromString("exec: sh -c './scripts/tag-release.sh > "+tmpdir+"/output'"),
+			"vtx", 0)
+		k.deps = [][]CacheKeyWithSelector{{depKey("scratch")}}
+		return k
+	}
+	require.NotEqual(t,
+		LeaseKey(mk("/tmp/earthlyexproutput2261401925")),
+		LeaseKey(mk("/tmp/earthlyexproutput3355012844")),
+		"the per-run temp path must reach the lease key -- it is the only thing "+
+			"keeping a host-side LOCALLY step from being adopted by another machine")
+}
