@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	digest "github.com/opencontainers/go-digest"
+
+	"github.com/moby/buildkit/version"
 )
 
 // Cross-machine single-flight.
@@ -98,6 +100,34 @@ type Coordinator interface {
 // Dependencies within a slot are sorted, so two machines that discovered the
 // same deps in a different order still agree. Memoized: a diamond-shaped DAG
 // would otherwise be walked exponentially.
+// leaseKeyCohort partitions the keyspace by BUILDER identity.
+//
+// Everything else in the key describes the build; nothing described the builder,
+// so two daemons at different commits computed identical keys and would adopt
+// each other's results. Silent, and unsound the moment LLB semantics differ
+// between them: a layer produced under one daemon's rules handed to another that
+// does not share them is exactly the "grid is multi-valued" failure principle 1
+// exists to prevent.
+//
+// Partitioning is the conservative half of the fix — cohorts simply never merge
+// across. It costs sharing during a rolling upgrade, which is the right trade:
+// a slower build is recoverable, a wrong one is not. Letting compatible versions
+// still share needs a compatibility policy for LLB semantics, and would be
+// unsound without this underneath it.
+//
+// Overridable so tests can vary it; there is no reason to set it in production.
+var leaseKeyCohort = defaultLeaseKeyCohort()
+
+// Revision is the precise thing (a commit); Version is the fallback for builds
+// whose ldflags were never set — which includes any plain `go build ./cmd/...`,
+// so it is the common case in rigs rather than an edge case.
+func defaultLeaseKeyCohort() string {
+	if version.Revision != "" {
+		return "buildkit:" + version.Revision
+	}
+	return "buildkit:" + version.Version
+}
+
 func LeaseKey(k *CacheKey) digest.Digest {
 	s, ok := leaseKeyString(k)
 	if !ok {
@@ -174,7 +204,10 @@ func leaseKeyString(k *CacheKey) (string, bool) {
 	if noIdentity {
 		return "", false
 	}
-	return out, true
+	// Prefix rather than hash separately: LeaseKeyDebugString is the only thing
+	// that says WHICH component diverged, and "merged nothing" from a version
+	// split is otherwise indistinguishable from an unreachable coordinator.
+	return leaseKeyCohort + "|" + out, true
 }
 
 // LeaseKeyDebugString exposes the pre-hash input for diagnosing why two machines

@@ -351,3 +351,74 @@ func TestLeaseKeyDistinguishesOpsCarryingAPerRunNonce(t *testing.T) {
 		"the per-run temp path must reach the lease key -- it is the only thing "+
 			"keeping a host-side LOCALLY step from being adopted by another machine")
 }
+
+// ---------------------------------------------------------------------------
+// The key must name the BUILDER, not just the build.
+//
+// LeaseKey is a function of graph content alone, so two daemons at different
+// commits compute the SAME key for the same vertex and adopt each other's
+// results. Fine while a fleet is homogeneous; wrong the moment it is not, and
+// silent when it is wrong -- a layer produced under one daemon's semantics is
+// handed to another that does not share them.
+//
+// earthbuild is homogeneous only by accident: earthly-entrypoint.sh starts a
+// buildkitd inside every test container (~480 per CI run) whose image is built
+// from ./buildkitd+buildkitd, so inner and outer match today. Pin a released
+// buildkitd for the inner daemon -- the obvious thing to do -- and two versions
+// share one keyspace.
+//
+// Partitioning by cohort is the cheap, safe half: versions never merge across.
+// The ambitious half (adoption decides compatibility from version metadata)
+// needs a policy for what "compatible" means when LLB semantics change, and is
+// unsound without this in place first.
+
+// Same graph, different builder cohort => different key. Otherwise a v0.8 daemon
+// adopts a v0.9 daemon's layer and nothing anywhere says so.
+func TestLeaseKeyPartitionsByBuilderCohort(t *testing.T) {
+	mk := func() *CacheKey {
+		k := NewCacheKey(digest.FromString("exec: go build"), "vtx", 0)
+		k.deps = [][]CacheKeyWithSelector{{depKey("src content")}}
+		return k
+	}
+
+	defer func(old string) { leaseKeyCohort = old }(leaseKeyCohort)
+
+	leaseKeyCohort = "buildkit-aaaaaaa"
+	a := LeaseKey(mk())
+	leaseKeyCohort = "buildkit-bbbbbbb"
+	b := LeaseKey(mk())
+
+	require.NotEqual(t, a, b,
+		"two builder cohorts must not share a keyspace -- adoption across them is silent and unsound")
+}
+
+// The other half: within one cohort nothing changes, or we have broken every
+// merge to fix a hypothetical.
+func TestLeaseKeyAgreesWithinACohort(t *testing.T) {
+	mk := func() *CacheKey {
+		k := NewCacheKey(digest.FromString("exec: go build"), "vtx", 0)
+		k.deps = [][]CacheKeyWithSelector{{depKey("src content")}}
+		return k
+	}
+
+	defer func(old string) { leaseKeyCohort = old }(leaseKeyCohort)
+	leaseKeyCohort = "buildkit-aaaaaaa"
+
+	require.Equal(t, LeaseKey(mk()), LeaseKey(mk()))
+}
+
+// A version partition must be DIAGNOSABLE. A fleet that merges nothing because
+// two daemons disagree looks exactly like a fleet whose coordinator is
+// unreachable -- and that ambiguity has already cost ten days once. The cohort
+// belongs in the pre-hash string, which is the only thing that names which
+// component diverged.
+func TestLeaseKeyDebugStringNamesTheCohort(t *testing.T) {
+	defer func(old string) { leaseKeyCohort = old }(leaseKeyCohort)
+	leaseKeyCohort = "buildkit-deadbee"
+
+	k := NewCacheKey(digest.FromString("exec: x"), "vtx", 0)
+	k.deps = [][]CacheKeyWithSelector{{depKey("c")}}
+
+	require.Contains(t, LeaseKeyDebugString(k), "buildkit-deadbee",
+		"the cohort must be visible in the debug string, or a version split is undebuggable")
+}
