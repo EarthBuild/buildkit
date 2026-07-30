@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"fmt"
 
 	digest "github.com/opencontainers/go-digest"
@@ -100,4 +101,48 @@ func decodeResolution(pr *publishedResult) (string, digest.Digest, []byte, bool)
 		return "", "", nil, false
 	}
 	return ref, d.Digest, d.Data, true
+}
+
+// ResolveFunc is the local resolution CoordinateResolve wraps: ref, manifest
+// digest, image config, error -- the shape llbBridge.ResolveImageConfig returns.
+type ResolveFunc func(context.Context) (string, digest.Digest, []byte, error)
+
+// CoordinateResolve agrees one answer across the fleet for a single image
+// reference: the first machine to ask resolves and publishes, the rest adopt.
+//
+// Every failure degrades to a local resolve. No coordinator configured, one that
+// cannot be reached, a published answer we cannot verify -- all fall through to
+// `resolve`, which is exactly what unmodified BuildKit does. That is not
+// politeness: a fleet whose builds die when the coordinator blinks is worse than
+// one that never coordinated, and single-flight has already been caught making
+// coordinator loss fatal once.
+func CoordinateResolve(ctx context.Context, ref, platform, resolveMode string, resolve ResolveFunc) (string, digest.Digest, []byte, error) {
+	c := coordinatorFromEnv()
+	if c == nil {
+		return resolve(ctx)
+	}
+
+	pr, l, adopted := c.claim(ctx, ResolveLeaseKey(ref, platform, resolveMode))
+	if adopted {
+		if gotRef, dgst, cfg, ok := decodeResolution(pr); ok {
+			return gotRef, dgst, cfg, nil
+		}
+		// Published, but not something we recognise. Resolve it ourselves rather
+		// than adopt an answer we cannot verify -- see decodeResolution.
+		return resolve(ctx)
+	}
+	if l == nil {
+		return resolve(ctx)
+	}
+
+	// We hold the lease, so followers are waiting on us. Publish either way:
+	// publish(nil) gives the lease up, which releases them to resolve for
+	// themselves. Dropping it silently would strand them until the TTL expires.
+	gotRef, dgst, cfg, err := resolve(ctx)
+	if err != nil {
+		c.publish(ctx, l, nil)
+		return "", "", nil, err
+	}
+	c.publish(ctx, l, encodeResolution(gotRef, dgst, cfg))
+	return gotRef, dgst, cfg, nil
 }

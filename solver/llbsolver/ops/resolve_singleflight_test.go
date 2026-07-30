@@ -1,6 +1,8 @@
 package ops
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	digest "github.com/opencontainers/go-digest"
@@ -117,4 +119,62 @@ func TestDecodeResolutionRefusesMalformed(t *testing.T) {
 			require.False(t, ok)
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Fail-open is the whole safety story. Coordination is best-effort: with no
+// coordinator configured, or one that cannot be reached, resolution must behave
+// exactly as unmodified BuildKit does. Get this wrong and every build in the
+// fleet dies the moment the driver blinks -- which has already happened once for
+// execution leases (see the nits file: losing the coordinator mid-build is
+// currently fatal rather than degrading).
+
+func TestCoordinateResolveFallsOpenWithoutCoordinator(t *testing.T) {
+	t.Setenv("BUILDKIT_SINGLEFLIGHT_URL", "")
+
+	calls := 0
+	ref, dgst, cfg, err := CoordinateResolve(context.Background(),
+		"alpine:3.24.1", "linux/amd64", "default",
+		func(context.Context) (string, digest.Digest, []byte, error) {
+			calls++
+			return "alpine:3.24.1@sha256:x", digest.FromString("m"), []byte("cfg"), nil
+		})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, calls, "with no coordinator the local resolve runs exactly once")
+	require.Equal(t, "alpine:3.24.1@sha256:x", ref)
+	require.Equal(t, digest.FromString("m"), dgst)
+	require.Equal(t, []byte("cfg"), cfg)
+}
+
+// A resolve failure is the caller's to handle; coordination must not swallow or
+// disguise it.
+func TestCoordinateResolvePropagatesFailure(t *testing.T) {
+	t.Setenv("BUILDKIT_SINGLEFLIGHT_URL", "")
+
+	want := errors.New("manifest unknown")
+	_, _, _, err := CoordinateResolve(context.Background(),
+		"alpine:nope", "linux/amd64", "default",
+		func(context.Context) (string, digest.Digest, []byte, error) {
+			return "", "", nil, want
+		})
+	require.ErrorIs(t, err, want)
+}
+
+// An unreachable coordinator must degrade, not fail. Same contract as claim's
+// own error path: build it, exactly as plain BuildKit would.
+func TestCoordinateResolveFallsOpenWhenCoordinatorUnreachable(t *testing.T) {
+	// Port 1 is reserved and never listening.
+	t.Setenv("BUILDKIT_SINGLEFLIGHT_URL", "http://127.0.0.1:1")
+
+	calls := 0
+	_, _, _, err := CoordinateResolve(context.Background(),
+		"alpine:3.24.1", "linux/amd64", "default",
+		func(context.Context) (string, digest.Digest, []byte, error) {
+			calls++
+			return "alpine@sha256:y", digest.FromString("m"), nil, nil
+		})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, calls, "an unreachable coordinator must not stop the build")
 }
