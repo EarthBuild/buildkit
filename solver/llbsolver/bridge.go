@@ -33,6 +33,7 @@ import (
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 )
 
 type llbBridge struct {
@@ -374,9 +375,14 @@ func (b *llbBridge) resolveSourceMetadata(ctx context.Context, op *pb.SourceOp, 
 	srcOp := op
 	if coordinated && agreed != "" {
 		if pinned, ok := ops.PinnedRef(op.Identifier, agreed); ok {
-			clone := *op
-			clone.Identifier = pinned
-			srcOp = &clone
+			// proto.Clone, not *op: a SourceOp embeds protoimpl.MessageState,
+			// which contains a mutex. Copying it by value is a data race waiting
+			// to happen, and go vet says so.
+			cloned, _ := proto.Clone(op).(*pb.SourceOp)
+			if cloned != nil {
+				cloned.Identifier = pinned
+				srcOp = cloned
+			}
 		}
 	}
 
