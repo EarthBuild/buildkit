@@ -3,6 +3,8 @@ package ops
 import (
 	"testing"
 
+	digest "github.com/opencontainers/go-digest"
+	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -70,4 +72,49 @@ func TestResolveLeaseKeyIsNamespacedAwayFromExecutionLeases(t *testing.T) {
 func TestResolveLeaseKeyIsIndependentOfBuilderVersion(t *testing.T) {
 	require.NotContains(t, ResolveLeaseKey("alpine:3.24.1", "linux/amd64", "default"), "buildkit:",
 		"a tag's digest is a registry fact, not a builder fact")
+}
+
+// ---------------------------------------------------------------------------
+// A resolution rides the execution lease protocol, so it must survive the round
+// trip through publishedResult -- and, more importantly, must REFUSE anything
+// that is not a resolution. The coordinator's table holds both kinds; adopting
+// an execution result as a resolution would hand the build a garbage digest.
+
+func TestResolutionSurvivesTheRoundTrip(t *testing.T) {
+	cfg := []byte(`{"architecture":"amd64","os":"linux"}`)
+	dgst := digest.FromString("the resolved manifest")
+
+	ref, got, gotCfg, ok := decodeResolution(encodeResolution("docker.io/library/alpine:3.24.1@sha256:abc", dgst, cfg))
+
+	require.True(t, ok)
+	require.Equal(t, "docker.io/library/alpine:3.24.1@sha256:abc", ref)
+	require.Equal(t, dgst, got)
+	require.Equal(t, cfg, gotCfg)
+}
+
+// An execution result has descriptors but none of the resolution annotations.
+// Refuse rather than improvise: a wrong digest here picks the wrong base image
+// for the whole build, silently.
+func TestDecodeResolutionRefusesAnExecutionResult(t *testing.T) {
+	exec := &publishedResult{Outputs: [][]ocispecs.Descriptor{{{
+		MediaType: "application/vnd.oci.image.layer.v1.tar+gzip",
+		Digest:    digest.FromString("a layer"),
+		Size:      1234,
+	}}}}
+	_, _, _, ok := decodeResolution(exec)
+	require.False(t, ok, "an execution result must never be adopted as a resolution")
+}
+
+// Defensive: malformed shapes must not panic or yield a half-answer.
+func TestDecodeResolutionRefusesMalformed(t *testing.T) {
+	for name, pr := range map[string]*publishedResult{
+		"nil":          nil,
+		"no outputs":   {Outputs: nil},
+		"empty output": {Outputs: [][]ocispecs.Descriptor{{}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, _, ok := decodeResolution(pr)
+			require.False(t, ok)
+		})
+	}
 }

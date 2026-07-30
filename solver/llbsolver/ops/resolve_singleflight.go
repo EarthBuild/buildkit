@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	digest "github.com/opencontainers/go-digest"
+	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // Cross-machine coordination of image RESOLUTION.
@@ -50,4 +51,53 @@ func ResolveLeaseKey(ref, platform, resolveMode string) string {
 	// slashes and colons, and the key travels in a URL path.
 	d := digest.FromString(fmt.Sprintf("ref=%s|platform=%s|mode=%s", ref, platform, resolveMode))
 	return resolveKeyPrefix + d.Encoded()
+}
+
+// A resolution rides the execution lease protocol, so it has to fit
+// publishedResult's shape: one descriptor, carrying the answer.
+//
+//	Digest      -> the resolved manifest digest (the thing we are agreeing on)
+//	Data        -> the image config bytes, so a follower need not fetch them
+//	Annotations -> the resolved reference, and a marker identifying this as a
+//	               resolution rather than an execution result
+//
+// The marker is not decoration. Executions and resolutions share one
+// coordinator table, and adopting an execution result as a resolution would
+// hand the build a layer digest where a manifest digest belongs -- picking the
+// wrong base image for everything downstream, silently. Refuse instead.
+const (
+	resolveAnnotationKind = "rebuck.resolve/kind"
+	resolveAnnotationRef  = "rebuck.resolve/ref"
+	resolveKindValue      = "image-resolution"
+)
+
+func encodeResolution(ref string, dgst digest.Digest, config []byte) *publishedResult {
+	return &publishedResult{Outputs: [][]ocispecs.Descriptor{{{
+		MediaType: ocispecs.MediaTypeImageManifest,
+		Digest:    dgst,
+		Size:      int64(len(config)),
+		Data:      config,
+		Annotations: map[string]string{
+			resolveAnnotationKind: resolveKindValue,
+			resolveAnnotationRef:  ref,
+		},
+	}}}}
+}
+
+// decodeResolution returns ok=false for anything that is not unmistakably a
+// resolution we wrote. Fail-closed: the caller then resolves locally, which is
+// slower and correct, rather than adopting an answer it cannot verify.
+func decodeResolution(pr *publishedResult) (string, digest.Digest, []byte, bool) {
+	if pr == nil || len(pr.Outputs) == 0 || len(pr.Outputs[0]) == 0 {
+		return "", "", nil, false
+	}
+	d := pr.Outputs[0][0]
+	if d.Annotations[resolveAnnotationKind] != resolveKindValue {
+		return "", "", nil, false
+	}
+	ref := d.Annotations[resolveAnnotationRef]
+	if ref == "" || d.Digest == "" {
+		return "", "", nil, false
+	}
+	return ref, d.Digest, d.Data, true
 }
