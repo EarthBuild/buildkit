@@ -274,3 +274,40 @@ func TestPinnedRefRefusesEmptyDigest(t *testing.T) {
 	_, ok := PinnedRef("docker-image://docker.io/library/alpine:3.19", "")
 	require.False(t, ok)
 }
+
+// ResolveAgreement is the seam resolveSourceMetadata uses: ask the fleet for an
+// agreed digest, or become the machine that decides it. With no coordinator it
+// must report "not coordinated" so the caller resolves exactly as before.
+func TestResolveAgreementFallsOpenWithoutCoordinator(t *testing.T) {
+	t.Setenv("BUILDKIT_SINGLEFLIGHT_URL", "")
+	dgst, publish, coordinated := ResolveAgreement(context.Background(),
+		"docker-image://docker.io/library/alpine:3.19", "linux/amd64", "mode=default")
+	require.False(t, coordinated)
+	require.Empty(t, dgst)
+	require.Nil(t, publish, "nothing to publish when nothing is coordinating")
+}
+
+func TestResolveAgreementFallsOpenWhenCoordinatorUnreachable(t *testing.T) {
+	t.Setenv("BUILDKIT_SINGLEFLIGHT_URL", "http://127.0.0.1:1")
+	_, _, coordinated := ResolveAgreement(context.Background(),
+		"docker-image://docker.io/library/alpine:3.19", "linux/amd64", "mode=default")
+	require.False(t, coordinated, "an unreachable coordinator must not block resolution")
+}
+
+// Non-image sources have their own identity and must never enter the image
+// keyspace -- a git ref and an image tag agreeing on a "digest" is nonsense.
+func TestResolveAgreementIgnoresNonImageSources(t *testing.T) {
+	t.Setenv("BUILDKIT_SINGLEFLIGHT_URL", "http://127.0.0.1:1")
+	_, _, coordinated := ResolveAgreement(context.Background(),
+		"git://github.com/foo/bar#main", "linux/amd64", "mode=default")
+	require.False(t, coordinated)
+}
+
+// Already pinned: there is nothing left to agree, so do not spend a round trip.
+func TestResolveAgreementSkipsAlreadyPinnedRefs(t *testing.T) {
+	t.Setenv("BUILDKIT_SINGLEFLIGHT_URL", "http://127.0.0.1:1")
+	_, _, coordinated := ResolveAgreement(context.Background(),
+		"docker-image://docker.io/library/alpine@sha256:"+digest.FromString("x").Encoded(),
+		"linux/amd64", "mode=default")
+	require.False(t, coordinated)
+}

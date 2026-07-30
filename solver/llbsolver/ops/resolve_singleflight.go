@@ -213,3 +213,49 @@ func PinnedRef(identifier string, dgst digest.Digest) (string, bool) {
 	}
 	return identifier + "@" + dgst.String(), true
 }
+
+// ResolveAgreement is the seam resolveSourceMetadata uses to stop every machine
+// resolving every tag for itself.
+//
+// Returns (agreed, publish, coordinated):
+//
+//	coordinated=false        nobody is coordinating -- resolve exactly as before
+//	agreed != ""             the fleet already decided; resolve the PINNED form
+//	agreed == "", publish!=nil  we hold the lease: resolve, then publish the
+//	                            digest, or publish "" to release the waiters
+//
+// publish must be called exactly once by a leader, including on failure --
+// dropping it silently strands every follower until the lease TTL expires.
+//
+// Skips anything with nothing to agree about: non-image sources, and references
+// already pinned by digest (no round trip spent on a settled question).
+func ResolveAgreement(ctx context.Context, identifier, platformKey, variant string) (digest.Digest, func(digest.Digest), bool) {
+	// PinnedRef with a throwaway digest answers "is this an unpinned image ref?"
+	// without duplicating the parsing rules.
+	if _, ok := PinnedRef(identifier, digest.FromString("probe")); !ok {
+		return "", nil, false
+	}
+	c := coordinatorFromEnv()
+	if c == nil {
+		return "", nil, false
+	}
+
+	pr, l, adopted := c.claim(ctx, ResolveLeaseKey(identifier, platformKey, variant))
+	if adopted {
+		if _, dgst, _, ok := decodeResolution(pr); ok && dgst != "" {
+			return dgst, nil, true
+		}
+		// Published, but not something we can verify. Resolve it ourselves.
+		return "", nil, false
+	}
+	if l == nil {
+		return "", nil, false
+	}
+	return "", func(d digest.Digest) {
+		if d == "" {
+			c.publish(ctx, l, nil)
+			return
+		}
+		c.publish(ctx, l, encodeResolution(identifier, d, nil))
+	}, true
+}

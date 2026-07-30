@@ -284,39 +284,13 @@ func (b *llbBridge) loadExecutor() error {
 	return b.executorErr
 }
 
+// Deliberately NOT coordinated. Instrumentation showed this seam is never
+// entered for earthbuild's graphs (0 calls, against 7 per run through
+// resolveSourceMetadata), so coordinating here achieved nothing and having two
+// coordinated paths risks them disagreeing on a key for the same reference.
 func (b *llbBridge) ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (string, digest.Digest, []byte, error) {
 	imr := sourceresolver.NewImageMetaResolver(b)
-	local := func(ctx context.Context) (string, digest.Digest, []byte, error) {
-		return imr.ResolveImageConfig(ctx, ref, opt)
-	}
-
-	// Agree ONE digest per reference across the fleet. Without this each machine
-	// resolves independently, so a tag republished mid-run (which Docker Official
-	// Images are, for CVE rebuilds) leaves part of the fleet on the old base and
-	// part on the new -- a build no single machine would have produced.
-	//
-	// Everything that changes the answer has to reach the key, hence the platform
-	// and variant folding. Coordination is best-effort throughout: with no
-	// coordinator, an unreachable one, or an answer we cannot verify,
-	// CoordinateResolve falls through to `local`.
-	var (
-		platform *ocispecs.Platform
-		mode     string
-		noConfig bool
-		attChain bool
-		att      []string
-	)
-	if opt.ImageOpt != nil {
-		platform = opt.ImageOpt.Platform
-		mode = opt.ImageOpt.ResolveMode
-		noConfig = opt.ImageOpt.NoConfig
-		attChain = opt.ImageOpt.AttestationChain
-		att = opt.ImageOpt.ResolveAttestations
-	}
-	return ops.CoordinateResolve(ctx, ref,
-		ops.ResolvePlatformKey(platform),
-		ops.ResolveVariant(mode, noConfig, attChain, att),
-		local)
+	return imr.ResolveImageConfig(ctx, ref, opt)
 }
 
 func (b *llbBridge) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt) (resp *sourceresolver.MetaResponse, err error) {
@@ -378,10 +352,47 @@ func (b *llbBridge) resolveSourceMetadata(ctx context.Context, op *pb.SourceOp, 
 	// policy is evaluated, so we can remove it from the options
 	opt.SourcePolicies = nil
 
+	// Agree ONE digest per reference across the fleet, instead of every machine
+	// resolving every tag for itself. Docker Official Images are republished
+	// under the same tag for CVE rebuilds, so independent resolution lets a tag
+	// that moves mid-run leave part of the fleet on the old base and part on the
+	// new -- a build no single machine would have produced.
+	//
+	// A follower adopts by resolving the PINNED reference down this same path,
+	// so nothing here has to reconstruct the response: correctness stays with
+	// the code that already works, and only the digest is shared.
+	var variant string
+	if opt.ImageOpt != nil {
+		variant = ops.ResolveVariant(opt.ImageOpt.ResolveMode, opt.ImageOpt.NoConfig,
+			opt.ImageOpt.AttestationChain, opt.ImageOpt.ResolveAttestations)
+	} else {
+		variant = ops.ResolveVariant("", false, false, nil)
+	}
+	agreed, publish, coordinated := ops.ResolveAgreement(ctx, op.Identifier,
+		ops.ResolvePlatformKey(platform), variant)
+
+	srcOp := op
+	if coordinated && agreed != "" {
+		if pinned, ok := ops.PinnedRef(op.Identifier, agreed); ok {
+			clone := *op
+			clone.Identifier = pinned
+			srcOp = &clone
+		}
+	}
+
 	err = inBuilderContext(ctx, b.builder, opt.LogName, id, func(ctx context.Context, jobCtx solver.JobContext) error {
-		resp, err = w.ResolveSourceMetadata(ctx, op, opt, b.sm, jobCtx)
+		resp, err = w.ResolveSourceMetadata(ctx, srcOp, opt, b.sm, jobCtx)
 		return err
 	})
+	if publish != nil {
+		// Exactly once, including on failure: dropping the lease silently would
+		// strand every follower until the TTL expired.
+		if err != nil || resp == nil || resp.Image == nil {
+			publish("")
+		} else {
+			publish(resp.Image.Digest)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
