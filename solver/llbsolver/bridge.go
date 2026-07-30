@@ -3,6 +3,7 @@ package llbsolver
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -285,6 +286,7 @@ func (b *llbBridge) loadExecutor() error {
 }
 
 func (b *llbBridge) ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (string, digest.Digest, []byte, error) {
+	fmt.Fprintf(os.Stderr, "REBUCK-SEAM: ResolveImageConfig ref=%s\n", ref)
 	imr := sourceresolver.NewImageMetaResolver(b)
 	local := func(ctx context.Context) (string, digest.Digest, []byte, error) {
 		return imr.ResolveImageConfig(ctx, ref, opt)
@@ -324,6 +326,7 @@ func (b *llbBridge) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, 
 }
 
 func (b *llbBridge) resolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt, withPolicy bool) (resp *sourceresolver.MetaResponse, err error) {
+	fmt.Fprintf(os.Stderr, "REBUCK-SEAM: resolveSourceMetadata id=%s\n", op.GetIdentifier())
 	w, err := b.resolveWorker()
 	if err != nil {
 		return nil, err
