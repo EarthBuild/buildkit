@@ -181,3 +181,35 @@ func ResolveVariant(mode string, noConfig, attestationChain bool, attestations [
 	return fmt.Sprintf("mode=%s|noconfig=%t|attchain=%t|att=%s",
 		mode, noConfig, attestationChain, strings.Join(att, ","))
 }
+
+// dockerImageScheme is the SourceOp identifier prefix for an image reference.
+// Only image sources resolve to a manifest digest; git, http and local sources
+// have their own identity and must be left alone.
+const dockerImageScheme = "docker-image://"
+
+// PinnedRef rewrites a SourceOp identifier to name the digest the fleet agreed
+// on, so a follower can adopt a resolution WITHOUT anyone serialising the
+// protobuf response.
+//
+// resolveSourceMetadata returns a MetaResponse carrying a mutated Op alongside
+// the image answer, and rebuilding that Op on a follower would be guesswork.
+// It does not need rebuilding: a follower that learns alpine:3.19 -> sha256:X
+// resolves "alpine:3.19@sha256:X" down the ORDINARY path. Correctness comes from
+// the code that already works; consistency comes from the shared digest.
+//
+// The follower still contacts the registry, so this buys agreement rather than
+// saved bandwidth -- leasing the PULL is the separate, later half of P4.
+//
+// Returns ok=false whenever there is nothing to agree: a non-image source, an
+// identifier already pinned by digest, or an empty digest.
+func PinnedRef(identifier string, dgst digest.Digest) (string, bool) {
+	if dgst == "" || !strings.HasPrefix(identifier, dockerImageScheme) {
+		return "", false
+	}
+	// Already pinned: the reference carries its own identity and coordinating it
+	// would only risk producing a double-digest that parses as neither.
+	if strings.Contains(identifier[len(dockerImageScheme):], "@") {
+		return "", false
+	}
+	return identifier + "@" + dgst.String(), true
+}

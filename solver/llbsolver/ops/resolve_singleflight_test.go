@@ -228,3 +228,49 @@ func TestResolveVariantIsStable(t *testing.T) {
 		ResolveVariant("forcepull", true, true, []string{"sbom", "provenance"}),
 		ResolveVariant("forcepull", true, true, []string{"sbom", "provenance"}))
 }
+
+// ---------------------------------------------------------------------------
+// Adopting a resolution without serialising the response.
+//
+// resolveSourceMetadata returns a MetaResponse carrying a mutated protobuf Op
+// as well as the image answer, and reconstructing that Op for a follower would
+// be guesswork. It does not need reconstructing: a follower that learns
+// alpine:3.19 -> sha256:X can simply resolve "alpine:3.19@sha256:X" through the
+// ORDINARY local path. Correctness then comes from the code that already works,
+// and consistency from the shared digest.
+
+func TestPinnedRefAppendsTheAgreedDigest(t *testing.T) {
+	d := digest.FromString("agreed manifest")
+	got, ok := PinnedRef("docker-image://docker.io/library/alpine:3.19", d)
+	require.True(t, ok)
+	require.Equal(t, "docker-image://docker.io/library/alpine:3.19@"+d.String(), got)
+}
+
+// An identifier already pinned by digest has nothing to agree about, and must
+// not be double-pinned into nonsense.
+func TestPinnedRefRefusesAnAlreadyPinnedRef(t *testing.T) {
+	d := digest.FromString("x")
+	_, ok := PinnedRef("docker-image://docker.io/library/alpine@sha256:"+digest.FromString("y").Encoded(), d)
+	require.False(t, ok, "an already-pinned reference needs no coordination")
+}
+
+// Only image sources resolve to a manifest digest. git://, http://, local://
+// and friends must be left alone.
+func TestPinnedRefRefusesNonImageSources(t *testing.T) {
+	d := digest.FromString("x")
+	for _, id := range []string{
+		"git://github.com/foo/bar#main",
+		"https://example.com/file.tar",
+		"local://context",
+		"",
+	} {
+		_, ok := PinnedRef(id, d)
+		require.False(t, ok, "non-image source must not be pinned: %q", id)
+	}
+}
+
+// An empty digest is not an agreement.
+func TestPinnedRefRefusesEmptyDigest(t *testing.T) {
+	_, ok := PinnedRef("docker-image://docker.io/library/alpine:3.19", "")
+	require.False(t, ok)
+}
