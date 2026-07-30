@@ -3,6 +3,8 @@ package ops
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -145,4 +147,37 @@ func CoordinateResolve(ctx context.Context, ref, platform, resolveMode string, r
 	}
 	c.publish(ctx, l, encodeResolution(gotRef, dgst, cfg))
 	return gotRef, dgst, cfg, nil
+}
+
+// ResolvePlatformKey renders a platform for the lease key.
+//
+// nil is NOT the same as "the default platform": ResolveImageConfig is called
+// with no ImageOpt on some paths, and if that collapsed onto linux/amd64 an
+// arm64 machine could adopt an amd64 digest. Give the unspecified case its own
+// marker so it only ever coordinates with other unspecified callers.
+func ResolvePlatformKey(p *ocispecs.Platform) string {
+	if p == nil {
+		return "platform-unspecified"
+	}
+	// Variant matters (v7 vs v8 arm), so it is included; the remaining fields
+	// (OSVersion, OSFeatures) do not affect which manifest a tag selects.
+	return strings.Join([]string{p.OS, p.Architecture, p.Variant}, "/")
+}
+
+// ResolveVariant folds every option that changes the ANSWER into the key.
+//
+// NoConfig is the subtle one: it omits the image config from the response, so a
+// follower that wanted config must never adopt an answer published without it --
+// it would get empty config bytes and fail somewhere far downstream. The
+// attestation options reshape the response for the same reason.
+func ResolveVariant(mode string, noConfig, attestationChain bool, attestations []string) string {
+	if mode == "" {
+		mode = "default"
+	}
+	// Sorted: two machines may list attestations in a different order and are
+	// still asking for the same thing.
+	att := append([]string(nil), attestations...)
+	sort.Strings(att)
+	return fmt.Sprintf("mode=%s|noconfig=%t|attchain=%t|att=%s",
+		mode, noConfig, attestationChain, strings.Join(att, ","))
 }

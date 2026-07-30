@@ -178,3 +178,53 @@ func TestCoordinateResolveFallsOpenWhenCoordinatorUnreachable(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, calls, "an unreachable coordinator must not stop the build")
 }
+
+// ---------------------------------------------------------------------------
+// Everything that changes the ANSWER must reach the key. Two hazards here, both
+// nil-shaped or invisible, both silently wrong if dropped.
+
+// A nil platform must not collapse into a concrete one. ResolveImageConfig is
+// called with opt.ImageOpt == nil on some paths; if that produced the same key
+// as linux/amd64, an arm64 machine could adopt an amd64 digest.
+func TestResolvePlatformKeyDistinguishesNilFromConcrete(t *testing.T) {
+	amd64 := &ocispecs.Platform{OS: "linux", Architecture: "amd64"}
+	arm64 := &ocispecs.Platform{OS: "linux", Architecture: "arm64"}
+
+	require.NotEqual(t, ResolvePlatformKey(nil), ResolvePlatformKey(amd64))
+	require.NotEqual(t, ResolvePlatformKey(amd64), ResolvePlatformKey(arm64))
+	require.Equal(t, ResolvePlatformKey(nil), ResolvePlatformKey(nil))
+}
+
+// Variant is the same platform expressed two ways; it must not fork the key or
+// two machines describing one platform differently would never coordinate.
+func TestResolvePlatformKeyIsStableForTheSamePlatform(t *testing.T) {
+	a := &ocispecs.Platform{OS: "linux", Architecture: "amd64"}
+	b := &ocispecs.Platform{OS: "linux", Architecture: "amd64"}
+	require.Equal(t, ResolvePlatformKey(a), ResolvePlatformKey(b))
+}
+
+// NoConfig changes what the resolve RETURNS -- the config bytes are omitted. A
+// follower that wanted config must not adopt an answer published without it, or
+// it gets an empty image config and fails somewhere far away.
+func TestResolveVariantSeparatesNoConfig(t *testing.T) {
+	require.NotEqual(t,
+		ResolveVariant("default", false, false, nil),
+		ResolveVariant("default", true, false, nil))
+}
+
+// Attestations likewise change the response shape.
+func TestResolveVariantSeparatesAttestations(t *testing.T) {
+	require.NotEqual(t,
+		ResolveVariant("default", false, false, nil),
+		ResolveVariant("default", false, true, nil))
+	require.NotEqual(t,
+		ResolveVariant("default", false, false, nil),
+		ResolveVariant("default", false, false, []string{"sbom"}))
+}
+
+// Same options, same variant -- or nothing ever coordinates.
+func TestResolveVariantIsStable(t *testing.T) {
+	require.Equal(t,
+		ResolveVariant("forcepull", true, true, []string{"sbom", "provenance"}),
+		ResolveVariant("forcepull", true, true, []string{"sbom", "provenance"}))
+}

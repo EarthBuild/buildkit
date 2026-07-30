@@ -21,6 +21,7 @@ import (
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
+	"github.com/moby/buildkit/solver/llbsolver/ops"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/sourcepolicy"
 	spb "github.com/moby/buildkit/sourcepolicy/pb"
@@ -285,7 +286,37 @@ func (b *llbBridge) loadExecutor() error {
 
 func (b *llbBridge) ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (string, digest.Digest, []byte, error) {
 	imr := sourceresolver.NewImageMetaResolver(b)
-	return imr.ResolveImageConfig(ctx, ref, opt)
+	local := func(ctx context.Context) (string, digest.Digest, []byte, error) {
+		return imr.ResolveImageConfig(ctx, ref, opt)
+	}
+
+	// Agree ONE digest per reference across the fleet. Without this each machine
+	// resolves independently, so a tag republished mid-run (which Docker Official
+	// Images are, for CVE rebuilds) leaves part of the fleet on the old base and
+	// part on the new -- a build no single machine would have produced.
+	//
+	// Everything that changes the answer has to reach the key, hence the platform
+	// and variant folding. Coordination is best-effort throughout: with no
+	// coordinator, an unreachable one, or an answer we cannot verify,
+	// CoordinateResolve falls through to `local`.
+	var (
+		platform *ocispecs.Platform
+		mode     string
+		noConfig bool
+		attChain bool
+		att      []string
+	)
+	if opt.ImageOpt != nil {
+		platform = opt.ImageOpt.Platform
+		mode = opt.ImageOpt.ResolveMode
+		noConfig = opt.ImageOpt.NoConfig
+		attChain = opt.ImageOpt.AttestationChain
+		att = opt.ImageOpt.ResolveAttestations
+	}
+	return ops.CoordinateResolve(ctx, ref,
+		ops.ResolvePlatformKey(platform),
+		ops.ResolveVariant(mode, noConfig, attChain, att),
+		local)
 }
 
 func (b *llbBridge) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt) (resp *sourceresolver.MetaResponse, err error) {
