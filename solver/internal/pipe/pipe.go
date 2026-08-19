@@ -153,7 +153,12 @@ func (pw *sender[Payload, Value]) Finalize(v Value, err error) {
 	pw.status.Value = v
 	pw.status.Err = err
 	pw.status.Completed = true
-	if errors.Is(err, context.Canceled) && pw.req.Canceled {
+	// req is written by setRequest (via Receiver.Cancel) under mu, possibly
+	// concurrently with this Finalize from the request function goroutine.
+	pw.mu.Lock()
+	reqCanceled := pw.req.Canceled
+	pw.mu.Unlock()
+	if errors.Is(err, context.Canceled) && reqCanceled {
 		pw.status.Canceled = true
 	}
 	pw.sendChannel.Send(pw.status)
