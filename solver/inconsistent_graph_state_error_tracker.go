@@ -5,6 +5,7 @@ package solver
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	digest "github.com/opencontainers/go-digest"
@@ -19,6 +20,7 @@ type dgstTrackerItem struct {
 }
 
 type dgstTracker struct {
+	mu      sync.Mutex
 	head    int
 	records []dgstTrackerItem
 }
@@ -31,6 +33,8 @@ func newDgstTracker() *dgstTracker {
 }
 
 func (d *dgstTracker) add(dgst digest.Digest, action string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.head++
 	if d.head >= len(d.records) {
 		d.head = 0
@@ -40,20 +44,64 @@ func (d *dgstTracker) add(dgst digest.Digest, action string) {
 	d.records[d.head].seen = time.Now()
 }
 
-func (d *dgstTracker) String() string {
-	var sb strings.Builder
-
+// eachNewestFirst walks the ring from newest to oldest, calling fn for each
+// populated record. Caller must hold d.mu.
+func (d *dgstTracker) eachNewestFirst(fn func(dgstTrackerItem) bool) {
 	for i := d.head; i >= 0; i-- {
 		if d.records[i].seen.IsZero() {
-			break
+			return
 		}
-		sb.WriteString(fmt.Sprintf("%s %s %s; ", d.records[i].dgst, d.records[i].action, d.records[i].seen))
+		if !fn(d.records[i]) {
+			return
+		}
 	}
 	for i := len(d.records) - 1; i > d.head; i-- {
 		if d.records[i].seen.IsZero() {
-			break
+			return
 		}
-		sb.WriteString(fmt.Sprintf("%s %s %s; ", d.records[i].dgst, d.records[i].action, d.records[i].seen))
+		if !fn(d.records[i]) {
+			return
+		}
+	}
+}
+
+func (d *dgstTracker) String() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var sb strings.Builder
+	d.eachNewestFirst(func(it dgstTrackerItem) bool {
+		sb.WriteString(fmt.Sprintf("%s %s %s; ", it.dgst, it.action, it.seen))
+		return true
+	})
+	return sb.String()
+}
+
+// historyFor returns up to max recorded actions for a single digest, newest
+// first. Unlike String() it is bounded and digest-scoped, so it stays well
+// under log-ingestion truncation limits and preserves the ordering that
+// matters for diagnosing "inconsistent graph state" (e.g. a delete preceding
+// a get-edge-not-found for the same digest).
+func (d *dgstTracker) historyFor(dgst digest.Digest, max int) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var sb strings.Builder
+	shown, total := 0, 0
+	d.eachNewestFirst(func(it dgstTrackerItem) bool {
+		if it.dgst != dgst {
+			return true
+		}
+		total++
+		if shown < max {
+			sb.WriteString(fmt.Sprintf("%s %s; ", it.action, it.seen))
+			shown++
+		}
+		return true
+	})
+	if total > shown {
+		sb.WriteString(fmt.Sprintf("(+%d older)", total-shown))
+	}
+	if total == 0 {
+		return "(no prior records for digest)"
 	}
 	return sb.String()
 }

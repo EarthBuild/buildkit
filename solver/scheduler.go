@@ -364,7 +364,18 @@ func (pf *pipeFactory) NewInputRequest(ee Edge, req *edgeRequest) pipeReceiver {
 	target := pf.s.ef.getEdge(ee)
 	if target == nil {
 		dgst := ee.Vertex.Digest()
-		bklog.G(context.TODO()).Errorf("failed to get edge dgst=%s name=%s desiredState=%s; actives history: %s", dgst, ee.Vertex.Name(), req.desiredState, dgstTrackerInst.String()) // earthly-specific
+		// earthly-specific: emit a discrete, digest-scoped record rather than
+		// the full tracker dump. The whole-ring String() is tens of KB and gets
+		// truncated at log ingestion, dropping exactly the ordering evidence
+		// (was this digest added/deleted before this failed lookup?) needed to
+		// diagnose the failure. historyFor stays small and keeps that ordering.
+		bklog.G(context.TODO()).
+			WithField("edge_vertex_name", ee.Vertex.Name()).
+			WithField("edge_vertex_digest", dgst).
+			WithField("edge_index", ee.Index).
+			WithField("desired_state", req.desiredState).
+			WithField("digest_history", dgstTrackerInst.historyFor(dgst, 32)).
+			Error("failed to get edge: inconsistent graph state")
 		debugSchedulerInconsistentGraphState(ee)
 		return pf.NewFuncRequest(func(_ context.Context) (any, error) {
 			return nil, errdefs.Internal(errors.Errorf("failed to get edge: inconsistent graph state in edge %s %s %d", ee.Vertex.Name(), ee.Vertex.Digest(), ee.Index))
