@@ -1,16 +1,11 @@
 package earthly_registry_v1 //nolint:revive
 
 import (
-	"io"
 	"net"
 	"strings"
-	"time"
 
 	"github.com/pkg/errors"
-	"golang.org/x/sync/errgroup"
 )
-
-const readDeadline = 50 * time.Millisecond
 
 // NewServer creates and returns a new proxy server with a given host and client.
 func NewServer(addr string) *Server {
@@ -75,76 +70,20 @@ func (s *StreamRW) Read(p []byte) (int, error) {
 // pipe them back out through the stream again. This allows us to send HTTP
 // requests to the embedded registry without having to connect via some other
 // exposed server or port.
+//
+// One stream carries one connection from the client's local listener, for as
+// long as the client keeps it: docker reuses a connection across the manifest
+// and blob requests of a single pull, and each of those requests is answered
+// on the stream that carried it.
 func (s *Server) Proxy(stream Registry_ProxyServer) error {
-	rw := NewStreamRW(stream)
-
 	addr := strings.ReplaceAll(s.addr, "0.0.0.0", "127.0.0.1")
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	ctx := stream.Context()
-	eg, _ := errgroup.WithContext(ctx)
-
-	eg.Go(func() error {
-		_, err = io.Copy(conn, rw)
-		if err != nil {
-			return errors.Wrap(err, "failed to copy from stream to host")
-		}
-		return nil
-	})
-
-	eg.Go(func() error {
-		_, err = CopyWithDeadline(conn, rw)
-		if err != nil {
-			return errors.Wrap(err, "failed to copy from host to stream")
-		}
-		return nil
-	})
-
-	err = eg.Wait()
-	if err != nil {
-		return errors.Wrap(err, "failed to wait")
+		return errors.Wrapf(err, "failed to dial the embedded registry at %s", addr)
 	}
 
-	return nil
-}
-
-// CopyWithDeadline copies data from a net.Conn using a read deadline. The
-// process will fail with a timeout error if no data is read for the defined
-// period.
-func CopyWithDeadline(conn net.Conn, w io.Writer) (int64, error) {
-	var (
-		t   = int64(0)
-		buf = make([]byte, 32*1024)
-	)
-	for {
-		err := conn.SetReadDeadline(time.Now().Add(readDeadline))
-		if err != nil {
-			return t, err
-		}
-		n, err := conn.Read(buf)
-		if err != nil {
-			if errors.Is(err, io.EOF) || isNetTimeout(err) {
-				break
-			}
-			return t, err
-		}
-		n, err = w.Write(buf[0:n])
-		t += int64(n)
-		if err != nil {
-			return t, err
-		}
-	}
-	return t, nil
-}
-
-func isNetTimeout(err error) bool {
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-		return true
-	}
-	return false
+	// The stream is closed by returning from this handler, so there is no send
+	// direction for the copy to close on its own.
+	return Copy(stream.Context(), conn, stream, nil)
 }
