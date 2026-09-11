@@ -8,6 +8,16 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// copyBufferSize is the size of the buffer each direction reads into. 32KiB is
+// io.Copy's own default, and what session/sshforward.Copy and
+// session/socketforward use for the same job; it is comfortably under gRPC's
+// 4MiB default maximum message size, so a full buffer never needs splitting
+// across messages. Nothing depends on the two ends of the tunnel choosing the
+// same value -- that they happened to agree is what kept StreamRW's leftover
+// handling from ever being exercised -- so this is a throughput knob and
+// nothing more.
+const copyBufferSize = 32 * 1024
+
 // Stream is the part of a gRPC bidirectional stream the tunnel needs. Both
 // ends of Registry.Proxy satisfy it, so the same copy runs on the daemon and
 // on the client.
@@ -70,7 +80,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 
 	// Connection to peer.
 	eg.Go(func() error {
-		buf := make([]byte, 32*1024)
+		buf := make([]byte, copyBufferSize)
 		for {
 			n, err := conn.Read(buf)
 			if n > 0 {
