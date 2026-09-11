@@ -82,25 +82,42 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 	// Connection to peer.
 	eg.Go(func() error {
 		buf := make([]byte, copyBufferSize)
+
+		send := func(n int) error {
+			if n == 0 {
+				return nil
+			}
+			if err := stream.SendMsg(&ByteMessage{Data: buf[:n]}); err != nil {
+				return fmt.Errorf("send to stream: %w", err)
+			}
+			return nil
+		}
+
 		for {
 			n, err := conn.Read(buf)
-			if n > 0 {
-				if err := stream.SendMsg(&ByteMessage{Data: buf[:n]}); err != nil {
-					return fmt.Errorf("send to stream: %w", err)
+			switch {
+			case errors.Is(err, io.EOF):
+				// Everything the connection had to say has been said. A final
+				// read is allowed to hand back bytes alongside the EOF, so
+				// they still go out before the stream is closed.
+				if err := send(n); err != nil {
+					return err
 				}
+				if closeStream != nil {
+					if err := closeStream(); err != nil {
+						return fmt.Errorf("close stream: %w", err)
+					}
+				}
+				return nil
+			case err != nil:
+				// A read error on the connection is terminal. Whatever is in
+				// the buffer belongs to a response that will never be
+				// completed, so there is nothing worth forwarding.
+				return fmt.Errorf("read from connection: %w", err)
 			}
 
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					// Everything the connection had to say has been said.
-					if closeStream != nil {
-						if err := closeStream(); err != nil {
-							return fmt.Errorf("close stream: %w", err)
-						}
-					}
-					return nil
-				}
-				return fmt.Errorf("read from connection: %w", err)
+			if err := send(n); err != nil {
+				return err
 			}
 
 			select {
