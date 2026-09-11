@@ -2,9 +2,10 @@ package earthly_registry_v1 //nolint:revive
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 
-	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -59,7 +60,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 					return nil
 				}
 				conn.Close()
-				return errors.Wrap(err, "failed to receive from the stream")
+				return fmt.Errorf("receive from stream: %w", err)
 			}
 
 			select {
@@ -71,7 +72,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 
 			if _, err := conn.Write(msg.GetData()); err != nil {
 				conn.Close()
-				return errors.Wrap(err, "failed to write to the connection")
+				return fmt.Errorf("write to connection: %w", err)
 			}
 
 			msg.Data = msg.Data[:0]
@@ -85,7 +86,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 			n, err := conn.Read(buf)
 			if n > 0 {
 				if err := stream.SendMsg(&ByteMessage{Data: buf[:n]}); err != nil {
-					return errors.Wrap(err, "failed to send to the stream")
+					return fmt.Errorf("send to stream: %w", err)
 				}
 			}
 
@@ -93,11 +94,13 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 				if errors.Is(err, io.EOF) {
 					// Everything the connection had to say has been said.
 					if closeStream != nil {
-						return errors.Wrap(closeStream(), "failed to close the stream")
+						if err := closeStream(); err != nil {
+							return fmt.Errorf("close stream: %w", err)
+						}
 					}
 					return nil
 				}
-				return errors.Wrap(err, "failed to read from the connection")
+				return fmt.Errorf("read from connection: %w", err)
 			}
 
 			select {
