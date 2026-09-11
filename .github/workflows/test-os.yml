@@ -38,10 +38,10 @@ jobs:
     steps:
       -
         name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       -
         name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@7b8cf10d4e4a01d4992d18a89f4d7dc5a3e6d6f4  # v4.3.0
         with:
           go-version: "${{ env.GO_VERSION }}"
       -
@@ -67,7 +67,7 @@ jobs:
       -
         name: Send to Codecov
         if: always()
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@ab904c41d6ece82784817410c45d8b8c02684457  # v3.1.6
         with:
           directory: ./bin/testreports
           env_vars: RUNNER_OS
@@ -75,30 +75,30 @@ jobs:
       -
         name: Generate annotations
         if: always()
-        uses: crazy-max/.github/.github/actions/gotest-annotations@5af0882e0496d2f7e98a53ae4048e3d86682496f
+        uses: crazy-max/.github/.github/actions/gotest-annotations@f91220cba053bd54299ba645a599ee8ed436f222  # v1.11.0
         with:
           directory: ./bin/testreports
       -
         name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: test-reports
           path: ./bin/testreports
       -
         name: Dump context
         if: failure()
-        uses: crazy-max/ghaction-dump-context@v2
+        uses: crazy-max/ghaction-dump-context@4d9eeaf15dd59aa4346919ea84a84ccf514b4db8  # v3.1.0
 
   build-freebsd-amd64:
     runs-on: ubuntu-22.04
     steps:
       -
         name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       -
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
       -
         name: Build
         uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c  # v6.9.0
@@ -108,7 +108,7 @@ jobs:
             *.platform=freebsd/amd64
       -
         name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: buildkit-freebsd-amd64
           path: ${{ env.DESTDIR }}/*
@@ -126,7 +126,7 @@ jobs:
     steps:
       -
         name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       -
         name: Download artifacts
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5.0.0
@@ -135,7 +135,7 @@ jobs:
           path: ${{ env.DESTDIR }}
       -
         name: Cache Vagrant boxes
-        uses: actions/cache@v3
+        uses: actions/cache@6f8efc29b200d32929f49075959781ed54ec270c  # v3.5.0
         with:
           path: ~/.vagrant.d/boxes
           key: ${{ runner.os }}-vagrant-${{ hashFiles('hack/Vagrantfile.freebsd13') }}
@@ -175,4 +175,4 @@ jobs:
       -
         name: Dump context
         if: failure()
-        uses: crazy-max/ghaction-dump-context@v2
+        uses: crazy-max/ghaction-dump-context@4d9eeaf15dd59aa4346919ea84a84ccf514b4db8  # v3.1.0
