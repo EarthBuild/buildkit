@@ -85,8 +85,23 @@ ENV GOFLAGS=-mod=vendor
 FROM buildkit-base AS buildkit-version
 # TODO: PKG should be inferred from go modules
 ARG RELEASE_VERSION=v0.0.0+earthlyunknown
-RUN --mount=target=. \
-  PKG=github.com/moby/buildkit EARTHLY_PKG=github.com/EarthBuild/buildkit VERSION=$(git describe --match 'v[0-9]*' --dirty='.m' --always --tags) REVISION=$(git rev-parse HEAD)$(if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi); \
+# REVISION is supplied by the caller rather than derived from git here.
+#
+# Deriving it needed `--mount=target=.`, which put the whole build context --
+# including .git -- into this stage's cache key. A git checkout is not
+# byte-reproducible, so the context digest differed per machine and this stage
+# missed the cache everywhere it had not already been built. buildctl and
+# buildkitd mount /tmp/.ldflags from here, so they inherited the miss; runc,
+# which mounts from runc-src instead of the context, was the only compile stage
+# that reused a shared cache. .git is now excluded from the context entirely
+# (see .earthlyignore), which is what makes the two expensive compile stages
+# cacheable across machines.
+#
+# The old `VERSION=$(git describe ...)` was already dead: the ldflags line has
+# used ${RELEASE_VERSION} since "build: bake version.Package as
+# github.com/EarthBuild/buildkit" (#18), so the computed value was discarded.
+ARG REVISION=unknown
+RUN PKG=github.com/moby/buildkit EARTHLY_PKG=github.com/EarthBuild/buildkit; \
   echo "-X ${PKG}/version.Version=${RELEASE_VERSION} -X ${PKG}/version.Revision=${REVISION} -X ${PKG}/version.Package=${EARTHLY_PKG}" | tee /tmp/.ldflags; \
   echo -n "${RELEASE_VERSION}" | tee /tmp/.version;
 

@@ -1,0 +1,18 @@
+# .git is deliberately excluded from the build context.
+#
+# Three Dockerfile stages mount the context (buildkit-version, buildctl,
+# buildkitd). A git checkout is not byte-reproducible -- .git/index carries
+# mtimes, logs/HEAD carries timestamps, packed-refs ordering varies -- so
+# including it made the context digest differ per machine, and those three
+# stages missed the layer cache on every machine that had not already built
+# them. runc, which mounts from the runc-src stage instead of the context, was
+# the only compile stage that reused a shared cache.
+#
+# Nothing in the build needs .git any more: buildkit-version now takes REVISION
+# as a build arg instead of shelling out to git.
+#
+# NOTE: the Earthfile here is VERSION 0.6, and earthly only falls back to
+# .dockerignore from 0.8 (the use-docker-ignore feature). .earthlyignore is
+# honoured at every version, so it is what actually takes effect for
+# `FROM DOCKERFILE`; .dockerignore is kept in sync for plain docker builds.
+.git
