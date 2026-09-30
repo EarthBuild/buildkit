@@ -418,7 +418,11 @@ func (jl *Solver) hasOwner(target Edge, owner Edge) bool {
 func (jl *Solver) setEdge(e Edge, targetEdge *edge) {
 	jl.mu.RLock()
 	defer jl.mu.RUnlock()
+	jl.setEdgeLocked(e, targetEdge)
+}
 
+// requires that Solver.mu is read-locked
+func (jl *Solver) setEdgeLocked(e Edge, targetEdge *edge) {
 	st, ok := jl.actives[e.Vertex.Digest()]
 	if !ok {
 		return
@@ -428,6 +432,43 @@ func (jl *Solver) setEdge(e Edge, targetEdge *edge) {
 	targetSt := jl.actives[targetEdge.edge.Vertex.Digest()]
 
 	st.setEdge(e.Index, targetEdge, targetSt)
+}
+
+// isActiveEdgeLocked reports whether e is still the edge its vertex's active
+// state resolves to. It is false once a Discard deleted that state, even if a
+// later job loaded the same digest again into a new state.
+// requires that Solver.mu is read-locked
+func (jl *Solver) isActiveEdgeLocked(e *edge) bool {
+	st, ok := jl.actives[e.edge.Vertex.Digest()]
+	if !ok {
+		return false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	cur, ok := st.edges[e.edge.Index]
+	if !ok {
+		return false
+	}
+	for cur.owner != nil {
+		cur = cur.owner
+	}
+	return cur == e
+}
+
+// mergeIfActive runs merge and then points src's state at dest, only if both
+// edges still belong to active states, holding the solver lock throughout so
+// that no Discard can delete dest's state in between.
+func (jl *Solver) mergeIfActive(dest, src *edge, merge func() bool) bool {
+	jl.mu.RLock()
+	defer jl.mu.RUnlock()
+	if !jl.isActiveEdgeLocked(dest) || !jl.isActiveEdgeLocked(src) {
+		return false
+	}
+	if !merge() {
+		return false
+	}
+	jl.setEdgeLocked(src.edge, dest)
+	return true
 }
 
 func (jl *Solver) getState(e Edge) *state {
