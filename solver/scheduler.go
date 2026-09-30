@@ -182,9 +182,15 @@ func (s *scheduler) dispatch(e *edge) {
 
 					bklog.G(context.TODO()).Debugf("merging edge %s[%d] to %s[%d]\n", src.edge.Vertex.Name(), src.edge.Index, dest.edge.Vertex.Name(), dest.edge.Index)
 					debugSchedulerMergingEdges(src, dest)
-					if s.mergeTo(dest, src) {
-						s.ef.setEdge(src.edge, dest)
-					} else {
+					// The index can still return an edge whose state a Discard
+					// has deleted, and a Discard can run between any check here
+					// and setEdge. Merging into such an edge hands src to a graph
+					// whose inputs are gone ("inconsistent graph state"), and
+					// every later edge with the same key merges there too.
+					// mergeIfActive checks both edges and merges under the
+					// solver lock, so the target's state gets src's jobs before
+					// a Discard can delete it.
+					if !s.ef.mergeIfActive(dest, src, func() bool { return s.mergeTo(dest, src) }) {
 						debugSchedulerMergingEdgesSkipped(src, dest)
 					}
 				}
@@ -353,6 +359,7 @@ type edgeFactory interface {
 	getEdge(Edge) *edge
 	setEdge(Edge, *edge)
 	hasOwner(Edge, Edge) bool
+	mergeIfActive(dest, src *edge, merge func() bool) bool
 }
 
 type pipeFactory struct {
