@@ -436,7 +436,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		resp[descKey] = base64.StdEncoding.EncodeToString(dtDesc)
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	timeoutCtx, cancel := context.WithTimeoutCause(ctx, 5*time.Second, errors.WithStack(context.DeadlineExceeded))
 	defer cancel()
 	caller, err := e.opt.SessionManager.Get(timeoutCtx, sessionID, false)
 	if err != nil {
@@ -675,7 +675,7 @@ func normalizedNames(name string) ([]string, error) {
 		return nil, nil
 	}
 	names := strings.Split(name, ",")
-	var tagNames = make([]string, len(names))
+	tagNames := make([]string, len(names))
 	for i, name := range names {
 		parsed, err := reference.ParseNormalizedNamed(name)
 		if err != nil {
@@ -767,10 +767,10 @@ func exportDirFunc(ctx context.Context, md map[string]string, caller session.Cal
 				// apply host uid/gid
 				res = idMapFunc(p, st)
 			}
-			//TODO if opt.Epoch != nil {
-			//TODO 	// apply used-specified epoch time
-			//TODO 	st.ModTime = opt.Epoch.UnixNano()
-			//TODO }
+			// TODO if opt.Epoch != nil {
+			// TODO 	// apply used-specified epoch time
+			// TODO 	st.ModTime = opt.Epoch.UnixNano()
+			// TODO }
 			return res
 		}
 		fs, err = fsutil.NewFilterFS(fs, filterOpt)

@@ -60,7 +60,7 @@ const (
 	CapExecMountTmpfsSize                apicaps.CapID = "exec.mount.tmpfs.size"
 	CapExecMountSecret                   apicaps.CapID = "exec.mount.secret"
 	CapExecMountSSH                      apicaps.CapID = "exec.mount.ssh"
-	CapExecMountSock                     apicaps.CapID = "exec.mount.sock"         // earthly-specific
+	CapExecMountSock                     apicaps.CapID = "exec.mount.sock" // earthly-specific
 	CapExecMountContentCache             apicaps.CapID = "exec.mount.cache.content"
 	CapExecCgroupsMounted                apicaps.CapID = "exec.cgroup"
 	CapExecSecretEnv                     apicaps.CapID = "exec.secretenv"

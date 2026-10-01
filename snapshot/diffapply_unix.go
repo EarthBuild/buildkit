@@ -816,5 +816,3 @@ func opaqueXattr(userxattr bool) string {
 	}
 	return trustedOpaqueXattr
 }
-
-

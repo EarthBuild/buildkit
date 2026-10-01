@@ -57,10 +57,10 @@ type SolveOpt struct {
 type ExportEntry struct {
 	Type               string
 	Attrs              map[string]string
-	Output             filesync.FileOutputFunc         // for ExporterOCI, ExporterDocker and ExporterEarthly
-	OutputDir          string                          // for ExporterLocal
+	Output             filesync.FileOutputFunc                 // for ExporterOCI, ExporterDocker and ExporterEarthly
+	OutputDir          string                                  // for ExporterLocal
 	OutputDirFunc      func(map[string]string) (string, error) // for ExporterEarthly
-	OutputPullCallback pullping.PullCallback                  // for ExporterEarthly
+	OutputPullCallback pullping.PullCallback                   // for ExporterEarthly
 	VerboseProgressCB  fsutil.VerboseProgressCB
 }
 

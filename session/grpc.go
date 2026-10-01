@@ -77,5 +77,3 @@ func grpcClientConn(ctx context.Context, conn net.Conn, healthCfg ManagerHealthC
 
 	return ctx, cc, nil
 }
-
-
