@@ -55,8 +55,6 @@ type ExecOp struct {
 
 var _ solver.Op = &ExecOp{}
 
-
-
 func NewExecOp(v solver.Vertex, op *pb.Op_Exec, platform *pb.Platform, cm cache.Manager, parallelism *semutil.Weighted, sm *session.Manager, exec executor.Executor, w worker.Worker) (*ExecOp, error) {
 	if err := opsutils.Validate(&pb.Op{Op: op}); err != nil {
 		return nil, err
@@ -401,8 +399,6 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 		return nil, err
 	}
 	// earthly-specific TODO: should the rec be set to a nopRecord, or can nil be safely used instead?
-
-
 
 	var execErr error
 	var rec resourcestypes.Recorder
