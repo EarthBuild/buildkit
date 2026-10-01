@@ -41,15 +41,18 @@ func grpcClientConn(ctx context.Context, conn net.Conn, healthCfg ManagerHealthC
 	dialOpts := []grpc.DialOption{
 		dialer,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+<<<<<<< HEAD
 		grpc.WithInitialWindowSize(65535 * 32),
 		grpc.WithInitialConnWindowSize(65535 * 16),
+=======
+>>>>>>> v0.13.2
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
 	}
 
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
-		unary = append(unary, filterClient(otelgrpc.UnaryClientInterceptor(otelgrpc.WithTracerProvider(span.TracerProvider()), otelgrpc.WithPropagators(propagators))))
-		stream = append(stream, otelgrpc.StreamClientInterceptor(otelgrpc.WithTracerProvider(span.TracerProvider()), otelgrpc.WithPropagators(propagators)))
+		unary = append(unary, filterClient(otelgrpc.UnaryClientInterceptor(otelgrpc.WithTracerProvider(span.TracerProvider()), otelgrpc.WithPropagators(propagators)))) //nolint:staticcheck // TODO(thaJeztah): ignore SA1019 for deprecated options: see https://github.com/moby/buildkit/issues/4681
+		stream = append(stream, otelgrpc.StreamClientInterceptor(otelgrpc.WithTracerProvider(span.TracerProvider()), otelgrpc.WithPropagators(propagators)))            //nolint:staticcheck // TODO(thaJeztah): ignore SA1019 for deprecated options: see https://github.com/moby/buildkit/issues/4681
 	}
 
 	unary = append(unary, grpcerrors.UnaryClientInterceptor)
@@ -72,15 +75,26 @@ func grpcClientConn(ctx context.Context, conn net.Conn, healthCfg ManagerHealthC
 		return nil, nil, errors.Wrap(err, "failed to create grpc client")
 	}
 
+<<<<<<< HEAD
 	ctx, cancel := context.WithCancel(ctx)
 	go configurableMonitorHealth(ctx, cc, cancel, healthCfg)
+=======
+	ctx, cancel := context.WithCancelCause(ctx)
+	go monitorHealth(ctx, cc, cancel)
+>>>>>>> v0.13.2
 
 	return ctx, cc, nil
 }
 
+<<<<<<< HEAD
 // func monitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelConn func()) {
 // 	defer cancelConn()
 // 	defer cc.Close()
+=======
+func monitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelConn func(error)) {
+	defer cancelConn(errors.WithStack(context.Canceled))
+	defer cc.Close()
+>>>>>>> v0.13.2
 
 // 	ticker := time.NewTicker(5 * time.Second)
 // 	defer ticker.Stop()
@@ -101,10 +115,19 @@ func grpcClientConn(ctx context.Context, conn net.Conn, healthCfg ManagerHealthC
 
 // 			healthcheckStart := time.Now()
 
+<<<<<<< HEAD
 // 			timeout := time.Duration(math.Max(float64(defaultHealthcheckDuration), float64(lastHealthcheckDuration)*1.5))
 // 			ctx, cancel := context.WithTimeout(ctx, timeout)
 // 			_, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 // 			cancel()
+=======
+			timeout := time.Duration(math.Max(float64(defaultHealthcheckDuration), float64(lastHealthcheckDuration)*1.5))
+
+			ctx, cancel := context.WithCancelCause(ctx)
+			ctx, _ = context.WithTimeoutCause(ctx, timeout, errors.WithStack(context.DeadlineExceeded))
+			_, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+			cancel(errors.WithStack(context.Canceled))
+>>>>>>> v0.13.2
 
 // 			lastHealthcheckDuration = time.Since(healthcheckStart)
 // 			logFields := logrus.Fields{

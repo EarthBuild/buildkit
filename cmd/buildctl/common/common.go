@@ -65,14 +65,12 @@ func ResolveClient(c *cli.Context) (*client.Client, error) {
 		key = c.GlobalString("tlskey")
 	}
 
-	opts := []client.ClientOpt{client.WithFailFast()}
-
 	ctx := CommandContext(c)
-
+	var opts []client.ClientOpt
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
 		opts = append(opts, client.WithTracerProvider(span.TracerProvider()))
 
-		exp, err := detect.Exporter()
+		exp, _, err := detect.Exporter()
 		if err != nil {
 			return nil, err
 		}
@@ -91,9 +89,10 @@ func ResolveClient(c *cli.Context) (*client.Client, error) {
 
 	timeout := time.Duration(c.GlobalInt("timeout"))
 	if timeout > 0 {
-		ctx2, cancel := context.WithTimeout(ctx, timeout*time.Second)
+		ctx2, cancel := context.WithCancelCause(ctx)
+		ctx2, _ = context.WithTimeoutCause(ctx2, timeout*time.Second, errors.WithStack(context.DeadlineExceeded))
 		ctx = ctx2
-		defer cancel()
+		defer cancel(errors.WithStack(context.Canceled))
 	}
 
 	cl, err := client.New(ctx, c.GlobalString("addr"), opts...)

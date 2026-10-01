@@ -81,7 +81,7 @@ func (gs *gitSource) Identifier(scheme, ref string, attrs map[string]string, pla
 				id.KeepGitDir = true
 			}
 		case pb.AttrFullRemoteURL:
-			if !isGitTransport(v) {
+			if !gitutil.IsGitTransport(v) {
 				v = "https://" + v
 			}
 			id.Remote = v
@@ -379,20 +379,45 @@ func (gs *gitSourceHandler) CacheKey(ctx context.Context, g session.Group, index
 
 	// TODO: should we assume that remote tag is immutable? add a timer?
 
-	buf, err := git.Run(ctx, "ls-remote", "origin", ref)
+	buf, err := git.Run(ctx, "ls-remote", "origin", ref, ref+"^{}")
 	if err != nil {
 		return "", "", nil, false, errors.Wrapf(err, "failed to fetch remote %s", urlutil.RedactCredentials(remote))
 	}
-	out := string(buf)
-	idx := strings.Index(out, "\t")
-	if idx == -1 {
-		return "", "", nil, false, errors.Errorf("repository does not contain ref %s, output: %q", ref, string(out))
+	lines := strings.Split(string(buf), "\n")
+
+	var (
+		partialRef      = "refs/" + strings.TrimPrefix(ref, "refs/")
+		headRef         = "refs/heads/" + strings.TrimPrefix(ref, "refs/heads/")
+		tagRef          = "refs/tags/" + strings.TrimPrefix(ref, "refs/tags/")
+		annotatedTagRef = tagRef + "^{}"
+	)
+	var sha, headSha, tagSha string
+	for _, line := range lines {
+		lineSha, lineRef, _ := strings.Cut(line, "\t")
+		switch lineRef {
+		case headRef:
+			headSha = lineSha
+		case tagRef, annotatedTagRef:
+			tagSha = lineSha
+		case partialRef:
+			sha = lineSha
+		}
 	}
 
-	sha := string(out[:idx])
+	// git-checkout prefers branches in case of ambiguity
+	if sha == "" {
+		sha = headSha
+	}
+	if sha == "" {
+		sha = tagSha
+	}
+	if sha == "" {
+		return "", "", nil, false, errors.Errorf("repository does not contain ref %s, output: %q", ref, string(buf))
+	}
 	if !isCommitSHA(sha) {
 		return "", "", nil, false, errors.Errorf("invalid commit sha %q", sha)
 	}
+
 	cacheKey := gs.shaToCacheKey(sha)
 	gs.cacheKey = cacheKey
 	return cacheKey, sha, nil, true, nil
@@ -483,7 +508,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		}
 	}
 
-	checkoutRef, err := gs.cache.New(ctx, nil, g, cache.WithRecordType(client.UsageRecordTypeGitCheckout), cache.WithDescription(fmt.Sprintf("git snapshot for %s#%s", gs.src.Remote, ref)))
+	checkoutRef, err := gs.cache.New(ctx, nil, g, cache.WithRecordType(client.UsageRecordTypeGitCheckout), cache.WithDescription(fmt.Sprintf("git snapshot for %s#%s", urlutil.RedactCredentials(gs.src.Remote), ref)))
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create new mutable for %s", urlutil.RedactCredentials(gs.src.Remote))
 	}
