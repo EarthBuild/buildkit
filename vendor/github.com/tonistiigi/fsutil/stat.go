@@ -19,7 +19,7 @@ func mkstat(path, relpath string, fi os.FileInfo, inodemap map[uint64]string) (*
 	relpath = filepath.ToSlash(relpath)
 
 	stat := &types.Stat{
-		Path:    filepath.FromSlash(relpath),
+		Path:    relpath,
 		Mode:    uint32(fi.Mode()),
 		ModTime: fi.ModTime().UnixNano(),
 	}
