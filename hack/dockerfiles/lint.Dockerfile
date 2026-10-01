@@ -19,12 +19,8 @@ COPY --link --from=protolint-base /usr/local/bin/protolint /usr/local/bin/protol
 COPY --link --from=xx / /
 WORKDIR /go/src/github.com/moby/buildkit
 
-<<<<<<< HEAD
-FROM base AS golangci-lint
-=======
 FROM base as golangci-lint
 ARG TARGETNAME
->>>>>>> v0.13.2
 ARG BUILDTAGS
 ARG TARGETPLATFORM
 RUN --mount=target=/go/src/github.com/moby/buildkit \
@@ -33,17 +29,12 @@ RUN --mount=target=/go/src/github.com/moby/buildkit \
   golangci-lint run --build-tags "${BUILDTAGS}" && \
   touch /golangci-lint.done
 
-<<<<<<< HEAD
-FROM base AS yamllint
-RUN --mount=target=/go/src/github.com/moby/buildkit --mount=target=/root/.cache,type=cache \
-=======
 FROM base as yamllint
 RUN --mount=target=/go/src/github.com/moby/buildkit \
->>>>>>> v0.13.2
   yamllint -c .yamllint.yml --strict . && \
   touch /yamllint.done
 
-FROM base AS protolint
+FROM base as protolint
 RUN --mount=target=/go/src/github.com/moby/buildkit \
   protolint lint . && \
   touch /protolint.done

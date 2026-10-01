@@ -1,5 +1,5 @@
-//go:build !windows
-// +build !windows
+//go:build linux || freebsd
+// +build linux freebsd
 
 package archutil
 

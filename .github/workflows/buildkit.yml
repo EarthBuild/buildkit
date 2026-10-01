@@ -22,7 +22,7 @@ on:
 
 env:
   GO_VERSION: "1.21"
-  SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
+  SETUP_BUILDX_VERSION: "latest"
   SETUP_BUILDKIT_IMAGE: "moby/buildkit:latest"
   IMAGE_NAME: "moby/buildkit"
   PLATFORMS: "linux/amd64,linux/arm/v7,linux/arm64,linux/s390x,linux/ppc64le,linux/riscv64"
@@ -104,16 +104,11 @@ jobs:
         env:
           RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
           PLATFORMS: ${{ matrix.platform }}
-          # TODO(jhorsts): replace with upstream
-          # CACHE_FROM: type=gha,scope=binaries-${{ env.PLATFORM_PAIR }}
-          # CACHE_TO: type=gha,scope=binaries-${{ env.PLATFORM_PAIR }}
+          CACHE_FROM: type=gha,scope=binaries-${{ env.PLATFORM_PAIR }}
+          CACHE_TO: type=gha,scope=binaries-${{ env.PLATFORM_PAIR }}
       -
         name: Upload artifacts
-<<<<<<< HEAD
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
-=======
-        uses: actions/upload-artifact@v4
->>>>>>> v0.13.2
         with:
           name: buildkit-${{ env.PLATFORM_PAIR }}
           path: ${{ env.DESTDIR }}/*
@@ -180,7 +175,7 @@ jobs:
         if: needs.prepare.outputs.push == 'push'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       -
         name: Build ${{ needs.prepare.outputs.tag }}
@@ -189,9 +184,8 @@ jobs:
         env:
           RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
           TARGET: ${{ matrix.target-stage }}
-          # TODO(jhorsts): replace with upstream
-          # CACHE_FROM: type=gha,scope=image${{ matrix.target-stage }}
-          # CACHE_TO: type=gha,scope=image${{ matrix.target-stage }}
+          CACHE_FROM: type=gha,scope=image${{ matrix.target-stage }}
+          CACHE_TO: type=gha,scope=image${{ matrix.target-stage }}
 
   release:
     runs-on: ubuntu-22.04
@@ -203,11 +197,7 @@ jobs:
     steps:
       -
         name: Download artifacts
-<<<<<<< HEAD
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5.0.0
-=======
         uses: actions/download-artifact@v4
->>>>>>> v0.13.2
         with:
           path: ${{ env.DESTDIR }}
           pattern: buildkit-*

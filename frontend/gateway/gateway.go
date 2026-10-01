@@ -453,10 +453,9 @@ func newBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridg
 	return lbf
 }
 
-<<<<<<< HEAD
-func serveLLBBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridge, workers worker.Infos, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) (*llbBridgeForwarder, context.Context, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	lbf := newBridgeForwarder(ctx, llbBridge, workers, inputs, sid, sm)
+func serveLLBBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridge, exec executor.Executor, workers worker.Infos, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) (*llbBridgeForwarder, context.Context, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	lbf := newBridgeForwarder(ctx, llbBridge, exec, workers, inputs, sid, sm)
 	maxMsgSize := 67108864 // 64MB
 	server := grpc.NewServer(
 		grpc.UnaryInterceptor(grpcerrors.UnaryServerInterceptor),
@@ -465,12 +464,6 @@ func serveLLBBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLB
 		grpc.InitialWindowSize(65535*32),
 		grpc.InitialConnWindowSize(65535*16),
 	)
-=======
-func serveLLBBridgeForwarder(ctx context.Context, llbBridge frontend.FrontendLLBBridge, exec executor.Executor, workers worker.Infos, inputs map[string]*opspb.Definition, sid string, sm *session.Manager) (*llbBridgeForwarder, context.Context, error) {
-	ctx, cancel := context.WithCancelCause(ctx)
-	lbf := newBridgeForwarder(ctx, llbBridge, exec, workers, inputs, sid, sm)
-	server := grpc.NewServer(grpc.UnaryInterceptor(grpcerrors.UnaryServerInterceptor), grpc.StreamInterceptor(grpcerrors.StreamServerInterceptor))
->>>>>>> v0.13.2
 	grpc_health_v1.RegisterHealthServer(server, health.NewServer())
 	pb.RegisterLLBBridgeServer(server, lbf)
 

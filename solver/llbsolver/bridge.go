@@ -12,14 +12,11 @@ import (
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/client"
-<<<<<<< HEAD
-	"github.com/moby/buildkit/client/llb"
-	"github.com/moby/buildkit/exporter"
-=======
+
 	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/executor"
 	resourcestypes "github.com/moby/buildkit/executor/resources/types"
->>>>>>> v0.13.2
+	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/frontend"
 	gw "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/identity"
@@ -77,6 +74,22 @@ func (b *llbBridge) Warn(ctx context.Context, dgst digest.Digest, msg string, op
 		})
 		return pw.Close()
 	})
+}
+
+func (b *llbBridge) ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (string, digest.Digest, []byte, error) {
+	if opt.LogName == "" {
+		opt.LogName = fmt.Sprintf("resolve image config for %s", ref)
+	}
+	resp, err := b.ResolveSourceMetadata(ctx, &pb.SourceOp{
+		Identifier: "docker-image://" + ref,
+	}, opt)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if resp.Image == nil {
+		return "", "", nil, errors.Errorf("no image metadata in response")
+	}
+	return ref, resp.Image.Digest, resp.Image.Config, nil
 }
 
 func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImports []gw.CacheOptionsEntry, pol []*spb.Policy) (solver.CachedResultWithProvenance, error) {
@@ -192,7 +205,6 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	return res, nil
 }
 
-<<<<<<< HEAD
 // getExporter is earthly specific code which extracts the configured exporter
 // from the job's metadata
 func (b *llbBridge) getExporter(ctx context.Context) (*ExporterRequest, error) {
@@ -226,21 +238,23 @@ func (b *llbBridge) Export(ctx context.Context, refs map[string]cache.ImmutableR
 	if err != nil {
 		return err
 	}
-	if exp.Exporter == nil {
+	if len(exp.Exporters) == 0 {
 		return errors.Errorf("Export had no exporter configured")
 	}
+	einst := exp.Exporters[0]
 
-	return inBuilderContext(ctx, b.builder, exp.Exporter.Name(), id, func(ctx context.Context, g session.Group) error {
+	return inBuilderContext(ctx, b.builder, einst.Name(), id, func(ctx context.Context, g session.Group) error {
 		sessionIDs := session.AllSessionIDs(g)
 		if len(sessionIDs) == 0 {
 			return errors.Errorf("group has no session IDs") // shouldnt happen
 		}
 		sessionID := sessionIDs[0]
 		var err error
-		_, _, err = exp.Exporter.Export(ctx, inp, sessionID)
+		_, _, err = einst.Export(ctx, inp, nil, sessionID)
 		return err
 	})
-=======
+}
+
 func (b *llbBridge) validateEntitlements(p executor.ProcessInfo) error {
 	ent, err := loadEntitlements(b.builder)
 	if err != nil {
@@ -285,7 +299,6 @@ func (b *llbBridge) loadExecutor() error {
 		b.executor = w.Executor()
 	})
 	return b.executorErr
->>>>>>> v0.13.2
 }
 
 type resultProxy struct {

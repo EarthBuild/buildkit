@@ -55,20 +55,13 @@ type SolveOpt struct {
 }
 
 type ExportEntry struct {
-<<<<<<< HEAD
 	Type               string
 	Attrs              map[string]string
-	Output             func(map[string]string) (io.WriteCloser, error) // for ExporterOCI, ExporterDocker and ExporterEarthly
-	OutputDir          string                                          // for ExporterLocal
-	OutputDirFunc      func(map[string]string) (string, error)         // for ExporterEarthly
-	OutputPullCallback pullping.PullCallback                           // for ExporterEarthly
+	Output             filesync.FileOutputFunc         // for ExporterOCI, ExporterDocker and ExporterEarthly
+	OutputDir          string                          // for ExporterLocal
+	OutputDirFunc      func(map[string]string) (string, error) // for ExporterEarthly
+	OutputPullCallback pullping.PullCallback                  // for ExporterEarthly
 	VerboseProgressCB  fsutil.VerboseProgressCB
-=======
-	Type      string
-	Attrs     map[string]string
-	Output    filesync.FileOutputFunc // for ExporterOCI and ExporterDocker
-	OutputDir string                  // for ExporterLocal
->>>>>>> v0.13.2
 }
 
 type CacheOptionsEntry struct {
@@ -164,54 +157,10 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			contentStores[key2] = store
 		}
 
-<<<<<<< HEAD
-		var supportFile bool
-		var supportDir bool
-		switch ex.Type {
-		case ExporterLocal:
-			supportDir = true
-		case ExporterTar:
-			supportFile = true
-		case ExporterOCI, ExporterDocker:
-			supportDir = ex.OutputDir != ""
-			supportFile = ex.Output != nil
-		case ExporterEarthly:
-			supportFile = true
-		}
-
-		if supportFile && supportDir {
-			return nil, errors.Errorf("both file and directory output is not supported by %s exporter", ex.Type)
-		}
-		if !supportFile && ex.Output != nil {
-			return nil, errors.Errorf("output file writer is not supported by %s exporter", ex.Type)
-		}
-		if !supportDir && ex.OutputDir != "" {
-			return nil, errors.Errorf("output directory is not supported by %s exporter", ex.Type)
-		}
-
-		if supportFile {
-			if ex.Output == nil {
-				return nil, errors.Errorf("output file writer is required for %s exporter", ex.Type)
-			}
-			if ex.Type == ExporterEarthly {
-				if ex.OutputPullCallback != nil {
-					s.Allow(pullping.NewPullPing(ex.OutputPullCallback))
-				}
-				s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.VerboseProgressCB))
-			} else {
-				s.Allow(filesync.NewFSSyncTarget(ex.Output, ex.VerboseProgressCB))
-			}
-		}
-		if supportDir {
-			if ex.OutputDir == "" {
-				return nil, errors.Errorf("output directory is required for %s exporter", ex.Type)
-			}
-=======
 		var syncTargets []filesync.FSSyncTarget
 		for exID, ex := range opt.Exports {
 			var supportFile bool
 			var supportDir bool
->>>>>>> v0.13.2
 			switch ex.Type {
 			case ExporterLocal:
 				supportDir = true
@@ -220,7 +169,10 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			case ExporterOCI, ExporterDocker:
 				supportDir = ex.OutputDir != ""
 				supportFile = ex.Output != nil
+			case ExporterEarthly:
+				supportFile = true
 			}
+
 			if supportFile && supportDir {
 				return nil, errors.Errorf("both file and directory output is not supported by %s exporter", ex.Type)
 			}
@@ -234,8 +186,16 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 				if ex.Output == nil {
 					return nil, errors.Errorf("output file writer is required for %s exporter", ex.Type)
 				}
-				syncTargets = append(syncTargets, filesync.WithFSSync(exID, ex.Output))
+				if ex.Type == ExporterEarthly {
+					if ex.OutputPullCallback != nil {
+						s.Allow(pullping.NewPullPing(ex.OutputPullCallback))
+					}
+					syncTargets = append(syncTargets, filesync.WithFSSyncEarthly(exID, ex.Output, ex.OutputDirFunc, ex.VerboseProgressCB))
+				} else {
+					syncTargets = append(syncTargets, filesync.WithFSSync(exID, ex.Output, ex.VerboseProgressCB))
+				}
 			}
+
 			if supportDir {
 				if ex.OutputDir == "" {
 					return nil, errors.Errorf("output directory is required for %s exporter", ex.Type)
@@ -251,16 +211,10 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 					}
 					contentStores["export"] = cs
 					storesToUpdate = append(storesToUpdate, ex.OutputDir)
+					syncTargets = append(syncTargets, filesync.WithFSSyncDir(exID, ex.OutputDir, ex.VerboseProgressCB))
 				default:
-					syncTargets = append(syncTargets, filesync.WithFSSyncDir(exID, ex.OutputDir))
+					syncTargets = append(syncTargets, filesync.WithFSSyncDir(exID, ex.OutputDir, ex.VerboseProgressCB))
 				}
-<<<<<<< HEAD
-				contentStores["export"] = cs
-				storesToUpdate = append(storesToUpdate, ex.OutputDir)
-			default:
-				s.Allow(filesync.NewFSSyncTargetDir(ex.OutputDir, ex.VerboseProgressCB))
-=======
->>>>>>> v0.13.2
 			}
 		}
 

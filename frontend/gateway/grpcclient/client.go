@@ -12,11 +12,8 @@ import (
 	"syscall"
 	"time"
 
-<<<<<<< HEAD
 	"github.com/containerd/containerd/defaults"
-=======
 	distreference "github.com/distribution/reference"
->>>>>>> v0.13.2
 	"github.com/gogo/googleapis/google/rpc"
 	gogotypes "github.com/gogo/protobuf/types"
 	"github.com/golang/protobuf/ptypes/any"
@@ -486,7 +483,6 @@ func (c *grpcClient) Solve(ctx context.Context, creq client.SolveRequest) (res *
 	return res, nil
 }
 
-<<<<<<< HEAD
 // Export is earthly-specific
 func (c *grpcClient) Export(ctx context.Context, req client.ExportRequest) error {
 	m := map[string]*pb.Ref{}
@@ -507,8 +503,6 @@ func (c *grpcClient) Export(ctx context.Context, req client.ExportRequest) error
 	return nil
 }
 
-func (c *grpcClient) ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt) (string, digest.Digest, []byte, error) {
-=======
 func (c *grpcClient) ResolveSourceMetadata(ctx context.Context, op *opspb.SourceOp, opt sourceresolver.Opt) (*sourceresolver.MetaResponse, error) {
 	if c.caps.Supports(pb.CapSourceMetaResolver) != nil {
 		var ref string
@@ -537,8 +531,6 @@ func (c *grpcClient) ResolveSourceMetadata(ctx context.Context, op *opspb.Source
 			},
 		}, nil
 	}
-
->>>>>>> v0.13.2
 	var p *opspb.Platform
 	if platform := opt.Platform; platform != nil {
 		p = &opspb.Platform{

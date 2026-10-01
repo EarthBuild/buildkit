@@ -14,6 +14,7 @@ const (
 	ExporterImageConfigDigestKey = "containerimage.config.digest"
 	ExporterImageDescriptorKey   = "containerimage.descriptor"
 	ExporterImageBaseConfigKey   = "containerimage.base.config"
+	ExporterInlineCache          = "containerimage.inlinecache"
 	ExporterPlatformsKey         = "refs.platforms"
 )
 
@@ -22,6 +23,7 @@ const (
 var KnownRefMetadataKeys = []string{
 	ExporterImageConfigKey,
 	ExporterImageBaseConfigKey,
+	ExporterInlineCache,
 }
 
 type Platforms struct {

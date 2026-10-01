@@ -333,14 +333,10 @@ func (jl *Solver) setEdge(e Edge, targetEdge *edge) {
 		return
 	}
 
-<<<<<<< HEAD
-	st.setEdge(e.Index, targetEdge)
-=======
 	// potentially passing nil targetSt is intentional and handled in st.setEdge
 	targetSt := jl.actives[targetEdge.edge.Vertex.Digest()]
 
 	st.setEdge(e.Index, targetEdge, targetSt)
->>>>>>> v0.13.2
 }
 
 func (jl *Solver) getState(e Edge) *state {

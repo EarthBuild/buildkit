@@ -276,23 +276,18 @@ func main() {
 			return err
 		}
 
-<<<<<<< HEAD
-		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor(ctx, tp), grpcerrors.UnaryServerInterceptor,
-			unaryTimeoutInterceptor(), // earthly-specific
-		)
-		stream := grpc_middleware.ChainStreamServer(streamTracer, grpcerrors.StreamServerInterceptor,
-			streamTimeoutInterceptor(), // earthly-specific
-		)
-=======
 		streamTracer := otelgrpc.StreamServerInterceptor( //nolint:staticcheck // TODO(thaJeztah): ignore SA1019 for deprecated options: see https://github.com/moby/buildkit/issues/4681
 			otelgrpc.WithTracerProvider(tp),
 			otelgrpc.WithMeterProvider(mp),
 			otelgrpc.WithPropagators(propagators),
 		)
 
-		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor(ctx, tp, mp), grpcerrors.UnaryServerInterceptor)
-		stream := grpc_middleware.ChainStreamServer(streamTracer, grpcerrors.StreamServerInterceptor)
->>>>>>> v0.13.2
+		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor(ctx, tp, mp), grpcerrors.UnaryServerInterceptor,
+			unaryTimeoutInterceptor(), // earthly-specific
+		)
+		stream := grpc_middleware.ChainStreamServer(streamTracer, grpcerrors.StreamServerInterceptor,
+			streamTimeoutInterceptor(), // earthly-specific
+		)
 
 		maxMsgSize := 67108864 // 64MB
 		opts := []grpc.ServerOption{
@@ -337,10 +332,7 @@ func main() {
 			os.RemoveAll(lockPath)
 		}()
 
-<<<<<<< HEAD
 		shutdownCh := make(chan struct{})
-		controller, err := newController(c, &cfg, shutdownCh)
-=======
 		// listeners have to be initialized before the controller
 		// https://github.com/moby/buildkit/issues/4618
 		listeners, err := newGRPCListeners(cfg.GRPC)
@@ -348,8 +340,7 @@ func main() {
 			return err
 		}
 
-		controller, err := newController(c, &cfg)
->>>>>>> v0.13.2
+		controller, err := newController(c, &cfg, shutdownCh)
 		if err != nil {
 			return err
 		}
@@ -418,14 +409,10 @@ func main() {
 			err = serverErr
 			cancel(err)
 		case <-ctx.Done():
-<<<<<<< HEAD
-			err = ctx.Err()
+			err = context.Cause(ctx)
 		case <-shutdownCh:
 			cancelReg()
 			err = nil
-=======
-			err = context.Cause(ctx)
->>>>>>> v0.13.2
 		}
 
 		bklog.G(ctx).Infof("stopping server")
