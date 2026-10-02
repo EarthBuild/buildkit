@@ -1,11 +1,7 @@
 # syntax=docker/dockerfile-upstream:master
 
 ARG RUNC_VERSION=v1.1.12
-<<<<<<< HEAD
-ARG CONTAINERD_VERSION=v1.7.7
-=======
 ARG CONTAINERD_VERSION=v1.7.11
->>>>>>> v0.13.2
 # containerd v1.6 for integration tests
 ARG CONTAINERD_ALT_VERSION_16=v1.6.24
 ARG REGISTRY_VERSION=v2.8.3
@@ -14,11 +10,7 @@ ARG CNI_VERSION=v1.3.0
 ARG STARGZ_SNAPSHOTTER_VERSION=v0.15.1
 ARG NERDCTL_VERSION=v1.6.2
 ARG DNSNAME_VERSION=v1.3.1
-<<<<<<< HEAD
 ARG NYDUS_VERSION=v2.2.4
-=======
-ARG NYDUS_VERSION=v2.1.6
->>>>>>> origin/main
 ARG SILO_VERSION=RELEASE.2026-09-16T00-00-00Z
 ARG AZURITE_VERSION=3.18.0
 ARG GOTESTSUM_VERSION=v1.9.0
@@ -26,11 +18,7 @@ ARG DELVE_VERSION=v1.21.0
 
 ARG GO_VERSION=1.21
 ARG ALPINE_VERSION=3.19
-<<<<<<< HEAD
-ARG XX_VERSION=1.3.0
-=======
 ARG XX_VERSION=1.4.0
->>>>>>> v0.13.2
 ARG BUILDKIT_DEBUG
 
 # silo for s3 integration tests
@@ -231,11 +219,8 @@ FROM scratch AS release
 COPY --link --from=releaser /out/ /
 
 FROM alpinebase AS buildkit-export
-<<<<<<< HEAD
-RUN apk add --no-cache fuse3 git openssh pigz xz iptables iptables-legacy ip6tables \
-=======
 RUN apk add --no-cache fuse3 git openssh pigz xz iptables ip6tables \
->>>>>>> v0.13.2
+  iptables-legacy \
   && ln -s fusermount3 /usr/bin/fusermount
 COPY --link examples/buildctl-daemonless/buildctl-daemonless.sh /usr/bin/
 VOLUME /var/lib/buildkit

@@ -2,11 +2,8 @@ package solver
 
 import (
 	"context"
-<<<<<<< HEAD
-	"fmt"
-=======
 	"encoding/csv"
->>>>>>> v0.13.2
+	"fmt"
 	"os"
 	"strings"
 	"sync"

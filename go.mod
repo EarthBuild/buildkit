@@ -49,12 +49,7 @@ require (
 	github.com/moby/docker-image-spec v1.3.1
 	github.com/moby/locker v1.0.1
 	github.com/moby/patternmatcher v0.6.0
-<<<<<<< HEAD
-	github.com/moby/sys/mount v0.3.3
-	github.com/moby/sys/mountinfo v0.6.2
-=======
-	github.com/moby/sys/mountinfo v0.7.1
->>>>>>> v0.13.2
+	github.com/moby/sys/mountinfo v0.7.2
 	github.com/moby/sys/signal v0.7.0
 	github.com/moby/sys/user v0.1.0
 	github.com/morikuni/aec v1.0.0
@@ -108,7 +103,10 @@ require (
 	kernel.org/pub/linux/libs/security/libcap/cap v1.2.67
 )
 
-require github.com/docker/distribution v2.8.2+incompatible
+require (
+	github.com/docker/distribution v2.8.2+incompatible
+	github.com/moby/sys/mount v0.3.5
+)
 
 require (
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20230811130428-ced1acdcaa24 // indirect
@@ -144,31 +142,20 @@ require (
 	github.com/docker/docker-credential-helpers v0.8.0 // indirect
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
 	github.com/docker/go-metrics v0.0.1 // indirect
-<<<<<<< HEAD
-	github.com/docker/libtrust v0.0.0-20150114040149-fa567046d9b1 // indirect
-	github.com/felixge/httpsnoop v1.0.3 // indirect
-	github.com/garyburd/redigo v0.0.0-20150301180006-535138d7bcd7 // indirect
-	github.com/go-logr/logr v1.2.3 // indirect
-=======
+	github.com/docker/libtrust v0.0.0-20160708172513-aabc10ec26b7 // indirect
 	github.com/felixge/fgprof v0.9.3 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/garyburd/redigo v1.6.4 // indirect
 	github.com/go-logr/logr v1.3.0 // indirect
->>>>>>> v0.13.2
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
-<<<<<<< HEAD
-	github.com/google/uuid v1.3.0 // indirect
-	github.com/gorilla/handlers v0.0.0-20150720190736-60c7bfde3e33 // indirect
-	github.com/gorilla/mux v1.8.0 // indirect
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.11.3 // indirect
-	github.com/hanwen/go-fuse/v2 v2.2.0 // indirect
-=======
 	github.com/google/pprof v0.0.0-20230323073829-e72429f035bd // indirect
 	github.com/google/uuid v1.5.0 // indirect
+	github.com/gorilla/handlers v1.5.2 // indirect
+	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
 	github.com/hanwen/go-fuse/v2 v2.4.0 // indirect
->>>>>>> v0.13.2
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
@@ -186,22 +173,12 @@ require (
 	github.com/vbatts/tar-split v0.11.5 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	go.opencensus.io v0.24.0 // indirect
-<<<<<<< HEAD
-	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.14.0 // indirect
-	go.opentelemetry.io/otel/metric v0.37.0 // indirect
-	golang.org/x/mod v0.11.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
-	golang.org/x/tools v0.10.0 // indirect
-	google.golang.org/genproto v0.0.0-20230711160842-782d3b101e98 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20230711160842-782d3b101e98 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
-=======
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric v0.42.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.14.0 // indirect
 	google.golang.org/genproto v0.0.0-20231016165738-49dd2c1f3d0b // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20231016165738-49dd2c1f3d0b // indirect
->>>>>>> v0.13.2
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.67 // indirect
 )

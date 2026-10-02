@@ -88,7 +88,7 @@ func Copy(ctx context.Context, srcRoot, src, dstRoot, dst string, opts ...Opt) e
 		return err
 	}
 
-	c, err := newCopier(dstRoot, ci.Chown, ci.Utime, ci.Mode, ci.XAttrErrorHandler, ci.IncludePatterns, ci.ExcludePatterns, ci.AlwaysReplaceExistingDestPaths, ci.ChangeFunc)
+	c, err := newCopier(dstRoot, ci.Chown, ci.Utime, ci.Mode, ci.XAttrErrorHandler, ci.IncludePatterns, ci.ExcludePatterns, ci.ChangeFunc)
 	if err != nil {
 		return err
 	}
@@ -172,11 +172,7 @@ type CopyInfo struct {
 	IncludePatterns []string
 	// Exclude files/dir matching any of these patterns (even if they match an include pattern)
 	ExcludePatterns []string
-	// If true, any source path that overwrite existing destination paths will always replace
-	// the existing destination path, even if they are of different types (e.g. a directory will
-	// replace any existing symlink or file)
-	AlwaysReplaceExistingDestPaths bool
-	ChangeFunc                     fsutil.ChangeFunc
+	ChangeFunc      fsutil.ChangeFunc
 }
 
 type Opt func(*CopyInfo)
@@ -231,17 +227,16 @@ func WithChangeNotifier(fn fsutil.ChangeFunc) Opt {
 }
 
 type copier struct {
-	chown                          Chowner
-	utime                          *time.Time
-	mode                           *int
-	inodes                         map[uint64]string
-	xattrErrorHandler              XAttrErrorHandler
-	includePatternMatcher          *patternmatcher.PatternMatcher
-	excludePatternMatcher          *patternmatcher.PatternMatcher
-	parentDirs                     []parentDir
-	changefn                       fsutil.ChangeFunc
-	root                           string
-	alwaysReplaceExistingDestPaths bool
+	chown                 Chowner
+	utime                 *time.Time
+	mode                  *int
+	inodes                map[uint64]string
+	xattrErrorHandler     XAttrErrorHandler
+	includePatternMatcher *patternmatcher.PatternMatcher
+	excludePatternMatcher *patternmatcher.PatternMatcher
+	parentDirs            []parentDir
+	changefn              fsutil.ChangeFunc
+	root                  string
 }
 
 type parentDir struct {
@@ -250,7 +245,7 @@ type parentDir struct {
 	copied  bool
 }
 
-func newCopier(root string, chown Chowner, tm *time.Time, mode *int, xeh XAttrErrorHandler, includePatterns, excludePatterns []string, alwaysReplaceExistingDestPaths bool, changeFunc fsutil.ChangeFunc) (*copier, error) {
+func newCopier(root string, chown Chowner, tm *time.Time, mode *int, xeh XAttrErrorHandler, includePatterns, excludePatterns []string, changeFunc fsutil.ChangeFunc) (*copier, error) {
 	if xeh == nil {
 		xeh = func(dst, src, key string, err error) error {
 			return err
@@ -276,16 +271,15 @@ func newCopier(root string, chown Chowner, tm *time.Time, mode *int, xeh XAttrEr
 	}
 
 	return &copier{
-		root:                           root,
-		inodes:                         map[uint64]string{},
-		chown:                          chown,
-		utime:                          tm,
-		xattrErrorHandler:              xeh,
-		mode:                           mode,
-		includePatternMatcher:          includePatternMatcher,
-		excludePatternMatcher:          excludePatternMatcher,
-		changefn:                       changeFunc,
-		alwaysReplaceExistingDestPaths: alwaysReplaceExistingDestPaths,
+		root:                  root,
+		inodes:                map[uint64]string{},
+		chown:                 chown,
+		utime:                 tm,
+		xattrErrorHandler:     xeh,
+		mode:                  mode,
+		includePatternMatcher: includePatternMatcher,
+		excludePatternMatcher: excludePatternMatcher,
+		changefn:              changeFunc,
 	}, nil
 }
 
@@ -330,10 +324,6 @@ func (c *copier) copy(ctx context.Context, src, srcComponents, target string, ov
 	}
 
 	if include {
-		if err := c.removeTargetIfNeeded(src, target, fi, targetFi); err != nil {
-			return err
-		}
-
 		if err := c.createParentDirs(src, srcComponents, target, overwriteTargetMetadata); err != nil {
 			return err
 		}
@@ -448,21 +438,6 @@ func (c *copier) exclude(path string, fi os.FileInfo, parentExcludeMatchInfo pat
 		return false, matchInfo, errors.Wrap(err, "failed to match excludepatterns")
 	}
 	return m, matchInfo, nil
-}
-
-func (c *copier) removeTargetIfNeeded(src, target string, srcFi, targetFi os.FileInfo) error {
-	if !c.alwaysReplaceExistingDestPaths {
-		return nil
-	}
-	if targetFi == nil {
-		// already doesn't exist
-		return nil
-	}
-	if srcFi.IsDir() && targetFi.IsDir() {
-		// directories are merged, not replaced
-		return nil
-	}
-	return os.RemoveAll(target)
 }
 
 // Delayed creation of parent directories when a file or dir matches an include

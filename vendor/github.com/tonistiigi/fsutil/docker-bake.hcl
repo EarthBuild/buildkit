@@ -1,9 +1,5 @@
 variable "GO_VERSION" {
-  default = null
-}
-
-variable "DESTDIR" {
-  default = "./bin"
+  default = "1.20"
 }
 
 group "default" {
@@ -22,14 +18,12 @@ group "test" {
 
 target "test-root" {
   inherits = ["build"]
-  target = "test-coverage"
-  output = ["${DESTDIR}/coverage"]
+  target = "test"
 }
 
 target "test-noroot" {
   inherits = ["build"]
-  target = "test-noroot-coverage"
-  output = ["${DESTDIR}/coverage"]
+  target = "test-noroot"
 }
 
 target "lint" {

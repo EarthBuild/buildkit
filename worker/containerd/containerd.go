@@ -31,10 +31,7 @@ import (
 type RuntimeInfo = containerdexecutor.RuntimeInfo
 
 // NewWorkerOpt creates a WorkerOpt.
-<<<<<<< HEAD
 // earthly-specific use semutil.Weighted instead of semaphore
-func NewWorkerOpt(root string, address, snapshotterName, ns string, rootless bool, labels map[string]string, dns *oci.DNSConfig, nopt netproviders.Opt, apparmorProfile string, selinux bool, parallelismSem *semutil.Weighted, traceSocket string, runtime *RuntimeInfo, opts ...containerd.ClientOpt) (base.WorkerOpt, error) {
-=======
 func NewWorkerOpt(
 	root string,
 	address, snapshotterName, ns string,
@@ -44,12 +41,11 @@ func NewWorkerOpt(
 	nopt netproviders.Opt,
 	apparmorProfile string,
 	selinux bool,
-	parallelismSem *semaphore.Weighted,
+	parallelismSem *semutil.Weighted,
 	traceSocket string,
 	runtime *RuntimeInfo,
 	opts ...containerd.ClientOpt,
 ) (base.WorkerOpt, error) {
->>>>>>> v0.13.2
 	opts = append(opts, containerd.WithDefaultNamespace(ns))
 
 	if goRuntime.GOOS == "windows" {

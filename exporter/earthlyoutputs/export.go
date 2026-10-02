@@ -78,9 +78,10 @@ func New(opt Opt) (exporter.Exporter, error) {
 	return im, nil
 }
 
-func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exporter.ExporterInstance, error) {
+func (e *imageExporter) Resolve(ctx context.Context, id int, opt map[string]string) (exporter.ExporterInstance, error) {
 	i := &imageExporterInstance{
 		imageExporter: e,
+		id:            id,
 		opts: containerimage.ImageCommitOpts{
 			RefCfg: cacheconfig.RefConfig{
 				Compression: compression.New(compression.Default),
@@ -181,6 +182,7 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 
 type imageExporterInstance struct {
 	*imageExporter
+	id                   int
 	opts                 containerimage.ImageCommitOpts
 	push                 bool
 	pushByDigest         bool
@@ -191,6 +193,10 @@ type imageExporterInstance struct {
 	nameCanonical        bool
 	danglingPrefix       string
 	meta                 map[string][]byte
+}
+
+func (e *imageExporterInstance) ID() int {
+	return e.id
 }
 
 func (e *imageExporterInstance) Name() string {
@@ -234,7 +240,7 @@ type imgData struct {
 	opts containerimage.ImageCommitOpts
 }
 
-func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, sessionID string) (map[string]string, exporter.DescriptorReference, error) {
+func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, inlineCache exptypes.InlineCache, sessionID string) (map[string]string, exporter.DescriptorReference, error) {
 	if src.Ref != nil {
 		return nil, nil, errors.Errorf("export with src.Ref not supported")
 	}
@@ -261,11 +267,6 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			if strings.HasPrefix(mdK, mdPrefix) {
 				simpleMd[strings.TrimPrefix(mdK, mdPrefix)] = mdV
 			}
-		}
-		inlineCacheK := fmt.Sprintf("%s/%s", exptypes.ExporterInlineCache, k)
-		inlineCache, ok := src.Metadata[inlineCacheK]
-		if ok {
-			simpleMd[exptypes.ExporterInlineCache] = inlineCache
 		}
 
 		opts := e.opts
@@ -404,7 +405,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 
 	resp := make(map[string]string)
 	for imgName, img := range images {
-		desc, err := e.opt.ImageWriter.Commit(ctx, img.expSrc, sessionID, &img.opts)
+		desc, err := e.opt.ImageWriter.Commit(ctx, img.expSrc, sessionID, inlineCache, &img.opts)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -430,8 +431,9 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		resp[descKey] = base64.StdEncoding.EncodeToString(dtDesc)
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	timeoutCtx, cancel := context.WithCancelCause(ctx)
+	timeoutCtx, _ = context.WithTimeoutCause(timeoutCtx, 5*time.Second, errors.WithStack(context.DeadlineExceeded))
+	defer cancel(errors.WithStack(context.Canceled))
 	caller, err := e.opt.SessionManager.Get(timeoutCtx, sessionID, false)
 	if err != nil {
 		return nil, nil, err
@@ -445,7 +447,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		for mdK, mdV := range img.expSrc.Metadata {
 			md[safeGrpcMetaKey(mdK)] = string(mdV)
 		}
-		img.tarWriter, err = filesync.CopyFileWriter(ctx, md, caller)
+		img.tarWriter, err = filesync.CopyFileWriter(ctx, md, e.id, caller)
 		if err != nil {
 			return nil, nil, err
 		}

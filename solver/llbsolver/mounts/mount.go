@@ -279,7 +279,7 @@ type sockMountInstance struct {
 }
 
 func (sm *sockMountInstance) Mount() ([]mount.Mount, func() error, error) {
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancelCause(context.TODO())
 
 	uid := int(sm.sm.mount.SockOpt.Uid)
 	gid := int(sm.sm.mount.SockOpt.Gid)
@@ -290,7 +290,7 @@ func (sm *sockMountInstance) Mount() ([]mount.Mount, func() error, error) {
 			GID: gid,
 		})
 		if err != nil {
-			cancel()
+			cancel(err)
 			return nil, nil, err
 		}
 		uid = identity.UID
@@ -304,7 +304,7 @@ func (sm *sockMountInstance) Mount() ([]mount.Mount, func() error, error) {
 		Mode: int(sm.sm.mount.SockOpt.Mode & 0777),
 	})
 	if err != nil {
-		cancel()
+		cancel(err)
 		return nil, nil, err
 	}
 	release := func() error {
@@ -312,7 +312,7 @@ func (sm *sockMountInstance) Mount() ([]mount.Mount, func() error, error) {
 		if cleanup != nil {
 			err = cleanup()
 		}
-		cancel()
+		cancel(err)
 		return err
 	}
 
