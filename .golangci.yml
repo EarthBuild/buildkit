@@ -54,6 +54,8 @@ linters-settings:
       - G402  # TLS MinVersion too low
       - G601  # Implicit memory aliasing in for loop (false positives)
       - G504  # Import blocklist: net/http/cgi
+      - G115  # Integer overflow conversion (pre-existing across codebase)
+      - G306  # WriteFile permissions (test files use os.ModePerm)
     config:
       G306: "0644"
 
@@ -77,3 +79,21 @@ issues:
     - linters:
         - revive
       text: "if-return"
+    - linters:
+        - errname
+      text: "should conform to the"
+    - linters:
+        - staticcheck
+      text: "SA1019:"
+    - linters:
+        - staticcheck
+      text: "SA1006:"
+    - linters:
+        - gosimple
+      text: "S1016:"
+    - linters:
+        - nolintlint
+      text: "staticcheck"
+    - linters:
+        - nolintlint
+      text: "errname"

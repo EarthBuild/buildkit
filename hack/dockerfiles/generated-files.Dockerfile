@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile-upstream:master
 
-ARG GO_VERSION="1.21"
+ARG GO_VERSION="1.23"
 ARG PROTOC_VERSION="3.11.4"
 
 # protoc is dynamically linked to glibc so can't use alpine base

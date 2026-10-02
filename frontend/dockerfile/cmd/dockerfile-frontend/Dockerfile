@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile-upstream:master
 
-ARG GO_VERSION=1.21
+ARG GO_VERSION=1.23
 
 # xx is a helper for cross-compilation
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:master@sha256:d4254d9739ce2de9fb88e09bdc716aa0c65f0446a2a2143399f991d71136a3d4 AS xx
@@ -14,7 +14,7 @@ ENV GOFLAGS=-mod=vendor
 FROM base AS version
 ARG CHANNEL
 # TODO: PKG should be inferred from go modules
-RUN --mount=target=. \ 
+RUN --mount=target=. \
   PKG=github.com/moby/buildkit/frontend/dockerfile/cmd/dockerfile-frontend VERSION=$(./frontend/dockerfile/cmd/dockerfile-frontend/hack/detect "$CHANNEL") REVISION=$(git rev-parse HEAD)$(if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi) \
   && echo "-X main.Version=${VERSION} -X main.Revision=${REVISION} -X main.Package=${PKG}" | tee /tmp/.ldflags \
   && echo -n "${VERSION}" | tee /tmp/.version
