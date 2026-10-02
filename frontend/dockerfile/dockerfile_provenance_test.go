@@ -204,9 +204,9 @@ RUN echo "ok" > /foo
 			require.Equal(t, "dockerfile", pred.Invocation.Parameters.Locals[1].Name)
 
 			require.NotNil(t, pred.Metadata.BuildFinishedOn)
-			require.True(t, time.Since(*pred.Metadata.BuildFinishedOn) < 5*time.Minute)
+			require.Less(t, time.Since(*pred.Metadata.BuildFinishedOn), 5*time.Minute)
 			require.NotNil(t, pred.Metadata.BuildStartedOn)
-			require.True(t, time.Since(*pred.Metadata.BuildStartedOn) < 5*time.Minute)
+			require.Less(t, time.Since(*pred.Metadata.BuildStartedOn), 5*time.Minute)
 			require.True(t, pred.Metadata.BuildStartedOn.Before(*pred.Metadata.BuildFinishedOn))
 
 			require.True(t, pred.Metadata.Completeness.Environment)
@@ -276,7 +276,7 @@ COPY myapp.Dockerfile /
 	expectedGitSHA, err := cmd.Output()
 	require.NoError(t, err)
 
-	server := httptest.NewServer(http.FileServer(http.Dir(filepath.Join(dir.Name))))
+	server := httptest.NewServer(http.FileServer(http.Dir(filepath.Clean(dir.Name))))
 	defer server.Close()
 
 	target := registry + "/buildkit/testwithprovenance:git"
@@ -1369,6 +1369,7 @@ COPY bar bar2
 			break
 		}
 		require.Equal(t, ref, ev.Record.Ref)
+		require.Len(t, ev.Record.Exporters, 1)
 
 		for _, prov := range ev.Record.Result.Attestations {
 			if len(prov.Annotations) == 0 || prov.Annotations["in-toto.io/predicate-type"] != "https://slsa.dev/provenance/v0.2" {

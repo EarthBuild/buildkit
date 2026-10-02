@@ -8,7 +8,6 @@ import (
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/util/bklog"
 	digest "github.com/opencontainers/go-digest"
-	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
 
@@ -284,13 +283,18 @@ func marshalRemote(ctx context.Context, r *solver.Remote, state *marshalState) s
 		return ""
 	}
 
+<<<<<<< HEAD
 	if cd, ok := r.Provider.(withCheckDescriptor); ok && len(r.Descriptors) > 0 {
+=======
+	if r.Provider != nil {
+>>>>>>> v0.14.1
 		for _, d := range r.Descriptors {
-			if cd.CheckDescriptor(ctx, d) != nil {
+			if _, err := r.Provider.Info(ctx, d.Digest); err != nil {
 				return ""
 			}
 		}
 	}
+
 	var parentID string
 	if len(r.Descriptors) > 1 {
 		r2 := &solver.Remote{

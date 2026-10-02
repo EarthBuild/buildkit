@@ -118,8 +118,9 @@ func (c *CacheChains) Marshal(ctx context.Context) (*CacheConfig, DescriptorProv
 type DescriptorProvider map[digest.Digest]DescriptorProviderPair
 
 type DescriptorProviderPair struct {
-	Descriptor ocispecs.Descriptor
-	Provider   content.Provider
+	Descriptor   ocispecs.Descriptor
+	Provider     content.Provider
+	InfoProvider content.InfoProvider
 }
 
 var _ withCheckDescriptor = DescriptorProviderPair{}
@@ -129,6 +130,9 @@ func (p DescriptorProviderPair) ReaderAt(ctx context.Context, desc ocispecs.Desc
 }
 
 func (p DescriptorProviderPair) Info(ctx context.Context, dgst digest.Digest) (content.Info, error) {
+	if p.InfoProvider != nil {
+		return p.InfoProvider.Info(ctx, dgst)
+	}
 	if dgst != p.Descriptor.Digest {
 		return content.Info{}, errors.Errorf("content not found %s", dgst)
 	}

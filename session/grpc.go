@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 
 	"github.com/containerd/containerd/defaults"
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/grpcerrors"
+	"github.com/moby/buildkit/util/tracing"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/trace"
@@ -26,10 +26,14 @@ func serve(ctx context.Context, grpcServer *grpc.Server, conn net.Conn) {
 	(&http2.Server{}).ServeConn(conn, &http2.ServeConnOpts{Handler: grpcServer})
 }
 
+<<<<<<< HEAD
 func grpcClientConn(ctx context.Context, conn net.Conn, healthCfg ManagerHealthCfg) (context.Context, *grpc.ClientConn, error) {
 	var unary []grpc.UnaryClientInterceptor
 	var stream []grpc.StreamClientInterceptor
 
+=======
+func grpcClientConn(ctx context.Context, conn net.Conn) (context.Context, *grpc.ClientConn, error) {
+>>>>>>> v0.14.1
 	var dialCount int64
 	dialer := grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 		if c := atomic.AddInt64(&dialCount, 1); c > 1 {
@@ -45,26 +49,16 @@ func grpcClientConn(ctx context.Context, conn net.Conn, healthCfg ManagerHealthC
 		grpc.WithInitialConnWindowSize(65535 * 16),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
+		grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor),
+		grpc.WithStreamInterceptor(grpcerrors.StreamClientInterceptor),
 	}
 
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
-		unary = append(unary, filterClient(otelgrpc.UnaryClientInterceptor(otelgrpc.WithTracerProvider(span.TracerProvider()), otelgrpc.WithPropagators(propagators)))) //nolint:staticcheck // TODO(thaJeztah): ignore SA1019 for deprecated options: see https://github.com/moby/buildkit/issues/4681
-		stream = append(stream, otelgrpc.StreamClientInterceptor(otelgrpc.WithTracerProvider(span.TracerProvider()), otelgrpc.WithPropagators(propagators)))            //nolint:staticcheck // TODO(thaJeztah): ignore SA1019 for deprecated options: see https://github.com/moby/buildkit/issues/4681
-	}
-
-	unary = append(unary, grpcerrors.UnaryClientInterceptor)
-	stream = append(stream, grpcerrors.StreamClientInterceptor)
-
-	if len(unary) == 1 {
-		dialOpts = append(dialOpts, grpc.WithUnaryInterceptor(unary[0]))
-	} else if len(unary) > 1 {
-		dialOpts = append(dialOpts, grpc.WithUnaryInterceptor(grpc_middleware.ChainUnaryClient(unary...)))
-	}
-
-	if len(stream) == 1 {
-		dialOpts = append(dialOpts, grpc.WithStreamInterceptor(stream[0]))
-	} else if len(stream) > 1 {
-		dialOpts = append(dialOpts, grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(stream...)))
+		statsHandler := tracing.ClientStatsHandler(
+			otelgrpc.WithTracerProvider(span.TracerProvider()),
+			otelgrpc.WithPropagators(propagators),
+		)
+		dialOpts = append(dialOpts, grpc.WithStatsHandler(statsHandler))
 	}
 
 	cc, err := grpc.DialContext(ctx, "localhost", dialOpts...)

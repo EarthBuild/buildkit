@@ -14,12 +14,12 @@ func TestParsePidsStat(t *testing.T) {
 	testDir := t.TempDir()
 
 	err := os.WriteFile(filepath.Join(testDir, "pids.current"), []byte("123"), 0644)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	expectedPidsStat := &resourcestypes.PIDsStat{
 		Current: uint64Ptr(123),
 	}
-	stats, err := getCgroupPIDsStat(filepath.Join(testDir))
+	stats, err := getCgroupPIDsStat(filepath.Clean(testDir))
 	require.NoError(t, err)
 	assert.Equal(t, expectedPidsStat, stats)
 }

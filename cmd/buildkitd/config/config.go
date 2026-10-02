@@ -36,6 +36,19 @@ type Config struct {
 
 	Health  HealthConfig   `toml:"health"`
 	History *HistoryConfig `toml:"history"`
+
+	Frontends struct {
+		Dockerfile DockerfileFrontendConfig `toml:"dockerfile.v0"`
+		Gateway    GatewayFrontendConfig    `toml:"gateway.v0"`
+	} `toml:"frontend"`
+
+	System *SystemConfig `toml:"system"`
+}
+
+type SystemConfig struct {
+	// PlatformCacheMaxAge controls how often supported platforms
+	// are refreshed by rescanning the system.
+	PlatformsCacheMaxAge *Duration `toml:"platformsCacheMaxAge"`
 }
 
 type LogConfig struct {
@@ -177,4 +190,13 @@ type Hook struct {
 type HistoryConfig struct {
 	MaxAge     Duration `toml:"maxAge"`
 	MaxEntries int64    `toml:"maxEntries"`
+}
+
+type DockerfileFrontendConfig struct {
+	Enabled *bool `toml:"enabled"`
+}
+
+type GatewayFrontendConfig struct {
+	Enabled             *bool    `toml:"enabled"`
+	AllowedRepositories []string `toml:"allowedRepositories"`
 }

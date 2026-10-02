@@ -289,10 +289,8 @@ func buildAction(clicontext *cli.Context) error {
 		if len(def.Def) == 0 {
 			return errors.Errorf("empty definition sent to build. Specify --frontend instead?")
 		}
-	} else {
-		if clicontext.Bool("no-cache") {
-			solveOpt.FrontendAttrs["no-cache"] = ""
-		}
+	} else if clicontext.Bool("no-cache") {
+		solveOpt.FrontendAttrs["no-cache"] = ""
 	}
 
 	refFile := clicontext.String("ref-file")
@@ -326,7 +324,7 @@ func buildAction(clicontext *cli.Context) error {
 		metricsCh := make(chan *client.SolveStatus)
 		pw = progresswriter.Tee(pw, metricsCh)
 		meg.Go(func() error {
-			vtxMap := tailVTXInfo(ctx, pw, metricsCh)
+			vtxMap := tailVTXInfo(metricsCh)
 			if cacheMetricsFile == os.Stdout || cacheMetricsFile == os.Stdin {
 				// make sure everything was printed out to get it as the last line.
 				eg.Wait()
@@ -426,7 +424,6 @@ func buildAction(clicontext *cli.Context) error {
 }
 
 func writeMetadataFile(filename string, exporterResponse map[string]string) error {
-	var err error
 	out := make(map[string]interface{})
 	for k, v := range exporterResponse {
 		dt, err := base64.StdEncoding.DecodeString(v)

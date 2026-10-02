@@ -702,7 +702,7 @@ buildctl \
 
 ### Load balancing
 
-`buildctl build` can be called against randomly load balanced the `buildkitd` daemon.
+`buildctl build` can be called against randomly load balanced `buildkitd` daemons.
 
 See also [Consistent hashing](#consistent-hashing) for client-side load balancing.
 
@@ -799,6 +799,10 @@ export JAEGER_TRACE=0.0.0.0:6831
 # restart buildkitd and buildctl so they know JAEGER_TRACE
 # any buildctl command should be traced to http://127.0.0.1:16686/
 ```
+
+> On Windows, if you are running Jaeger outside of a container, [`jaeger-all-in-one.exe`](https://www.jaegertracing.io/docs/1.57/getting-started/#all-in-one),
+> set the environment variable `setx -m JAEGER_TRACE "0.0.0.0:6831"`,
+> restart `buildkitd` in a new terminal and the traces will be collected automatically.
 
 ## Running BuildKit without root privileges
 

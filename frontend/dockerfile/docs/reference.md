@@ -1,4 +1,6 @@
-# Dockerfile reference
+---
+title: Dockerfile reference
+---
 
 Docker can build images automatically by reading the instructions from a
 Dockerfile. A Dockerfile is a text document that contains all the commands a
@@ -453,7 +455,7 @@ The exec form is parsed as a JSON array, which means that
 you must use double-quotes (") around words, not single-quotes (').
 
 ```dockerfile
-ENTRYPOINT ["/bin/bash", "-c", "echo", "hello"]
+ENTRYPOINT ["/bin/bash", "-c", "echo hello"]
 ```
 
 The exec form is best used to specify an `ENTRYPOINT` instruction, combined
@@ -564,8 +566,10 @@ The image can be any valid image.
   `FROM` instruction. Each `FROM` instruction clears any state created by previous
   instructions.
 - Optionally a name can be given to a new build stage by adding `AS name` to the
-  `FROM` instruction. The name can be used in subsequent `FROM` and
-  `COPY --from=<name>` instructions to refer to the image built in this stage.
+  `FROM` instruction. The name can be used in subsequent `FROM <name>`,
+  [`COPY --from=<name>`](#copy---from),
+  and [`RUN --mount=type=bind,from=<name>`](#run---mounttypebind) instructions
+  to refer to the image built in this stage.
 - The `tag` or `digest` values are optional. If you omit either of them, the
   builder assumes a `latest` tag by default. The builder returns an error if it
   can't find the `tag` value.
@@ -669,6 +673,7 @@ The supported mount types are:
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | [`bind`](#run---mounttypebind) (default) | Bind-mount context directories (read-only).                                                               |
 | [`cache`](#run---mounttypecache)         | Mount a temporary directory to cache directories for compilers and package managers.                      |
+| [`tmpfs`](#run---mounttypetmpfs)         | Mount a `tmpfs` in the build container.                                                                   |
 | [`secret`](#run---mounttypesecret)       | Allow the build container to access secure files such as private keys without baking them into the image. |
 | [`ssh`](#run---mounttypessh)             | Allow the build container to access SSH keys via SSH agents, with support for passphrases.                |
 
@@ -785,7 +790,7 @@ with support for passphrases.
 | `uid`      | User ID for socket. Default `0`.                                                               |
 | `gid`      | Group ID for socket. Default `0`.                                                              |
 
-#### Example: access to Gitlab
+#### Example: access to GitLab
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -1360,6 +1365,7 @@ COPY [OPTIONS] ["<src>", ... "<dest>"]
 
 The available `[OPTIONS]` are:
 
+- [`--from`](#copy---from)
 - [`--chown`](#copy---chown---chmod)
 - [`--chmod`](#copy---chown---chmod)
 - [`--link`](#copy---link)
@@ -1425,10 +1431,10 @@ attempted to be used instead.
 
 `COPY` obeys the following rules:
 
-- The `<src>` path must be inside the build context;
-  you can't use `COPY ../something /something`, because the builder can only
-  access files from the context, and `../something` specifies a parent file or
-  directory of the build context root.
+- The `<src>` path is resolved relative to the build context.
+  If you specify a relative path leading outside of the build context, such as
+  `COPY ../something /something`, parent directory paths are stripped out automatically.
+  The effective source path in this example becomes `COPY something /something`
 
 - If `<src>` is a directory, the entire contents of the directory are copied,
   including filesystem metadata.
@@ -1461,6 +1467,42 @@ attempted to be used instead.
 > guide – Leverage build cache](https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#leverage-build-cache)
 > for more information.
 
+### COPY --from
+
+By default, the `COPY` instruction copies files from the build context. The
+`COPY --from` flag lets you copy files from an image, a build stage,
+or a named context instead.
+
+```dockerfile
+COPY [--from=<image|stage|context>] <src> ... <dest>
+```
+
+To copy from a build stage in a
+[multi-stage build](https://docs.docker.com/build/building/multi-stage/),
+specify the name of the stage you want to copy from. You specify stage names
+using the `AS` keyword with the `FROM` instruction.
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM alpine AS build
+COPY . .
+RUN apk add clang
+RUN clang -o /hello hello.c
+
+FROM scratch
+COPY --from=build /hello /
+```
+
+You can also copy files directly from other images. The following example
+copies an `nginx.conf` file from the official Nginx image.
+
+```dockerfile
+COPY --from=nginx:latest /etc/nginx/nginx.conf /nginx.conf
+```
+
+The source path of `COPY --from` is always resolved from filesystem root of the
+image or stage that you specify.
+
 ### COPY --chown --chmod
 
 > **Note**
@@ -1478,7 +1520,7 @@ not translate between Linux and Windows, the use of `/etc/passwd` and `/etc/grou
 translating user and group names to IDs restricts this feature to only be viable for
 Linux OS-based containers.
 
-All files and directories copied from the build context are created with a UID and GID of 0.unless the
+All files and directories copied from the build context are created with a UID and GID of `0` unless the
 optional `--chown` flag specifies a given username, groupname, or UID/GID
 combination to request specific ownership of the copied content. The
 format of the `--chown` flag allows for either username and groupname strings
@@ -2097,14 +2139,6 @@ flag.
 > learn about secure ways to use secrets when building images.
 { .warning }
 
-
-If you specify a build argument that wasn't defined in the Dockerfile,
-the build outputs a warning.
-
-```console
-[Warning] One or more build-args [foo] were not consumed.
-```
-
 A Dockerfile may include one or more `ARG` instructions. For example,
 the following is a valid Dockerfile:
 
@@ -2448,15 +2482,11 @@ ONBUILD ADD . /app/src
 ONBUILD RUN /usr/local/bin/python-build --dir /app/src
 ```
 
-> **Warning**
->
-> Chaining `ONBUILD` instructions using `ONBUILD ONBUILD` isn't allowed.
-{ .warning }
+### ONBUILD limitations
 
-> **Warning**
->
-> The `ONBUILD` instruction may not trigger `FROM` or `MAINTAINER` instructions.
-{ .warning }
+- Chaining `ONBUILD` instructions using `ONBUILD ONBUILD` isn't allowed.
+- The `ONBUILD` instruction may not trigger `FROM` or `MAINTAINER` instructions.
+- `ONBUILD COPY --from` is [not supported](https://github.com/moby/buildkit/issues/816).
 
 ## STOPSIGNAL
 

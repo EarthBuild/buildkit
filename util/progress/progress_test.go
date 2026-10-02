@@ -9,13 +9,14 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
 func TestProgress(t *testing.T) {
 	t.Parallel()
 	s, err := calc(context.TODO(), 4, "calc")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 10, s)
 
 	eg, ctx := errgroup.WithContext(context.Background())
@@ -29,19 +30,19 @@ func TestProgress(t *testing.T) {
 	pw, _, ctx2 := NewFromContext(ctx, WithMetadata("tag", "foo"))
 	s, err = calc(ctx2, 5, "calc")
 	pw.Close()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 15, s)
 
 	cancelProgress(errors.WithStack(context.Canceled))
 	err = eg.Wait()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.True(t, len(trace.items) > 5)
-	assert.True(t, len(trace.items) <= 7)
+	assert.Greater(t, len(trace.items), 5)
+	assert.LessOrEqual(t, len(trace.items), 7)
 	for _, p := range trace.items {
 		v, ok := p.Meta("tag")
 		assert.True(t, ok)
-		assert.Equal(t, v.(string), "foo")
+		assert.Equal(t, "foo", v.(string))
 	}
 }
 
@@ -54,16 +55,16 @@ func TestProgressNested(t *testing.T) {
 		return saveProgress(ctx, pr, &trace)
 	})
 	s, err := reduceCalc(ctx, 3)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 6, s)
 
 	cancelProgress(errors.WithStack(context.Canceled))
 
 	err = eg.Wait()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.True(t, len(trace.items) > 9) // usually 14
-	assert.True(t, len(trace.items) <= 15)
+	assert.Greater(t, len(trace.items), 9) // usually 14
+	assert.LessOrEqual(t, len(trace.items), 15)
 }
 
 func calc(ctx context.Context, total int, name string) (int, error) {

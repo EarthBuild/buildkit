@@ -1,40 +1,57 @@
 run:
   timeout: 30m
-  skip-files:
-    - ".*\\.pb\\.go$"
 
   modules-download-mode: vendor
 
 linters:
   enable:
+    - bodyclose
     - depguard
+    - errname
+    - forbidigo
+    - gocritic
     - gofmt
     - goimports
+    - gosec
     - gosimple
-    - revive
     - govet
     - importas
     - ineffassign
+    - makezero
     - misspell
+    - noctx
+    - nolintlint
+    - revive
     - staticcheck
+    # - testifylint
     - typecheck
     - unused
-    - bodyclose
-    - errname
-    - makezero
     - whitespace
-    - nolintlint
-    - gosec
-    - forbidigo
   disable-all: true
 
 linters-settings:
+  gocritic:
+    disabled-checks:
+      - "ifElseChain"
+      - "assignOp"
+      - "appendAssign"
+      - "singleCaseSwitch"
+  govet:
+    enable:
+      - nilness
+      - unusedwrite
+  # enable-all: true
+  # disable:
+  #   - fieldalignment
+  #   - shadow
   depguard:
     rules:
       main:
         deny:
-          # The io/ioutil package has been deprecated.
-          # https://go.dev/doc/go1.16#ioutil
+          - pkg: "github.com/containerd/containerd/errdefs"
+            desc: The containerd errdefs package was migrated to a separate module. Use github.com/containerd/errdefs instead.
+          - pkg: "github.com/containerd/containerd/log"
+            desc: The containerd log package was migrated to a separate module. Use github.com/containerd/log instead.
           - pkg: "io/ioutil"
             desc: The io/ioutil package has been deprecated.
   forbidigo:
@@ -47,21 +64,35 @@ linters-settings:
       - '^ctx\.Err(# use context\.Cause instead)?$'
   importas:
     alias:
+      # Enforce alias to prevent it accidentally being used instead of our
+      # own errdefs package (or vice-versa).
+      - pkg: "github.com/containerd/errdefs"
+        alias: "cerrdefs"
       - pkg: "github.com/opencontainers/image-spec/specs-go/v1"
         alias: "ocispecs"
       - pkg: "github.com/opencontainers/go-digest"
         alias: "digest"
+
+    # Do not allow unaliased imports of aliased packages.
     no-unaliased: true
   gosec:
     excludes:
       - G101  # Potential hardcoded credentials (false positives)
       - G402  # TLS MinVersion too low
-      - G601  # Implicit memory aliasing in for loop (false positives)
       - G504  # Import blocklist: net/http/cgi
+      - G601  # Implicit memory aliasing in for loop (false positives)
     config:
       G306: "0644"
+  testifylint:
+    disable:
+      # disable rules that reduce the test condition
+      - "empty"
+      - "bool-compare"
+      - "len"
 
 issues:
+  exclude-files:
+    - ".*\\.pb\\.go$"
   exclude-rules:
     - linters:
         - revive

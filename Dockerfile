@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile-upstream:master
 
 ARG RUNC_VERSION=v1.1.12
-ARG CONTAINERD_VERSION=v1.7.11
+ARG CONTAINERD_VERSION=v1.7.18
 # containerd v1.6 for integration tests
-ARG CONTAINERD_ALT_VERSION_16=v1.6.24
+ARG CONTAINERD_ALT_VERSION_16=v1.6.33
 ARG REGISTRY_VERSION=v2.8.3
 ARG ROOTLESSKIT_VERSION=v2.0.0
 ARG CNI_VERSION=v1.3.0
@@ -17,22 +17,12 @@ ARG GOTESTSUM_VERSION=v1.9.0
 ARG DELVE_VERSION=v1.21.0
 
 ARG GO_VERSION=1.21
-ARG ALPINE_VERSION=3.19
+ARG ALPINE_VERSION=3.20
 ARG XX_VERSION=1.4.0
 ARG BUILDKIT_DEBUG
 
 # silo for s3 integration tests
 FROM pgsty/silo:${SILO_VERSION} AS silo
-
-# alpine base for buildkit image
-# TODO: remove this when alpine image supports riscv64
-FROM alpine:${ALPINE_VERSION} AS alpine-amd64
-FROM alpine:${ALPINE_VERSION} AS alpine-arm
-FROM alpine:${ALPINE_VERSION} AS alpine-arm64
-FROM alpine:${ALPINE_VERSION} AS alpine-s390x
-FROM alpine:${ALPINE_VERSION} AS alpine-ppc64le
-FROM alpine:edge@sha256:2d01a16bab53a8405876cec4c27235d47455a7b72b75334c614f2fb0968b3f90 AS alpine-riscv64
-FROM alpine-$TARGETARCH AS alpinebase
 
 # xx is a helper for cross-compilation
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:${XX_VERSION} AS xx
@@ -96,11 +86,12 @@ RUN --mount=target=. \
 FROM buildkit-base AS buildctl
 ENV CGO_ENABLED=0
 ARG TARGETPLATFORM
+ARG GOBUILDFLAGS
 RUN --mount=target=. --mount=target=/root/.cache,type=cache \
   --mount=target=/go/pkg/mod,type=cache \
   --mount=source=/tmp/.ldflags,target=/tmp/.ldflags,from=buildkit-version <<EOT
   set -ex
-  xx-go build -ldflags "$(cat /tmp/.ldflags)" -o /usr/bin/buildctl ./cmd/buildctl
+  xx-go build ${GOBUILDFLAGS} -ldflags "$(cat /tmp/.ldflags)" -o /usr/bin/buildctl ./cmd/buildctl
   xx-verify --static /usr/bin/buildctl
   if [ "$(xx-info os)" = "linux" ]; then /usr/bin/buildctl --version; fi
 EOT
@@ -218,7 +209,7 @@ RUN --mount=from=binaries \
 FROM scratch AS release
 COPY --link --from=releaser /out/ /
 
-FROM alpinebase AS buildkit-export
+FROM alpine:${ALPINE_VERSION} AS buildkit-export
 RUN apk add --no-cache fuse3 git openssh pigz xz iptables ip6tables \
   iptables-legacy \
   && ln -s fusermount3 /usr/bin/fusermount
@@ -258,7 +249,7 @@ RUN --mount=from=containerd-src,src=/usr/src/containerd,rw \
 EOT
 
 # containerd v1.6 for integration tests
-FROM containerd-base as containerd-alt-16
+FROM containerd-base AS containerd-alt-16
 ARG CONTAINERD_ALT_VERSION_16
 RUN --mount=from=containerd-src,src=/usr/src/containerd,rw \
     --mount=target=/root/.cache,type=cache <<EOT
@@ -338,14 +329,37 @@ ARG TARGETPLATFORM
 RUN --mount=target=/root/.cache,type=cache <<EOT
   set -ex
   xx-go install "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"
+  xx-go install "github.com/wadey/gocovmerge@latest"
   mkdir /out
   if ! xx-info is-cross; then
     /go/bin/gotestsum --version
     mv /go/bin/gotestsum /out
+    mv /go/bin/gocovmerge /out
   else
     mv /go/bin/*/gotestsum* /out
+    mv /go/bin/*/gocovmerge* /out
   fi
 EOT
+COPY --chmod=755 <<"EOF" /out/gotestsumandcover
+#!/bin/sh
+set -x
+if [ -z "$GO_TEST_COVERPROFILE" ]; then
+  exec gotestsum "$@"
+fi
+coverdir="$(dirname "$GO_TEST_COVERPROFILE")"
+mkdir -p "$coverdir/helpers"
+gotestsum "$@" "-coverprofile=$GO_TEST_COVERPROFILE"
+ecode=$?
+go tool covdata textfmt -i=$coverdir/helpers -o=$coverdir/helpers-report.txt
+gocovmerge "$coverdir/helpers-report.txt" "$GO_TEST_COVERPROFILE" > "$coverdir/merged-report.txt"
+mv "$coverdir/merged-report.txt" "$GO_TEST_COVERPROFILE"
+rm "$coverdir/helpers-report.txt"
+for f in "$coverdir/helpers"/*; do
+  rm "$f"
+done
+rmdir "$coverdir/helpers"
+exit $ecode
+EOF
 
 FROM buildkit-export AS buildkit-linux
 COPY --link --from=binaries / /usr/bin/
@@ -429,7 +443,7 @@ FROM integration-tests AS dev-env
 VOLUME /var/lib/buildkit
 
 # Rootless mode.
-FROM alpinebase AS rootless
+FROM alpine:${ALPINE_VERSION} AS rootless
 RUN apk add --no-cache fuse3 fuse-overlayfs git openssh pigz shadow-uidmap xz
 RUN adduser -D -u 1000 user \
   && mkdir -p /run/user/1000 /home/user/.local/tmp /home/user/.local/share/buildkit \

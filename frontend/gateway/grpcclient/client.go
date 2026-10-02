@@ -1269,10 +1269,18 @@ func (r *reference) StatFile(ctx context.Context, req client.StatRequest) (*fsty
 }
 
 func grpcClientConn(ctx context.Context) (context.Context, *grpc.ClientConn, error) {
-	dialOpt := grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
-		return stdioConn(), nil
-	})
+	dialOpts := []grpc.DialOption{
+		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			return stdioConn(), nil
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor),
+		grpc.WithStreamInterceptor(grpcerrors.StreamClientInterceptor),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(16 << 20)),
+		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(16 << 20)),
+	}
 
+<<<<<<< HEAD
 	cc, err := grpc.DialContext(ctx, "localhost", dialOpt,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor),
@@ -1281,6 +1289,9 @@ func grpcClientConn(ctx context.Context) (context.Context, *grpc.ClientConn, err
 		grpc.WithInitialConnWindowSize(65535*16),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
 		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)))
+=======
+	cc, err := grpc.DialContext(ctx, "localhost", dialOpts...)
+>>>>>>> v0.14.1
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to create grpc client")
 	}

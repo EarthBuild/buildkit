@@ -373,6 +373,7 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		if err != nil {
 			return nil, err
 		}
+		bklog.G(ctx).Debugf("resolve exporter %s with %v", ex.Type, ex.Attrs)
 		expi, err := exp.Resolve(ctx, i, ex.Attrs)
 		if err != nil {
 			return nil, err

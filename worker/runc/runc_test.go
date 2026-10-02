@@ -86,7 +86,7 @@ func TestRuncWorker(t *testing.T) {
 
 	names, err := f.Readdirnames(-1)
 	require.NoError(t, err)
-	require.True(t, len(names) > 5)
+	require.Greater(t, len(names), 5)
 
 	err = f.Close()
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestRuncWorker(t *testing.T) {
 	// }
 
 	for _, d := range du {
-		require.True(t, d.Size >= 8192)
+		require.GreaterOrEqual(t, d.Size, int64(8192))
 	}
 
 	meta := executor.Meta{
@@ -142,11 +142,11 @@ func TestRuncWorker(t *testing.T) {
 	target, err = lm.Mount()
 	require.NoError(t, err)
 
-	//Verifies fix for issue https://github.com/moby/buildkit/issues/429
+	// verifies fix for issue https://github.com/moby/buildkit/issues/429
 	dt, err := os.ReadFile(filepath.Join(target, "run", "bar"))
 
 	require.NoError(t, err)
-	require.Equal(t, string(dt), "foo\n")
+	require.Equal(t, "foo\n", string(dt))
 
 	lm.Unmount()
 	require.NoError(t, err)

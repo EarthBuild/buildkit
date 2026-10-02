@@ -2,7 +2,6 @@ package workers
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,7 +26,6 @@ func (osp otelSocketPath) UpdateConfigFile(in string) string {
 }
 
 func runBuildkitd(
-	ctx context.Context,
 	conf *integration.BackendConfig,
 	args []string,
 	logs map[string]*bytes.Buffer,
@@ -81,6 +79,10 @@ func runBuildkitd(
 		"BUILDKIT_DEBUG_EXEC_OUTPUT=1",
 		"BUILDKIT_DEBUG_PANIC_ON_ERROR=1",
 		"TMPDIR="+filepath.Join(tmpdir, "tmp"))
+	if v := os.Getenv("GO_TEST_COVERPROFILE"); v != "" {
+		coverDir := filepath.Join(filepath.Dir(v), "helpers")
+		cmd.Env = append(cmd.Env, "GOCOVERDIR="+coverDir)
+	}
 	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.SysProcAttr = getSysProcAttr()
 
