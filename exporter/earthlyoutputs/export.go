@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	archiveexporter "github.com/containerd/containerd/images/archive"
@@ -28,6 +29,7 @@ import (
 	"github.com/moby/buildkit/session/filesync"
 	"github.com/moby/buildkit/session/pullping"
 	"github.com/moby/buildkit/snapshot"
+	"github.com/moby/buildkit/solver/result"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/grpcerrors"
@@ -238,6 +240,8 @@ type imgData struct {
 	localExportReport func()
 
 	opts containerimage.ImageCommitOpts
+
+	inlineCacheRefKeys map[string]string // maps platform ID (or "" for single-platform) -> src.Refs key
 }
 
 func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, inlineCache exptypes.InlineCache, sessionID string) (map[string]string, exporter.DescriptorReference, error) {
@@ -327,7 +331,8 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				img, ok := images[imgName]
 				if !ok {
 					img = &imgData{
-						expSrc: &exporter.Source{},
+						expSrc:             &exporter.Source{},
+						inlineCacheRefKeys: make(map[string]string),
 					}
 					images[imgName] = img
 				}
@@ -362,6 +367,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 						Platform: p,
 					}
 					img.platforms = append(img.platforms, plat)
+					img.inlineCacheRefKeys[platStr] = k
 				} else {
 					ps, err := exptypes.ParsePlatforms(img.expSrc.Metadata)
 					if err != nil {
@@ -374,6 +380,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 						return nil, nil, err
 					}
 					img.expSrc.AddMeta(exptypes.ExporterPlatformsKey, dt)
+					img.inlineCacheRefKeys[""] = k
 				}
 
 				for mdK, mdV := range simpleMd {
@@ -403,9 +410,60 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	}
 	defer done(context.TODO())
 
+	var (
+		inlineCacheOnce   sync.Once
+		inlineCacheResult *result.Result[*exptypes.InlineCacheEntry]
+		inlineCacheErr    error
+	)
+	getInlineCache := func(ctx context.Context) (*result.Result[*exptypes.InlineCacheEntry], error) {
+		if inlineCache == nil {
+			return nil, nil
+		}
+		inlineCacheOnce.Do(func() {
+			inlineCacheResult, inlineCacheErr = inlineCache(ctx)
+		})
+		return inlineCacheResult, inlineCacheErr
+	}
+
 	resp := make(map[string]string)
 	for imgName, img := range images {
-		desc, err := e.opt.ImageWriter.Commit(ctx, img.expSrc, sessionID, inlineCache, &img.opts)
+		var imgInlineCache exptypes.InlineCache
+		if inlineCache != nil {
+			imgInlineCache = func(ctx context.Context) (*result.Result[*exptypes.InlineCacheEntry], error) {
+				res, err := getInlineCache(ctx)
+				if err != nil || res == nil {
+					return nil, err
+				}
+				imgRes := &result.Result[*exptypes.InlineCacheEntry]{}
+				if srcRefKey, ok := img.inlineCacheRefKeys[""]; ok {
+					if entry, found := res.FindRef(srcRefKey); found {
+						imgRes.Ref = entry
+						for _, plat := range img.platforms {
+							imgRes.AddRef(plat.ID, entry)
+						}
+					}
+				}
+				for platStr, srcRefKey := range img.inlineCacheRefKeys {
+					if platStr == "" {
+						continue
+					}
+					if entry, found := res.FindRef(srcRefKey); found {
+						imgRes.AddRef(platStr, entry)
+						if imgRes.Ref == nil {
+							imgRes.Ref = entry
+						}
+					}
+				}
+				if imgRes.Ref == nil && len(imgRes.Refs) == 0 && res.Ref != nil {
+					imgRes.Ref = res.Ref
+					for _, plat := range img.platforms {
+						imgRes.AddRef(plat.ID, res.Ref)
+					}
+				}
+				return imgRes, nil
+			}
+		}
+		desc, err := e.opt.ImageWriter.Commit(ctx, img.expSrc, sessionID, imgInlineCache, &img.opts)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -431,9 +489,8 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		resp[descKey] = base64.StdEncoding.EncodeToString(dtDesc)
 	}
 
-	timeoutCtx, cancel := context.WithCancelCause(ctx)
-	timeoutCtx, _ = context.WithTimeoutCause(timeoutCtx, 5*time.Second, errors.WithStack(context.DeadlineExceeded))
-	defer cancel(errors.WithStack(context.Canceled))
+	timeoutCtx, cancel := context.WithTimeoutCause(ctx, 5*time.Second, errors.WithStack(context.DeadlineExceeded))
+	defer cancel()
 	caller, err := e.opt.SessionManager.Get(timeoutCtx, sessionID, false)
 	if err != nil {
 		return nil, nil, err
