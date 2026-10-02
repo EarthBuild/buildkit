@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/reference"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
@@ -18,6 +18,7 @@ import (
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/progress/logs"
 	"github.com/moby/buildkit/util/pull/pullprogress"
+	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -51,7 +52,7 @@ func (sr *immutableRef) GetRemotes(ctx context.Context, createIfNeeded bool, ref
 	}
 
 	// Search all available remotes that has the topmost blob with the specified
-	// compression with all combination of copmressions
+	// compression with all combination of compressions
 	res := []*solver.Remote{remote}
 	topmost, parentChain := remote.Descriptors[len(remote.Descriptors)-1], remote.Descriptors[:len(remote.Descriptors)-1]
 	vDesc, err := getBlobWithCompression(ctx, sr.cm.ContentStore, topmost, refCfg.Compression.Type)
@@ -85,7 +86,7 @@ func (sr *immutableRef) GetRemotes(ctx context.Context, createIfNeeded bool, ref
 	return res, nil
 }
 
-func appendRemote(parents []*solver.Remote, desc ocispecs.Descriptor, p content.Provider) (res []*solver.Remote) {
+func appendRemote(parents []*solver.Remote, desc ocispecs.Descriptor, p content.InfoReaderProvider) (res []*solver.Remote) {
 	for _, pRemote := range parents {
 		provider := contentutil.NewMultiProvider(pRemote.Provider)
 		provider.Add(desc.Digest, p)
@@ -212,7 +213,7 @@ func (sr *immutableRef) getRemote(ctx context.Context, createIfNeeded bool, refC
 			}
 		}
 
-		if needsForceCompression(ctx, sr.cm.ContentStore, desc, refCfg) {
+		if refCfg.Compression.Force {
 			if needs, err := refCfg.Compression.Type.NeedsConversion(ctx, sr.cm.ContentStore, desc); err != nil {
 				return nil, err
 			} else if needs {
@@ -276,6 +277,10 @@ func (mp *lazyMultiProvider) ReaderAt(ctx context.Context, desc ocispecs.Descrip
 	return mp.mprovider.ReaderAt(ctx, desc)
 }
 
+func (mp *lazyMultiProvider) Info(ctx context.Context, dgst digest.Digest) (content.Info, error) {
+	return mp.mprovider.Info(ctx, dgst)
+}
+
 func (mp *lazyMultiProvider) Unlazy(ctx context.Context) error {
 	eg, egctx := errgroup.WithContext(ctx)
 	for _, p := range mp.plist {
@@ -296,12 +301,34 @@ type lazyRefProvider struct {
 
 func (p lazyRefProvider) ReaderAt(ctx context.Context, desc ocispecs.Descriptor) (content.ReaderAt, error) {
 	if desc.Digest != p.desc.Digest {
-		return nil, errdefs.ErrNotFound
+		return nil, cerrdefs.ErrNotFound
 	}
 	if err := p.Unlazy(ctx); err != nil {
 		return nil, err
 	}
 	return p.ref.cm.ContentStore.ReaderAt(ctx, desc)
+}
+
+func (p lazyRefProvider) Info(ctx context.Context, dgst digest.Digest) (content.Info, error) {
+	if dgst != p.desc.Digest {
+		return content.Info{}, cerrdefs.ErrNotFound
+	}
+	info, err := p.ref.cm.ContentStore.Info(ctx, dgst)
+	if err == nil {
+		return info, nil
+	}
+
+	if isLazy, err1 := p.ref.isLazy(ctx); err1 != nil {
+		return content.Info{}, err1
+	} else if !isLazy {
+		return content.Info{}, err
+	}
+
+	// for lazy records don't unlazy without read request
+	return content.Info{
+		Digest: p.desc.Digest,
+		Size:   p.desc.Size,
+	}, nil
 }
 
 func (p lazyRefProvider) Unlazy(ctx context.Context) error {

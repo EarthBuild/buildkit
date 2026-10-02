@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
@@ -19,6 +18,7 @@ import (
 	"github.com/moby/buildkit/session/grpchijack"
 	"github.com/moby/buildkit/util/appdefaults"
 	"github.com/moby/buildkit/util/grpcerrors"
+	"github.com/moby/buildkit/util/tracing"
 	"github.com/moby/buildkit/util/tracing/otlptracegrpc"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -52,23 +52,15 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		grpc.WithDefaultCallOptions(grpc_retry.WithBackoff(grpc_retry.BackoffExponentialWithJitter(10*time.Millisecond, 0.1))), //earthly
 	}
 	needDialer := true
-	useDefaultDialer := false // earthly-specific
-
-	var unary []grpc.UnaryClientInterceptor
-	var stream []grpc.StreamClientInterceptor
 
 	var customTracer bool // allows manually setting disabling tracing even if tracer in context
 	var tracerProvider trace.TracerProvider
 	var tracerDelegate TracerDelegate
 	var sessionDialer func(context.Context, string, map[string][]string) (net.Conn, error)
-	var headersKV []string // earthly-specific
 	var customDialOptions []grpc.DialOption
 	var creds *withCredentials
 
 	for _, o := range opts {
-		if _, ok := o.(*withFailFast); ok {
-			gopts = append(gopts, grpc.FailOnNonTempDialError(true))
-		}
 		if credInfo, ok := o.(*withCredentials); ok {
 			if creds == nil {
 				creds = &withCredentials{}
@@ -88,16 +80,6 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		}
 		if sd, ok := o.(*withSessionDialer); ok {
 			sessionDialer = sd.dialer
-		}
-
-		// earthly-specific
-		if h, ok := o.(*withAdditionalHeaders); ok {
-			headersKV = h.kv
-		}
-
-		// earthly-specific
-		if _, ok := o.(*withDefaultGRPCDialer); ok {
-			useDefaultDialer = true
 		}
 
 		if opt, ok := o.(*withGRPCDialOption); ok {
@@ -122,24 +104,31 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 	}
 
 	if tracerProvider != nil {
-		var propagators = propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
-		unary = append(unary, filterInterceptor(otelgrpc.UnaryClientInterceptor(otelgrpc.WithTracerProvider(tracerProvider), otelgrpc.WithPropagators(propagators))))
-		stream = append(stream, otelgrpc.StreamClientInterceptor(otelgrpc.WithTracerProvider(tracerProvider), otelgrpc.WithPropagators(propagators)))
+		gopts = append(gopts, grpc.WithStatsHandler(
+			tracing.ClientStatsHandler(
+				otelgrpc.WithTracerProvider(tracerProvider),
+				otelgrpc.WithPropagators(
+					propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}),
+				),
+			),
+		))
 	}
 
-	if needDialer && !useDefaultDialer {
+	if needDialer {
 		dialFn, err := resolveDialer(address)
 		if err != nil {
 			return nil, err
 		}
-		gopts = append(gopts, grpc.WithContextDialer(dialFn))
+		if dialFn != nil {
+			gopts = append(gopts, grpc.WithContextDialer(dialFn))
+		}
 	}
 	if address == "" {
 		address = appdefaults.Address
 	}
-	if len(headersKV) > 0 {
-		unary = append(unary, headersUnaryInterceptor(headersKV...))
-		stream = append(stream, headersStreamInterceptor(headersKV...))
+	uri, err := url.Parse(address)
+	if err != nil {
+		return nil, err
 	}
 
 	// Setting :authority pseudo header
@@ -155,28 +144,18 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 	}
 	if authority == "" {
 		// authority as hostname from target address
-		uri, err := url.Parse(address)
-		if err != nil {
-			return nil, err
-		}
 		authority = uri.Host
 	}
-	gopts = append(gopts, grpc.WithAuthority(authority))
-
-	unary = append(unary, grpcerrors.UnaryClientInterceptor)
-	stream = append(stream, grpcerrors.StreamClientInterceptor)
-
-	gopts = append(gopts, grpc.WithChainUnaryInterceptor(unary...))
-	gopts = append(gopts, grpc.WithChainStreamInterceptor(stream...))
-	gopts = append(gopts, customDialOptions...)
-
-	// earthly-specific
-	if useDefaultDialer {
-		split := strings.Split(address, "://")
-		if len(split) > 0 {
-			address = split[1]
-		}
+	if uri.Scheme == "tcp" {
+		// remove tcp scheme from address, since default dialer doesn't expect that
+		// name resolution is done by grpc according to the following spec: https://github.com/grpc/grpc/blob/master/doc/naming.md
+		address = uri.Host
 	}
+
+	gopts = append(gopts, grpc.WithAuthority(authority))
+	gopts = append(gopts, grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor))
+	gopts = append(gopts, grpc.WithStreamInterceptor(grpcerrors.StreamClientInterceptor))
+	gopts = append(gopts, customDialOptions...)
 
 	conn, err := grpc.DialContext(ctx, address, gopts...)
 	if err != nil {
@@ -235,7 +214,7 @@ func (c *Client) Wait(ctx context.Context) error {
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case <-time.After(time.Second):
 		}
 		c.conn.ResetConnectBackoff()
@@ -244,14 +223,6 @@ func (c *Client) Wait(ctx context.Context) error {
 
 func (c *Client) Close() error {
 	return c.conn.Close()
-}
-
-type withFailFast struct{}
-
-func (*withFailFast) isClientOpt() {}
-
-func WithFailFast() ClientOpt {
-	return &withFailFast{}
 }
 
 type withDialer struct {
@@ -416,17 +387,7 @@ func resolveDialer(address string) (func(context.Context, string) (net.Conn, err
 	if ch != nil {
 		return ch.ContextDialer, nil
 	}
-	// basic dialer
-	return dialer, nil
-}
-
-func filterInterceptor(intercept grpc.UnaryClientInterceptor) grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		if strings.HasSuffix(method, "opentelemetry.proto.collector.trace.v1.TraceService/Export") {
-			return invoker(ctx, method, req, reply, cc, opts...)
-		}
-		return intercept(ctx, method, req, reply, cc, invoker, opts...)
-	}
+	return nil, nil
 }
 
 type withGRPCDialOption struct {

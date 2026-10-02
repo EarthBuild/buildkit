@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/distribution/reference"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/apicaps"
 	"github.com/moby/buildkit/util/gitutil"
@@ -137,10 +138,11 @@ func Image(ref string, opts ...ImageOption) State {
 				if p == nil {
 					p = c.Platform
 				}
-				_, _, dt, err := info.metaResolver.ResolveImageConfig(ctx, ref, ResolveImageConfigOpt{
-					Platform:     p,
-					ResolveMode:  info.resolveMode.String(),
-					ResolverType: ResolverTypeRegistry,
+				_, _, dt, err := info.metaResolver.ResolveImageConfig(ctx, ref, sourceresolver.Opt{
+					Platform: p,
+					ImageOpt: &sourceresolver.ResolveImageOpt{
+						ResolveMode: info.resolveMode.String(),
+					},
 				})
 				if err != nil {
 					return State{}, err
@@ -153,10 +155,11 @@ func Image(ref string, opts ...ImageOption) State {
 			if p == nil {
 				p = c.Platform
 			}
-			ref, dgst, dt, err := info.metaResolver.ResolveImageConfig(context.TODO(), ref, ResolveImageConfigOpt{
-				Platform:     p,
-				ResolveMode:  info.resolveMode.String(),
-				ResolverType: ResolverTypeRegistry,
+			ref, dgst, dt, err := info.metaResolver.ResolveImageConfig(context.TODO(), ref, sourceresolver.Opt{
+				Platform: p,
+				ImageOpt: &sourceresolver.ResolveImageOpt{
+					ResolveMode: info.resolveMode.String(),
+				},
 			})
 			if err != nil {
 				return State{}, err
@@ -225,6 +228,11 @@ type ImageInfo struct {
 	RecordType    string
 }
 
+const (
+	GitAuthHeaderKey = "GIT_AUTH_HEADER"
+	GitAuthTokenKey  = "GIT_AUTH_TOKEN"
+)
+
 // Git returns a state that represents a git repository.
 // Example:
 //
@@ -265,8 +273,8 @@ func Git(url, ref string, opts ...GitOption) State {
 	}
 
 	gi := &GitInfo{
-		AuthHeaderSecret: "GIT_AUTH_HEADER",
-		AuthTokenSecret:  "GIT_AUTH_TOKEN",
+		AuthHeaderSecret: GitAuthHeaderKey,
+		AuthTokenSecret:  GitAuthTokenKey,
 	}
 	for _, o := range opts {
 		o.SetGitOption(gi)

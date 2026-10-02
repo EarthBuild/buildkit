@@ -9,12 +9,14 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/pkg/seed" //nolint:staticcheck // SA1019 deprecated
 	"github.com/containerd/containerd/pkg/userns"
 	"github.com/containerd/containerd/platforms"
@@ -23,8 +25,12 @@ import (
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/gofrs/flock"
+<<<<<<< HEAD
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	regproxy "github.com/moby/buildkit/api/services/registry"
+=======
+	"github.com/hashicorp/go-multierror"
+>>>>>>> v0.14.1
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/cache/remotecache/azblob"
 	"github.com/moby/buildkit/cache/remotecache/gha"
@@ -53,6 +59,7 @@ import (
 	"github.com/moby/buildkit/util/profiler"
 	"github.com/moby/buildkit/util/resolver"
 	"github.com/moby/buildkit/util/stack"
+	"github.com/moby/buildkit/util/tracing"
 	"github.com/moby/buildkit/util/tracing/detect"
 	_ "github.com/moby/buildkit/util/tracing/detect/jaeger"
 	_ "github.com/moby/buildkit/util/tracing/env"
@@ -65,9 +72,10 @@ import (
 	"github.com/urfave/cli"
 	"go.etcd.io/bbolt"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
 	tracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -153,6 +161,11 @@ func main() {
 		return strconv.Itoa(*gid)
 	}
 
+	groupUsageStr := "group (name or gid) which will own all Unix socket listening addresses"
+	if runtime.GOOS == "windows" {
+		groupUsageStr = "group name(s), comma-separated, which will have RW access to the named pipe listening addresses"
+	}
+
 	app.Flags = append(app.Flags,
 		cli.StringFlag{
 			Name:  "config",
@@ -185,7 +198,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "group",
-			Usage: "group (name or gid) which will own all Unix socket listening addresses",
+			Usage: groupUsageStr,
 			Value: groupValue(defaultConf.GRPC.GID),
 		},
 		cli.StringFlag{
@@ -220,14 +233,15 @@ func main() {
 	app.Flags = append(app.Flags, appFlags...)
 	app.Flags = append(app.Flags, serviceFlags()...)
 
+	var closers []func(ctx context.Context) error
 	app.Action = func(c *cli.Context) error {
 		// TODO: On Windows this always returns -1. The actual "are you admin" check is very Windows-specific.
 		// See https://github.com/golang/go/issues/28804#issuecomment-505326268 for the "short" version.
 		if os.Geteuid() > 0 {
 			return errors.New("rootless mode requires to be executed as the mapped root in a user namespace; you may use RootlessKit for setting up the namespace")
 		}
-		ctx, cancel := context.WithCancel(appcontext.Context())
-		defer cancel()
+		ctx, cancel := context.WithCancelCause(appcontext.Context())
+		defer cancel(errors.WithStack(context.Canceled))
 
 		cfg, err := config.LoadFile(c.GlobalString("config"))
 		if err != nil {
@@ -256,7 +270,15 @@ func main() {
 			logrus.SetLevel(logrus.TraceLevel)
 		}
 
+<<<<<<< HEAD
 		logrus.SetOutput(os.Stderr) // earthly-specific: force logs to show up under earthly-buildkitd container logs
+=======
+		if sc := cfg.System; sc != nil {
+			if v := sc.PlatformsCacheMaxAge; v != nil {
+				archutil.CacheMaxAge = v.Duration
+			}
+		}
+>>>>>>> v0.14.1
 
 		if cfg.GRPC.DebugAddress != "" {
 			if err := setupDebugHandlers(cfg.GRPC.DebugAddress); err != nil {
@@ -264,14 +286,26 @@ func main() {
 			}
 		}
 
-		tp, err := detect.TracerProvider()
+		tp, err := newTracerProvider(ctx)
 		if err != nil {
 			return err
 		}
+		closers = append(closers, tp.Shutdown)
 
-		streamTracer := otelgrpc.StreamServerInterceptor(otelgrpc.WithTracerProvider(tp), otelgrpc.WithPropagators(propagators))
+		mp, err := newMeterProvider(ctx)
+		if err != nil {
+			return err
+		}
+		closers = append(closers, mp.Shutdown)
 
-		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor(ctx, tp), grpcerrors.UnaryServerInterceptor,
+		statsHandler := tracing.ServerStatsHandler(
+			otelgrpc.WithTracerProvider(tp),
+			otelgrpc.WithMeterProvider(mp),
+			otelgrpc.WithPropagators(propagators),
+		)
+<<<<<<< HEAD
+
+		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor(ctx, tp, mp), grpcerrors.UnaryServerInterceptor,
 			unaryTimeoutInterceptor(), // earthly-specific
 		)
 		stream := grpc_middleware.ChainStreamServer(streamTracer, grpcerrors.StreamServerInterceptor,
@@ -284,6 +318,14 @@ func main() {
 			grpc.MaxRecvMsgSize(maxMsgSize), grpc.MaxSendMsgSize(maxMsgSize),
 			grpc.InitialWindowSize(65535 * 32),
 			grpc.InitialConnWindowSize(65535 * 16),
+=======
+		opts := []grpc.ServerOption{
+			grpc.StatsHandler(statsHandler),
+			grpc.ChainUnaryInterceptor(unaryInterceptor, grpcerrors.UnaryServerInterceptor),
+			grpc.StreamInterceptor(grpcerrors.StreamServerInterceptor),
+			grpc.MaxRecvMsgSize(defaults.DefaultMaxRecvMsgSize),
+			grpc.MaxSendMsgSize(defaults.DefaultMaxSendMsgSize),
+>>>>>>> v0.14.1
 		}
 		server := grpc.NewServer(opts...)
 
@@ -321,6 +363,13 @@ func main() {
 			os.RemoveAll(lockPath)
 		}()
 
+		// listeners have to be initialized before the controller
+		// https://github.com/moby/buildkit/issues/4618
+		listeners, err := newGRPCListeners(cfg.GRPC)
+		if err != nil {
+			return err
+		}
+
 		shutdownCh := make(chan struct{})
 		controller, err := newController(c, &cfg, shutdownCh)
 		if err != nil {
@@ -333,8 +382,8 @@ func main() {
 		reflection.Register(server)
 
 		// Earthly specific.
-		ctxReg, cancelReg := context.WithCancel(ctx)
-		defer cancelReg()
+		ctxReg, cancelReg := context.WithCancelCause(ctx)
+		defer cancelReg(errors.WithStack(context.Canceled))
 		lrPort, ok := os.LookupEnv("BUILDKIT_LOCAL_REGISTRY_LISTEN_PORT")
 		lrAddr := fmt.Sprintf("0.0.0.0:%s", lrPort)
 		if ok {
@@ -344,7 +393,7 @@ func main() {
 				for {
 					select {
 					case <-shutdownCh:
-						cancelReg()
+						cancelReg(errors.WithStack(context.Canceled))
 					case err := <-serveErr:
 						if err != nil {
 							bklog.G(ctx).Errorf("Registry serve error: %s\n", err.Error())
@@ -382,18 +431,18 @@ func main() {
 		}
 
 		errCh := make(chan error, 1)
-		if err := serveGRPC(cfg.GRPC, server, errCh); err != nil {
+		if err := serveGRPC(server, listeners, errCh); err != nil {
 			return err
 		}
 
 		select {
 		case serverErr := <-errCh:
 			err = serverErr
-			cancel()
+			cancel(err)
 		case <-ctx.Done():
-			err = ctx.Err()
+			err = context.Cause(ctx)
 		case <-shutdownCh:
-			cancelReg()
+			cancelReg(errors.WithStack(context.Canceled))
 			err = nil
 		}
 
@@ -407,8 +456,13 @@ func main() {
 		return err
 	}
 
-	app.After = func(_ *cli.Context) error {
-		return detect.Shutdown(context.TODO())
+	app.After = func(_ *cli.Context) (err error) {
+		for _, c := range closers {
+			if e := c(context.TODO()); e != nil {
+				err = multierror.Append(err, e)
+			}
+		}
+		return err
 	}
 
 	profiler.Attach(app)
@@ -419,32 +473,44 @@ func main() {
 	}
 }
 
-func serveGRPC(cfg config.GRPCConfig, server *grpc.Server, errCh chan error) error {
+func newGRPCListeners(cfg config.GRPCConfig) ([]net.Listener, error) {
 	addrs := cfg.Address
 	if len(addrs) == 0 {
-		return errors.New("--addr cannot be empty")
+		return nil, errors.New("--addr cannot be empty")
 	}
 	tlsConfig, err := serverCredentials(cfg.TLS)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	eg, _ := errgroup.WithContext(context.Background())
+
+	sd := cfg.SecurityDescriptor
+	if sd == "" {
+		sd, err = groupToSecurityDescriptor("")
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	listeners := make([]net.Listener, 0, len(addrs))
 	for _, addr := range addrs {
-		l, err := getListener(addr, *cfg.UID, *cfg.GID, tlsConfig)
+		l, err := getListener(addr, *cfg.UID, *cfg.GID, sd, tlsConfig)
 		if err != nil {
 			for _, l := range listeners {
 				l.Close()
 			}
-			return err
+			return listeners, err
 		}
 		listeners = append(listeners, l)
 	}
+	return listeners, nil
+}
 
+func serveGRPC(server *grpc.Server, listeners []net.Listener, errCh chan error) error {
 	if os.Getenv("NOTIFY_SOCKET") != "" {
 		notified, notifyErr := sddaemon.SdNotify(false, sddaemon.SdNotifyReady)
 		bklog.L.Debugf("SdNotifyReady notified=%v, err=%v", notified, notifyErr)
 	}
+	eg, _ := errgroup.WithContext(context.Background())
 	for _, l := range listeners {
 		func(l net.Listener) {
 			eg.Go(func() error {
@@ -486,10 +552,20 @@ func setDefaultNetworkConfig(nc config.NetworkConfig) config.NetworkConfig {
 		nc.Mode = "auto"
 	}
 	if nc.CNIConfigPath == "" {
-		nc.CNIConfigPath = appdefaults.DefaultCNIConfigPath
+		if isRootlessConfig() {
+			nc.CNIConfigPath = appdefaults.UserCNIConfigPath
+		} else {
+			nc.CNIConfigPath = appdefaults.DefaultCNIConfigPath
+		}
 	}
 	if nc.CNIBinaryPath == "" {
 		nc.CNIBinaryPath = appdefaults.DefaultCNIBinDir
+	}
+	if nc.BridgeName == "" {
+		nc.BridgeName = appdefaults.BridgeName
+	}
+	if nc.BridgeSubnet == "" {
+		nc.BridgeSubnet = appdefaults.BridgeSubnet
 	}
 	return nc
 }
@@ -603,11 +679,19 @@ func applyMainFlags(c *cli.Context, cfg *config.Config) error {
 	}
 
 	if group := c.String("group"); group != "" {
-		gid, err := groupToGid(group)
-		if err != nil {
-			return err
+		if runtime.GOOS == "windows" {
+			secDescriptor, err := groupToSecurityDescriptor(group)
+			if err != nil {
+				return err
+			}
+			cfg.GRPC.SecurityDescriptor = secDescriptor
+		} else {
+			gid, err := groupToGid(group)
+			if err != nil {
+				return err
+			}
+			cfg.GRPC.GID = &gid
 		}
-		cfg.GRPC.GID = &gid
 	}
 
 	if tlscert := c.String("tlscert"); tlscert != "" {
@@ -662,7 +746,7 @@ func groupToGid(group string) (int, error) {
 	return id, nil
 }
 
-func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener, error) {
+func getListener(addr string, uid, gid int, secDescriptor string, tlsConfig *tls.Config) (net.Listener, error) {
 	addrSlice := strings.SplitN(addr, "://", 2)
 	if len(addrSlice) < 2 {
 		return nil, errors.Errorf("address %s does not contain proto, you meant unix://%s ?",
@@ -674,6 +758,9 @@ func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener
 	case "unix", "npipe":
 		if tlsConfig != nil {
 			bklog.L.Warnf("TLS is disabled for %s", addr)
+		}
+		if proto == "npipe" {
+			return getLocalListener(listenAddr, secDescriptor)
 		}
 		return sys.GetLocalListener(listenAddr, uid, gid)
 	case "fd":
@@ -694,34 +781,19 @@ func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener
 	}
 }
 
-func unaryInterceptor(globalCtx context.Context, tp trace.TracerProvider) grpc.UnaryServerInterceptor {
-	withTrace := otelgrpc.UnaryServerInterceptor(otelgrpc.WithTracerProvider(tp), otelgrpc.WithPropagators(propagators))
-
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		go func() {
-			select {
-			case <-ctx.Done():
-			case <-globalCtx.Done():
-				cancel()
-			}
-		}()
-
-		if strings.HasSuffix(info.FullMethod, "opentelemetry.proto.collector.trace.v1.TraceService/Export") {
-			return handler(ctx, req)
-		}
-
-		resp, err = withTrace(ctx, req, info, handler)
-		if err != nil {
-			bklog.G(ctx).Errorf("%s returned error: %v", info.FullMethod, err)
-			if logrus.GetLevel() >= logrus.DebugLevel {
-				fmt.Fprintf(os.Stderr, "%+v", stack.Formatter(grpcerrors.FromGRPC(err)))
-			}
-		}
-		return
+func unaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+	if strings.HasSuffix(info.FullMethod, "opentelemetry.proto.collector.trace.v1.TraceService/Export") {
+		return handler(ctx, req)
 	}
+
+	resp, err = handler(ctx, req)
+	if err != nil {
+		bklog.G(ctx).Errorf("%s returned error: %v", info.FullMethod, err)
+		if logrus.GetLevel() >= logrus.DebugLevel {
+			fmt.Fprintf(os.Stderr, "%+v", stack.Formatter(grpcerrors.FromGRPC(err)))
+		}
+	}
+	return resp, err
 }
 
 func serverCredentials(cfg config.TLSConfig) (*tls.Config, error) {
@@ -772,13 +844,19 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		return nil, err
 	}
 
-	tc, err := detect.Exporter()
-	if err != nil {
+	tc := make(tracing.MultiSpanExporter, 0, 2)
+	if detect.Recorder != nil {
+		tc = append(tc, detect.Recorder)
+	}
+
+	if exp, err := detect.NewSpanExporter(context.TODO()); err != nil {
 		return nil, err
+	} else if !detect.IsNoneSpanExporter(exp) {
+		tc = append(tc, exp)
 	}
 
 	var traceSocket string
-	if tc != nil {
+	if len(tc) > 0 {
 		traceSocket = cfg.OTEL.SocketPath
 		if err := runTraceController(traceSocket, tc); err != nil {
 			return nil, err
@@ -794,8 +872,17 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		return nil, err
 	}
 	frontends := map[string]frontend.Frontend{}
-	frontends["dockerfile.v0"] = forwarder.NewGatewayForwarder(wc, dockerfile.Build)
-	frontends["gateway.v0"] = gateway.NewGatewayFrontend(wc)
+
+	if cfg.Frontends.Dockerfile.Enabled == nil || *cfg.Frontends.Dockerfile.Enabled {
+		frontends["dockerfile.v0"] = forwarder.NewGatewayForwarder(wc.Infos(), dockerfile.Build)
+	}
+	if cfg.Frontends.Gateway.Enabled == nil || *cfg.Frontends.Gateway.Enabled {
+		gwfe, err := gateway.NewGatewayFrontend(wc.Infos(), cfg.Frontends.Gateway.AllowedRepositories)
+		if err != nil {
+			return nil, err
+		}
+		frontends["gateway.v0"] = gwfe
+	}
 
 	cacheStorage, err := bboltcachestorage.NewStore(filepath.Join(cfg.Root, "cache.db"))
 	if err != nil {
@@ -963,7 +1050,7 @@ func parseBoolOrAuto(s string) (*bool, error) {
 func runTraceController(p string, exp sdktrace.SpanExporter) error {
 	server := grpc.NewServer()
 	tracev1.RegisterTraceServiceServer(server, &traceCollector{exporter: exp})
-	l, err := getLocalListener(p)
+	l, err := getLocalListener(p, "")
 	if err != nil {
 		return errors.Wrap(err, "creating trace controller listener")
 	}
@@ -972,14 +1059,50 @@ func runTraceController(p string, exp sdktrace.SpanExporter) error {
 }
 
 type traceCollector struct {
-	*tracev1.UnimplementedTraceServiceServer
+	tracev1.UnimplementedTraceServiceServer
 	exporter sdktrace.SpanExporter
 }
 
 func (t *traceCollector) Export(ctx context.Context, req *tracev1.ExportTraceServiceRequest) (*tracev1.ExportTraceServiceResponse, error) {
-	err := t.exporter.ExportSpans(ctx, transform.Spans(req.GetResourceSpans()))
-	if err != nil {
+	if err := t.exporter.ExportSpans(ctx, transform.Spans(req.GetResourceSpans())); err != nil {
 		return nil, err
 	}
 	return &tracev1.ExportTraceServiceResponse{}, nil
+}
+
+func newTracerProvider(ctx context.Context) (*sdktrace.TracerProvider, error) {
+	opts := []sdktrace.TracerProviderOption{
+		sdktrace.WithResource(detect.Resource()),
+		sdktrace.WithSyncer(detect.Recorder),
+	}
+
+	if exp, err := detect.NewSpanExporter(ctx); err != nil {
+		return nil, err
+	} else if !detect.IsNoneSpanExporter(exp) {
+		opts = append(opts, sdktrace.WithBatcher(exp))
+	}
+	return sdktrace.NewTracerProvider(opts...), nil
+}
+
+func newMeterProvider(ctx context.Context) (*sdkmetric.MeterProvider, error) {
+	opts := []sdkmetric.Option{
+		sdkmetric.WithResource(detect.Resource()),
+	}
+
+	if r, err := prometheus.New(); err != nil {
+		// Log the error but do not fail if we could not configure the prometheus metrics.
+		bklog.G(context.Background()).
+			WithError(err).
+			Error("failed prometheus metrics configuration")
+	} else {
+		opts = append(opts, sdkmetric.WithReader(r))
+	}
+
+	if exp, err := detect.NewMetricExporter(ctx); err != nil {
+		return nil, err
+	} else if !detect.IsNoneMetricExporter(exp) {
+		r := sdkmetric.NewPeriodicReader(exp)
+		opts = append(opts, sdkmetric.WithReader(r))
+	}
+	return sdkmetric.NewMeterProvider(opts...), nil
 }

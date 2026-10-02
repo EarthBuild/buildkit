@@ -38,10 +38,19 @@ variable "CGO_ENABLED" {
   default = null
 }
 
+variable "GOLANGCI_LINT_MULTIPLATFORM" {
+  default = null
+}
+
 # Defines the output folder
 variable "DESTDIR" {
   default = ""
 }
+
+variable "TEST_COVERAGE" {
+  default = null
+}
+
 function "bindir" {
   params = [defaultdir]
   result = DESTDIR != "" ? DESTDIR : "./bin/${defaultdir}"
@@ -90,6 +99,12 @@ target "binaries-cross" {
   ]
 }
 
+target "binaries-for-test" {
+  inherits = ["_common"]
+  target = "binaries-for-test"
+  output = [bindir("build")]
+}
+
 target "release" {
   inherits = ["binaries-cross"]
   target = "release"
@@ -105,10 +120,13 @@ target "integration-tests-base" {
 target "integration-tests" {
   inherits = ["integration-tests-base"]
   target = "integration-tests"
+  args = {
+    GOBUILDFLAGS = TEST_COVERAGE == "1" ? "-cover" : null
+  }
 }
 
 group "validate" {
-  targets = ["lint", "validate-vendor", "validate-doctoc", "validate-generated-files", "validate-shfmt", "validate-docs"]
+  targets = ["lint", "validate-vendor", "validate-doctoc", "validate-generated-files", "validate-archutil", "validate-shfmt", "validate-docs", "validate-docs-dockerfile"]
 }
 
 target "lint" {
@@ -118,15 +136,28 @@ target "lint" {
   output = ["type=cacheonly"]
   target = buildtags.target
   args = {
+    TARGETNAME = buildtags.name
     BUILDTAGS = buildtags.tags
   }
+  platforms = ( buildtags.target == "golangci-lint" || buildtags.name == "gopls" ) && GOLANGCI_LINT_MULTIPLATFORM != null ? [
+    "freebsd/amd64",
+    "linux/amd64",
+    "linux/arm64",
+    "linux/s390x",
+    "linux/ppc64le",
+    "linux/riscv64",
+    "windows/amd64",
+    "windows/arm64"
+  ] : []
   matrix = {
     buildtags = [
       { name = "default", tags = "", target = "golangci-lint" },
-      { name = "labs", tags = "dfrunsecurity dfparents", target = "golangci-lint" },
+      { name = "labs", tags = "dfrunsecurity dfparents dfexcludepatterns", target = "golangci-lint" },
       { name = "nydus", tags = "nydus", target = "golangci-lint" },
       { name = "yaml", tags = "", target = "yamllint" },
+      { name = "golangci-verify", tags = "", target = "golangci-verify" },
       { name = "proto", tags = "", target = "protolint" },
+      { name = "gopls", tags = "", target = "gopls-analyze" }
     ]
   }
 }
@@ -141,6 +172,13 @@ target "validate-vendor" {
 target "validate-generated-files" {
   inherits = ["_common"]
   dockerfile = "./hack/dockerfiles/generated-files.Dockerfile"
+  target = "validate"
+  output = ["type=cacheonly"]
+}
+
+target "validate-archutil" {
+  inherits = ["_common"]
+  dockerfile = "./hack/dockerfiles/archutil.Dockerfile"
   target = "validate"
   output = ["type=cacheonly"]
 }
@@ -173,6 +211,13 @@ target "validate-docs" {
   output = ["type=cacheonly"]
 }
 
+target "validate-docs-dockerfile" {
+  inherits = ["_common"]
+  dockerfile = "./hack/dockerfiles/docs-dockerfile.Dockerfile"
+  target = "validate"
+  output = ["type=cacheonly"]
+}
+
 target "vendor" {
   inherits = ["_common"]
   dockerfile = "./hack/dockerfiles/vendor.Dockerfile"
@@ -185,6 +230,13 @@ target "generated-files" {
   dockerfile = "./hack/dockerfiles/generated-files.Dockerfile"
   target = "update"
   output = ["."]
+}
+
+target "archutil" {
+  inherits = ["_common"]
+  dockerfile = "./hack/dockerfiles/archutil.Dockerfile"
+  target = "update"
+  output = ["./util/archutil"]
 }
 
 target "shfmt" {
@@ -213,6 +265,13 @@ target "docs" {
   dockerfile = "./hack/dockerfiles/docs.Dockerfile"
   target = "update"
   output = ["./docs"]
+}
+
+target "docs-dockerfile" {
+  inherits = ["_common"]
+  dockerfile = "./hack/dockerfiles/docs-dockerfile.Dockerfile"
+  target = "update"
+  output = ["./frontend/dockerfile/docs/rules"]
 }
 
 target "mod-outdated" {

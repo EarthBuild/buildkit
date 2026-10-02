@@ -10,6 +10,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestConvertShellPatternToRegex(t *testing.T) {
+	cases := map[string]string{
+		"*":                       "^.*",
+		"?":                       "^.",
+		"\\*":                     "^\\*",
+		"(()[]{\\}^$.\\*\\?|\\\\": "^\\(\\(\\)\\[\\]\\{\\}\\^\\$\\.\\*\\?\\|\\\\",
+	}
+	for pattern, expected := range cases {
+		res, err := convertShellPatternToRegex(pattern, true, true)
+		require.NoError(t, err)
+		require.Equal(t, expected, res.String())
+	}
+	invalid := []string{
+		"\\", "\\x", "\\\\\\",
+	}
+	for _, pattern := range invalid {
+		_, err := convertShellPatternToRegex(pattern, true, true)
+		require.Error(t, err)
+	}
+}
+
+func TestReverseString(t *testing.T) {
+	require.Equal(t, "12345", reverseString("54321"))
+	require.Equal(t, "👽🚀🖖", reverseString("🖖🚀👽"))
+}
+
+func TestReversePattern(t *testing.T) {
+	cases := map[string]string{
+		"a\\*c":    "c\\*a",
+		"\\\\\\ab": "b\\a\\\\",
+		"ab\\":     "\\ba",
+		"👽\\🚀🖖":    "🖖\\🚀👽",
+		"\\\\b":    "b\\\\",
+	}
+	for pattern, expected := range cases {
+		require.Equal(t, expected, reversePattern(pattern))
+	}
+}
+
 func TestShellParserMandatoryEnvVars(t *testing.T) {
 	var newWord string
 	var err error
@@ -22,26 +61,26 @@ func TestShellParserMandatoryEnvVars(t *testing.T) {
 	noUnset := "${VAR?message here$ARG}"
 
 	// disallow empty
-	newWord, err = shlex.ProcessWord(noEmpty, setEnvs)
+	newWord, _, err = shlex.ProcessWord(noEmpty, setEnvs)
 	require.NoError(t, err)
 	require.Equal(t, "plain", newWord)
 
-	_, err = shlex.ProcessWord(noEmpty, emptyEnvs)
+	_, _, err = shlex.ProcessWord(noEmpty, emptyEnvs)
 	require.ErrorContains(t, err, "message herex")
 
-	_, err = shlex.ProcessWord(noEmpty, unsetEnvs)
+	_, _, err = shlex.ProcessWord(noEmpty, unsetEnvs)
 	require.ErrorContains(t, err, "message herex")
 
 	// disallow unset
-	newWord, err = shlex.ProcessWord(noUnset, setEnvs)
+	newWord, _, err = shlex.ProcessWord(noUnset, setEnvs)
 	require.NoError(t, err)
 	require.Equal(t, "plain", newWord)
 
-	newWord, err = shlex.ProcessWord(noUnset, emptyEnvs)
+	newWord, _, err = shlex.ProcessWord(noUnset, emptyEnvs)
 	require.NoError(t, err)
 	require.Empty(t, newWord)
 
-	_, err = shlex.ProcessWord(noUnset, unsetEnvs)
+	_, _, err = shlex.ProcessWord(noUnset, unsetEnvs)
 	require.ErrorContains(t, err, "message herex")
 }
 
@@ -84,7 +123,7 @@ func TestShellParser4EnvVars(t *testing.T) {
 
 		if ((platform == "W" || platform == "A") && runtime.GOOS == "windows") ||
 			((platform == "U" || platform == "A") && runtime.GOOS != "windows") {
-			newWord, err := shlex.ProcessWord(source, envs)
+			newWord, _, err := shlex.ProcessWord(source, envs)
 			if expected == "error" {
 				require.Errorf(t, err, "input: %q, result: %q", source, newWord)
 			} else {
@@ -182,7 +221,7 @@ func TestShellParser4Words(t *testing.T) {
 }
 
 func TestGetEnv(t *testing.T) {
-	sw := &shellWord{envs: nil, matches: make(map[string]struct{})}
+	sw := &shellWord{envs: nil, matches: make(map[string]struct{}), nonmatches: make(map[string]struct{})}
 
 	getEnv := func(name string) string {
 		value, _ := sw.getEnv(name)
@@ -232,6 +271,7 @@ func TestProcessWithMatches(t *testing.T) {
 		expected    string
 		expectedErr bool
 		matches     map[string]struct{}
+		unmatched   map[string]struct{}
 	}{
 		{
 			input:    "x",
@@ -240,10 +280,11 @@ func TestProcessWithMatches(t *testing.T) {
 			matches:  nil,
 		},
 		{
-			input:    "x ${UNUSED}",
-			envs:     map[string]string{"DUMMY": "dummy"},
-			expected: "x ",
-			matches:  nil,
+			input:     "x ${UNUSED}",
+			envs:      map[string]string{"DUMMY": "dummy"},
+			expected:  "x ",
+			matches:   nil,
+			unmatched: map[string]struct{}{"UNUSED": {}},
 		},
 		{
 			input:    "x ${FOO}",
@@ -258,8 +299,9 @@ func TestProcessWithMatches(t *testing.T) {
 				"FOO": "xxx",
 				"BAR": "",
 			},
-			expected: "xxx  ccc",
-			matches:  map[string]struct{}{"FOO": {}, "BAR": {}},
+			expected:  "xxx  ccc",
+			matches:   map[string]struct{}{"FOO": {}, "BAR": {}},
+			unmatched: map[string]struct{}{"BAZ": {}},
 		},
 		{
 			input: "${FOO:-aaa} ${BAR:-bbb} ${BAZ:-ccc}",
@@ -267,8 +309,24 @@ func TestProcessWithMatches(t *testing.T) {
 				"FOO": "xxx",
 				"BAR": "",
 			},
-			expected: "xxx bbb ccc",
-			matches:  map[string]struct{}{"FOO": {}, "BAR": {}},
+			expected:  "xxx bbb ccc",
+			matches:   map[string]struct{}{"FOO": {}, "BAR": {}},
+			unmatched: map[string]struct{}{"BAZ": {}},
+		},
+		{
+			input: "${FOO:-}",
+			envs: map[string]string{
+				"FOO": "xxx",
+				"BAR": "",
+			},
+			expected: "xxx",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:     "${FOO:-}",
+			envs:      map[string]string{},
+			expected:  "",
+			unmatched: map[string]struct{}{"FOO": {}},
 		},
 
 		{
@@ -277,8 +335,9 @@ func TestProcessWithMatches(t *testing.T) {
 				"FOO": "xxx",
 				"BAR": "",
 			},
-			expected: "aaa bbb ",
-			matches:  map[string]struct{}{"FOO": {}, "BAR": {}},
+			expected:  "aaa bbb ",
+			matches:   map[string]struct{}{"FOO": {}, "BAR": {}},
+			unmatched: map[string]struct{}{"BAZ": {}},
 		},
 		{
 			input: "${FOO:+aaa} ${BAR:+bbb} ${BAZ:+ccc}",
@@ -286,8 +345,9 @@ func TestProcessWithMatches(t *testing.T) {
 				"FOO": "xxx",
 				"BAR": "",
 			},
-			expected: "aaa  ",
-			matches:  map[string]struct{}{"FOO": {}, "BAR": {}},
+			expected:  "aaa  ",
+			matches:   map[string]struct{}{"FOO": {}, "BAR": {}},
+			unmatched: map[string]struct{}{"BAZ": {}},
 		},
 
 		{
@@ -315,6 +375,7 @@ func TestProcessWithMatches(t *testing.T) {
 				"BAR": "",
 			},
 			expectedErr: true,
+			unmatched:   map[string]struct{}{"BAZ": {}},
 		},
 		{
 			input: "${FOO:?aaa}",
@@ -340,6 +401,16 @@ func TestProcessWithMatches(t *testing.T) {
 				"BAR": "",
 			},
 			expectedErr: true,
+			unmatched:   map[string]struct{}{"BAZ": {}},
+		},
+		{
+			input: "${BAZ:?}",
+			envs: map[string]string{
+				"FOO": "xxx",
+				"BAR": "",
+			},
+			expectedErr: true,
+			unmatched:   map[string]struct{}{"BAZ": {}},
 		},
 
 		{
@@ -358,12 +429,173 @@ func TestProcessWithMatches(t *testing.T) {
 			},
 			expectedErr: true,
 		},
+		{
+			input:       "${FOO=}",
+			envs:        map[string]string{},
+			expectedErr: true,
+		},
+		{
+			// special characters in regular expressions
+			// } needs to be escaped so it doesn't match the
+			// closing brace of ${}
+			input:    "${FOO#()[]{\\}^$.\\*\\?|\\\\}",
+			envs:     map[string]string{"FOO": "()[]{}^$.*?|\\x"},
+			expected: "x",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO%%\\**}",
+			envs:     map[string]string{"FOO": "xx**"},
+			expected: "xx",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO#*x*y}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: "y",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO#*}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: "xxyy",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO#$BAR}",
+			envs:     map[string]string{"FOO": "xxyy", "BAR": "x"},
+			expected: "xyy",
+			matches:  map[string]struct{}{"FOO": {}, "BAR": {}},
+		},
+		{
+			input:    "${FOO#$BAR}",
+			envs:     map[string]string{"FOO": "xxyy", "BAR": ""},
+			expected: "xxyy",
+			matches:  map[string]struct{}{"FOO": {}, "BAR": {}},
+		},
+		{
+			input:    "${FOO#}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: "xxyy",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO##*x}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: "yy",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO##}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: "xxyy",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO#?\\?}",
+			envs:     map[string]string{"FOO": "???y"},
+			expected: "?y",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:     "${ABC:-.}${FOO%x}${ABC:-.}",
+			envs:      map[string]string{"FOO": "xxyy"},
+			expected:  ".xxyy.",
+			matches:   map[string]struct{}{"FOO": {}},
+			unmatched: map[string]struct{}{"ABC": {}},
+		},
+		{
+			input:    "${FOO%%\\**\\*}",
+			envs:     map[string]string{"FOO": "a***yy*"},
+			expected: "a",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO%}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: "xxyy",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO%%$BAR}",
+			envs:     map[string]string{"FOO": "xxyy", "BAR": ""},
+			expected: "xxyy",
+			matches:  map[string]struct{}{"FOO": {}, "BAR": {}},
+		},
+		{
+			// test: wildcards
+			input:    "${FOO/$NEEDLE/.} - ${FOO//$NEEDLE/.}",
+			envs:     map[string]string{"FOO": "/foo*/*/*.txt", "NEEDLE": "\\*/"},
+			expected: "/foo.*/*.txt - /foo..*.txt",
+			matches:  map[string]struct{}{"FOO": {}, "NEEDLE": {}},
+		},
+		{
+			// test: / in patterns
+			input:    "${FOO/$NEEDLE/} - ${FOO//$NEEDLE/}",
+			envs:     map[string]string{"FOO": "/tmp/tmp/bar.txt", "NEEDLE": "/tmp"},
+			expected: "/tmp/bar.txt - /bar.txt",
+			matches:  map[string]struct{}{"FOO": {}, "NEEDLE": {}},
+		},
+		{
+			input:    "${FOO/$NEEDLE/$REPLACEMENT} - ${FOO//$NEEDLE/$REPLACEMENT}",
+			envs:     map[string]string{"FOO": "/a/foo/b/c.txt", "NEEDLE": "/?/", "REPLACEMENT": "/"},
+			expected: "/foo/b/c.txt - /foo/c.txt",
+			matches:  map[string]struct{}{"FOO": {}, "NEEDLE": {}, "REPLACEMENT": {}},
+		},
+		{
+			input:    "${FOO/$NEEDLE/$REPLACEMENT}",
+			envs:     map[string]string{"FOO": "http://google.de", "NEEDLE": "http://", "REPLACEMENT": "https://"},
+			expected: "https://google.de",
+			matches:  map[string]struct{}{"FOO": {}, "NEEDLE": {}, "REPLACEMENT": {}},
+		},
+		{
+			// test: substitute escaped separator characters
+			input:    "${FOO//\\//\\/}",
+			envs:     map[string]string{"FOO": "/tmp/foo.txt"},
+			expected: "\\/tmp\\/foo.txt",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+
+		// Following cases with empty/partial values are currently not
+		// guaranteed behavior. Tests are provided to make sure partial
+		// input does not cause runtime error.
+		{
+			input:    "${FOO/$BAR/ww}",
+			envs:     map[string]string{"FOO": "xxyy", "BAR": ""},
+			expected: "wwxxyy",
+			matches:  map[string]struct{}{"FOO": {}, "BAR": {}},
+		},
+		{
+			input:       "${FOO//ww}",
+			envs:        map[string]string{"FOO": "xxyy"},
+			expectedErr: true,
+		},
+		{
+			input:       "${FOO//}",
+			envs:        map[string]string{"FOO": "xxyy"},
+			expectedErr: true,
+		},
+		{
+			input:    "${FOO///}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: "xxyy",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:     "${FOO///}",
+			envs:      map[string]string{},
+			expected:  "",
+			unmatched: map[string]struct{}{"FOO": {}},
+		},
 	}
 
 	for _, c := range tc {
 		c := c
 		t.Run(c.input, func(t *testing.T) {
-			w, matches, err := shlex.ProcessWordWithMatches(c.input, c.envs)
+			result, err := shlex.ProcessWordWithMatches(c.input, c.envs)
+			w := result.Result
+			matches := result.Matched
+			unmatched := result.Unmatched
 			if c.expectedErr {
 				require.Error(t, err)
 				return
@@ -371,9 +603,14 @@ func TestProcessWithMatches(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, c.expected, w)
 
-			require.Equal(t, len(c.matches), len(matches))
+			require.Len(t, matches, len(c.matches), c.matches)
 			for k := range c.matches {
 				require.Contains(t, matches, k)
+			}
+
+			require.Len(t, unmatched, len(c.unmatched), c.unmatched)
+			for k := range c.unmatched {
+				require.Contains(t, unmatched, k)
 			}
 		})
 	}
@@ -388,30 +625,30 @@ func TestProcessWithMatchesPlatform(t *testing.T) {
 		version = "v1.2.3"
 	)
 
-	w, _, err := shlex.ProcessWordWithMatches(release, map[string]string{
+	results, err := shlex.ProcessWordWithMatches(release, map[string]string{
 		"VERSION":       version,
 		"TARGETOS":      "linux",
 		"TARGETARCH":    "arm",
 		"TARGETVARIANT": "v7",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "something-v1.2.3.linux-arm-v7.tar.gz", w)
+	require.Equal(t, "something-v1.2.3.linux-arm-v7.tar.gz", results.Result)
 
-	w, _, err = shlex.ProcessWordWithMatches(release, map[string]string{
+	results, err = shlex.ProcessWordWithMatches(release, map[string]string{
 		"VERSION":       version,
 		"TARGETOS":      "linux",
 		"TARGETARCH":    "arm64",
 		"TARGETVARIANT": "",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "something-v1.2.3.linux-arm64.tar.gz", w)
+	require.Equal(t, "something-v1.2.3.linux-arm64.tar.gz", results.Result)
 
-	w, _, err = shlex.ProcessWordWithMatches(release, map[string]string{
+	results, err = shlex.ProcessWordWithMatches(release, map[string]string{
 		"VERSION":    version,
 		"TARGETOS":   "linux",
 		"TARGETARCH": "arm64",
 		// No "TARGETVARIANT": "",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "something-v1.2.3.linux-arm64.tar.gz", w)
+	require.Equal(t, "something-v1.2.3.linux-arm64.tar.gz", results.Result)
 }

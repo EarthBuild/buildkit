@@ -27,12 +27,20 @@ type Stream interface {
 
 func Send(ctx context.Context, conn Stream, fs FS, progressCb func(int, bool), verboseProgressCb VerboseProgressCB) error {
 	s := &sender{
+<<<<<<< HEAD
 		conn:              &syncStream{Stream: conn},
 		fs:                fs,
 		files:             make(map[uint32]string),
 		progressCb:        progressCb,
 		verboseProgressCb: verboseProgressCb,
 		sendpipeline:      make(chan *sendHandle, 128),
+=======
+		conn:         &syncStream{Stream: conn},
+		fs:           WithHardlinkReset(fs),
+		files:        make(map[uint32]string),
+		progressCb:   progressCb,
+		sendpipeline: make(chan *sendHandle, 128),
+>>>>>>> v0.14.1
 	}
 	return s.run(ctx)
 }
@@ -48,8 +56,13 @@ type sender struct {
 	files             map[uint32]string
 	mu                sync.RWMutex
 	progressCb        func(int, bool)
+<<<<<<< HEAD
 	verboseProgressCb VerboseProgressCB
 	progressCurrent   int
+=======
+	progressCurrent   int
+	progressCurrentMu sync.Mutex
+>>>>>>> v0.14.1
 	sendpipeline      chan *sendHandle
 }
 
@@ -116,6 +129,12 @@ func (s *sender) updateProgress(size int, last bool) {
 	defer s.mu.Unlock()
 	s.progressCurrent += size
 	if s.progressCb != nil {
+<<<<<<< HEAD
+=======
+		s.progressCurrentMu.Lock()
+		defer s.progressCurrentMu.Unlock()
+		s.progressCurrent += size
+>>>>>>> v0.14.1
 		s.progressCb(s.progressCurrent, last)
 	}
 }
@@ -164,7 +183,12 @@ func (s *sender) walk(ctx context.Context) error {
 		if !ok {
 			return errors.WithStack(&os.PathError{Path: path, Err: syscall.EBADMSG, Op: "fileinfo without stat info"})
 		}
+<<<<<<< HEAD
 
+=======
+		stat.Path = filepath.ToSlash(stat.Path)
+		stat.Linkname = filepath.ToSlash(stat.Linkname)
+>>>>>>> v0.14.1
 		p := &types.Packet{
 			Type: types.PACKET_STAT,
 			Stat: stat,

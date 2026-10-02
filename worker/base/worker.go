@@ -18,7 +18,7 @@ import (
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/executor"
 	"github.com/moby/buildkit/executor/resources"
 	"github.com/moby/buildkit/exporter"
@@ -258,10 +258,14 @@ func (w *Worker) Labels() map[string]string {
 
 func (w *Worker) Platforms(noCache bool) []ocispecs.Platform {
 	if noCache {
+		matchers := make([]platforms.MatchComparer, len(w.WorkerOpt.Platforms))
+		for i, p := range w.WorkerOpt.Platforms {
+			matchers[i] = platforms.Only(p)
+		}
 		for _, p := range archutil.SupportedPlatforms(noCache) {
 			exists := false
-			for _, pp := range w.WorkerOpt.Platforms {
-				if platforms.Only(pp).Match(p) {
+			for _, m := range matchers {
+				if m.Match(p) {
 					exists = true
 					break
 				}
@@ -378,16 +382,65 @@ func (w *Worker) PruneCacheMounts(ctx context.Context, ids []string) error {
 	return nil
 }
 
-func (w *Worker) ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt, sm *session.Manager, g session.Group) (string, digest.Digest, []byte, error) {
-	// is this an registry source? Or an OCI layout source?
-	switch opt.ResolverType {
-	case llb.ResolverTypeOCILayout:
-		return w.OCILayoutSource.ResolveImageConfig(ctx, ref, opt, sm, g)
-		// we probably should put an explicit case llb.ResolverTypeRegistry and default here,
-		// but then go complains that we do not have a return statement,
-		// so we just add it after
+func (w *Worker) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt, sm *session.Manager, g session.Group) (*sourceresolver.MetaResponse, error) {
+	if opt.SourcePolicies != nil {
+		return nil, errors.New("source policies can not be set for worker")
 	}
-	return w.ImageSource.ResolveImageConfig(ctx, ref, opt, sm, g)
+
+	var platform *pb.Platform
+	if p := opt.Platform; p != nil {
+		platform = &pb.Platform{
+			Architecture: p.Architecture,
+			OS:           p.OS,
+			Variant:      p.Variant,
+			OSVersion:    p.OSVersion,
+		}
+	}
+
+	id, err := w.SourceManager.Identifier(&pb.Op_Source{Source: op}, platform)
+	if err != nil {
+		return nil, err
+	}
+
+	switch idt := id.(type) {
+	case *containerimage.ImageIdentifier:
+		if opt.ImageOpt == nil {
+			opt.ImageOpt = &sourceresolver.ResolveImageOpt{}
+		}
+		dgst, config, err := w.ImageSource.ResolveImageConfig(ctx, idt.Reference.String(), opt, sm, g)
+		if err != nil {
+			return nil, err
+		}
+		return &sourceresolver.MetaResponse{
+			Op: op,
+			Image: &sourceresolver.ResolveImageResponse{
+				Digest: dgst,
+				Config: config,
+			},
+		}, nil
+	case *containerimage.OCIIdentifier:
+		opt.OCILayoutOpt = &sourceresolver.ResolveOCILayoutOpt{
+			Store: sourceresolver.ResolveImageConfigOptStore{
+				StoreID:   idt.StoreID,
+				SessionID: idt.SessionID,
+			},
+		}
+		dgst, config, err := w.OCILayoutSource.ResolveImageConfig(ctx, idt.Reference.String(), opt, sm, g)
+		if err != nil {
+			return nil, err
+		}
+		return &sourceresolver.MetaResponse{
+			Op: op,
+			Image: &sourceresolver.ResolveImageResponse{
+				Digest: dgst,
+				Config: config,
+			},
+		}, nil
+	}
+
+	return &sourceresolver.MetaResponse{
+		Op: op,
+	}, nil
 }
 
 func (w *Worker) DiskUsage(ctx context.Context, opt client.DiskUsageInfo) ([]*client.UsageInfo, error) {
@@ -444,14 +497,12 @@ func (w *Worker) Exporter(name string, sm *session.Manager) (exporter.Exporter, 
 }
 
 func (w *Worker) FromRemote(ctx context.Context, remote *solver.Remote) (ref cache.ImmutableRef, err error) {
-	if cd, ok := remote.Provider.(interface {
-		CheckDescriptor(context.Context, ocispecs.Descriptor) error
-	}); ok && len(remote.Descriptors) > 0 {
+	if len(remote.Descriptors) > 0 {
 		var eg errgroup.Group
 		for _, desc := range remote.Descriptors {
 			desc := desc
 			eg.Go(func() error {
-				if err := cd.CheckDescriptor(ctx, desc); err != nil {
+				if _, err := remote.Provider.Info(ctx, desc.Digest); err != nil {
 					return err
 				}
 				return nil

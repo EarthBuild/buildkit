@@ -67,11 +67,8 @@ func TestParseGitRef(t *testing.T) {
 			},
 		},
 		{
-			ref: "custom.xyz/moby/buildkit.git",
-			expected: &GitRef{
-				Remote:    "https://custom.xyz/moby/buildkit.git",
-				ShortName: "buildkit",
-			},
+			ref:      "custom.xyz/moby/buildkit.git",
+			expected: nil,
 		},
 		{
 			ref:      "https://github.com/moby/buildkit",
@@ -133,12 +130,21 @@ func TestParseGitRef(t *testing.T) {
 				SubDir:    "myfolder",
 			},
 		},
+		{
+			ref:      "./.git",
+			expected: nil,
+		},
+		{
+			ref:      ".git",
+			expected: nil,
+		},
 	}
 	for _, tt := range cases {
 		tt := tt
 		t.Run(tt.ref, func(t *testing.T) {
 			got, err := ParseGitRef(tt.ref)
 			if tt.expected == nil {
+				require.Nil(t, got)
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
