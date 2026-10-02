@@ -12,14 +12,10 @@ import (
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/client"
-<<<<<<< HEAD
-	"github.com/moby/buildkit/client/llb"
-	"github.com/moby/buildkit/exporter"
-=======
 	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/executor"
 	resourcestypes "github.com/moby/buildkit/executor/resources/types"
->>>>>>> v0.13.2
+	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/frontend"
 	gw "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/identity"
@@ -192,7 +188,6 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	return res, nil
 }
 
-<<<<<<< HEAD
 // getExporter is earthly specific code which extracts the configured exporter
 // from the job's metadata
 func (b *llbBridge) getExporter(ctx context.Context) (*ExporterRequest, error) {
@@ -209,6 +204,9 @@ func (b *llbBridge) getExporter(ctx context.Context) (*ExporterRequest, error) {
 	return exp, nil
 }
 
+// Export is an EarthBuild-specific method that exports output artifacts on-demand
+// using the exporter configured for this build job, allowing frontend/gateway
+// callers to emit exports during build execution rather than only at completion.
 func (b *llbBridge) Export(ctx context.Context, refs map[string]cache.ImmutableRef, metadata map[string][]byte) error {
 	// generate an ID that's consistent for the refs
 	refKeys := []string{}
@@ -226,21 +224,34 @@ func (b *llbBridge) Export(ctx context.Context, refs map[string]cache.ImmutableR
 	if err != nil {
 		return err
 	}
-	if exp.Exporter == nil {
+	if len(exp.Exporters) == 0 {
 		return errors.Errorf("Export had no exporter configured")
 	}
 
-	return inBuilderContext(ctx, b.builder, exp.Exporter.Name(), id, func(ctx context.Context, g session.Group) error {
-		sessionIDs := session.AllSessionIDs(g)
-		if len(sessionIDs) == 0 {
-			return errors.Errorf("group has no session IDs") // shouldnt happen
+	for i, e := range exp.Exporters {
+		expID := id
+		if len(exp.Exporters) > 1 {
+			expID = fmt.Sprintf("%s-%d", id, i)
 		}
-		sessionID := sessionIDs[0]
-		var err error
-		_, _, err = exp.Exporter.Export(ctx, inp, sessionID)
-		return err
-	})
-=======
+		err := inBuilderContext(ctx, b.builder, e.Name(), expID, func(ctx context.Context, g session.Group) error {
+			sessionIDs := session.AllSessionIDs(g)
+			if len(sessionIDs) == 0 {
+				return errors.Errorf("group has no session IDs") // shouldnt happen
+			}
+			sessionID := sessionIDs[0]
+			_, descRef, err := e.Export(ctx, inp, nil, sessionID)
+			if descRef != nil {
+				descRef.Release()
+			}
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (b *llbBridge) validateEntitlements(p executor.ProcessInfo) error {
 	ent, err := loadEntitlements(b.builder)
 	if err != nil {
@@ -285,7 +296,6 @@ func (b *llbBridge) loadExecutor() error {
 		b.executor = w.Executor()
 	})
 	return b.executorErr
->>>>>>> v0.13.2
 }
 
 type resultProxy struct {

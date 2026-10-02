@@ -29,12 +29,8 @@ func NewResult() *Result {
 type Client interface {
 	sourceresolver.MetaResolver
 	Solve(ctx context.Context, req SolveRequest) (*Result, error)
-<<<<<<< HEAD
 	Export(ctx context.Context, req ExportRequest) error // earthly-specific
-	ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt) (string, digest.Digest, []byte, error)
-=======
 	ResolveImageConfig(ctx context.Context, ref string, opt sourceresolver.Opt) (string, digest.Digest, []byte, error)
->>>>>>> v0.13.2
 	BuildOpts() BuildOpts
 	Inputs(ctx context.Context) (map[string]llb.State, error)
 	NewContainer(ctx context.Context, req NewContainerRequest) (Container, error)

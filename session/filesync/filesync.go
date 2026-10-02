@@ -235,51 +235,16 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 	return pr.recvFn(stream, opt.DestDir, opt.CacheUpdater, opt.ProgressCb, opt.Differ, opt.Filter)
 }
 
-<<<<<<< HEAD
-// NewFSSyncTargetDir allows writing into a directory
-func NewFSSyncTargetDir(outdir string, verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
-	p := &fsSyncTarget{
-		outdir:            outdir,
-		verboseProgressCB: verboseProgressCB,
-	}
-	return p
-}
-
-// NewFSSyncTarget allows writing into an io.WriteCloser
-func NewFSSyncTarget(f func(map[string]string) (io.WriteCloser, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
-	p := &fsSyncTarget{
-		f:                 f,
-		verboseProgressCB: verboseProgressCB,
-	}
-	return p
-}
-
-// NewFSSyncTarget allows writing into an io.WriteCloser; it is earthly-specific
-func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
-	p := &fsSyncTarget{
-		f:                 f,
-		outdirFunc:        outdirFunc,
-		verboseProgressCB: verboseProgressCB,
-	}
-	return p
-}
-
-type fsSyncTarget struct {
-	outdir     string
-	outdirFunc func(map[string]string) (string, error) //earthly
-	f          func(map[string]string) (io.WriteCloser, error)
-
-	verboseProgressCB fsutil.VerboseProgressCB
-=======
 type FSSyncTarget interface {
 	target() *fsSyncTarget
 }
 
 type fsSyncTarget struct {
-	id     int
-	outdir string
-	f      FileOutputFunc
->>>>>>> v0.13.2
+	id                int
+	outdir            string
+	outdirFunc        func(map[string]string) (string, error) // earthly
+	f                 FileOutputFunc
+	verboseProgressCB fsutil.VerboseProgressCB
 }
 
 func (target *fsSyncTarget) target() *fsSyncTarget {
@@ -300,9 +265,30 @@ func WithFSSyncDir(id int, outdir string) FSSyncTarget {
 	}
 }
 
+// NewFSSyncTargetDir allows writing into a directory
+func NewFSSyncTargetDir(outdir string, verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
+	return NewFSSyncTarget(&fsSyncTarget{
+		id:                0,
+		outdir:            outdir,
+		verboseProgressCB: verboseProgressCB,
+	})
+}
+
+// NewFSSyncTarget allows writing into an io.WriteCloser; it is earthly-specific
+func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
+	return NewFSSyncTarget(&fsSyncTarget{
+		id:                0,
+		f:                 f,
+		outdirFunc:        outdirFunc,
+		verboseProgressCB: verboseProgressCB,
+	})
+}
+
 func NewFSSyncTarget(targets ...FSSyncTarget) session.Attachable {
 	fs := make(map[int]FileOutputFunc)
 	outdirs := make(map[int]string)
+	outdirFuncs := make(map[int]func(map[string]string) (string, error))
+	progressCBs := make(map[int]fsutil.VerboseProgressCB)
 	for _, t := range targets {
 		t := t.target()
 		if t.f != nil {
@@ -311,27 +297,32 @@ func NewFSSyncTarget(targets ...FSSyncTarget) session.Attachable {
 		if t.outdir != "" {
 			outdirs[t.id] = t.outdir
 		}
+		if t.outdirFunc != nil {
+			outdirFuncs[t.id] = t.outdirFunc
+		}
+		if t.verboseProgressCB != nil {
+			progressCBs[t.id] = t.verboseProgressCB
+		}
 	}
 	return &fsSyncAttachable{
-		fs:      fs,
-		outdirs: outdirs,
+		fs:          fs,
+		outdirs:     outdirs,
+		outdirFuncs: outdirFuncs,
+		progressCBs: progressCBs,
 	}
 }
 
 type fsSyncAttachable struct {
-	fs      map[int]FileOutputFunc
-	outdirs map[int]string
+	fs          map[int]FileOutputFunc
+	outdirs     map[int]string
+	outdirFuncs map[int]func(map[string]string) (string, error)
+	progressCBs map[int]fsutil.VerboseProgressCB
 }
 
 func (sp *fsSyncAttachable) Register(server *grpc.Server) {
 	RegisterFileSendServer(server, sp)
 }
 
-<<<<<<< HEAD
-func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
-	if sp.outdir != "" {
-		return syncTargetDiffCopy(stream, sp.outdir, sp.verboseProgressCB)
-=======
 func (sp *fsSyncAttachable) chooser(ctx context.Context) int {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -350,13 +341,16 @@ func (sp *fsSyncAttachable) chooser(ctx context.Context) int {
 
 func (sp *fsSyncAttachable) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 	id := sp.chooser(stream.Context())
+	var verboseCB fsutil.VerboseProgressCB
+	if sp.progressCBs != nil {
+		verboseCB = sp.progressCBs[id]
+	}
 	if outdir, ok := sp.outdirs[id]; ok {
-		return syncTargetDiffCopy(stream, outdir)
+		return syncTargetDiffCopy(stream, outdir, verboseCB)
 	}
 	f, ok := sp.fs[id]
 	if !ok {
 		return errors.Errorf("exporter %d not found", id)
->>>>>>> v0.13.2
 	}
 
 	opts, _ := metadata.FromIncomingContext(stream.Context()) // if no metadata continue with empty object
@@ -366,20 +360,18 @@ func (sp *fsSyncAttachable) DiffCopy(stream FileSend_DiffCopyServer) (err error)
 			md[strings.TrimPrefix(k, keyExporterMetaPrefix)] = strings.Join(v, ",")
 		}
 	}
-<<<<<<< HEAD
-	if sp.outdirFunc != nil {
-		outdir, err := sp.outdirFunc(md)
-		if err != nil {
-			return err
-		}
-		if outdir != "" {
-			return syncTargetDiffCopy(stream, outdir, sp.verboseProgressCB)
+	if sp.outdirFuncs != nil {
+		if outdirFunc, ok := sp.outdirFuncs[id]; ok && outdirFunc != nil {
+			outdir, err := outdirFunc(md)
+			if err != nil {
+				return err
+			}
+			if outdir != "" {
+				return syncTargetDiffCopy(stream, outdir, verboseCB)
+			}
 		}
 	}
-	wc, err := sp.f(md)
-=======
 	wc, err := f(md)
->>>>>>> v0.13.2
 	if err != nil {
 		return err
 	}
@@ -421,7 +413,6 @@ func CopyToCaller(ctx context.Context, fs fsutil.FS, id int, c session.Caller, p
 	return sendDiffCopy(cc, fs, progress)
 }
 
-<<<<<<< HEAD
 // CopyToCallerWithMeta is earthly specific
 func CopyToCallerWithMeta(ctx context.Context, md map[string]string, fs fsutil.FS, c session.Caller, progress func(int, bool)) error {
 	method := session.MethodURL(_FileSend_serviceDesc.ServiceName, "diffcopy")
@@ -446,10 +437,7 @@ func CopyToCallerWithMeta(ctx context.Context, md map[string]string, fs fsutil.F
 	return sendDiffCopy(cc, fs, progress)
 }
 
-func CopyFileWriter(ctx context.Context, md map[string]string, c session.Caller) (io.WriteCloser, error) {
-=======
 func CopyFileWriter(ctx context.Context, md map[string]string, id int, c session.Caller) (io.WriteCloser, error) {
->>>>>>> v0.13.2
 	method := session.MethodURL(_FileSend_serviceDesc.ServiceName, "diffcopy")
 	if !c.Supports(method) {
 		return nil, errors.Errorf("method %s not supported by the client", method)

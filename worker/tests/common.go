@@ -38,17 +38,12 @@ func NewCtx(s string) context.Context {
 
 func TestWorkerExec(t *testing.T, w *base.Worker) {
 	ctx := NewCtx("buildkit-test")
-<<<<<<< HEAD
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 	sm, err := session.NewManager(&session.ManagerOpt{
 		HealthFrequency:       1 * time.Second,
 		HealthTimeout:         10 * time.Second,
 		HealthAllowedFailures: 1,
 	})
-=======
-	ctx, cancel := context.WithCancelCause(ctx)
-	sm, err := session.NewManager()
->>>>>>> v0.13.2
 	require.NoError(t, err)
 
 	snap := NewBusyboxSourceSnapshot(ctx, t, w, sm)
