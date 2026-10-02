@@ -831,10 +831,10 @@ func exportDirFunc(ctx context.Context, md map[string]string, caller session.Cal
 				// apply host uid/gid
 				res = idMapFunc(p, st)
 			}
-			//TODO if opt.Epoch != nil {
-			//TODO 	// apply used-specified epoch time
-			//TODO 	st.ModTime = opt.Epoch.UnixNano()
-			//TODO }
+			// TODO if opt.Epoch != nil {
+			// TODO 	// apply used-specified epoch time
+			// TODO 	st.ModTime = opt.Epoch.UnixNano()
+			// TODO }
 			return res
 		}
 		fs, err = fsutil.NewFilterFS(fs, filterOpt)
