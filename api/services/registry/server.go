@@ -1,4 +1,4 @@
-package earthly_registry_v1 //nolint:revive
+package earthly_registry_v1
 
 import (
 	"fmt"
