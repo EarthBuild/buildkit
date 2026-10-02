@@ -14,9 +14,12 @@ ARG CNI_VERSION=v1.3.0
 ARG STARGZ_SNAPSHOTTER_VERSION=v0.15.1
 ARG NERDCTL_VERSION=v1.6.2
 ARG DNSNAME_VERSION=v1.3.1
+<<<<<<< HEAD
 ARG NYDUS_VERSION=v2.2.4
-ARG MINIO_VERSION=RELEASE.2022-05-03T20-36-08Z
-ARG MINIO_MC_VERSION=RELEASE.2022-05-04T06-07-55Z
+=======
+ARG NYDUS_VERSION=v2.1.6
+>>>>>>> origin/main
+ARG SILO_VERSION=RELEASE.2026-09-16T00-00-00Z
 ARG AZURITE_VERSION=3.18.0
 ARG GOTESTSUM_VERSION=v1.9.0
 ARG DELVE_VERSION=v1.21.0
@@ -30,9 +33,8 @@ ARG XX_VERSION=1.4.0
 >>>>>>> v0.13.2
 ARG BUILDKIT_DEBUG
 
-# minio for s3 integration tests
-FROM minio/minio:${MINIO_VERSION} AS minio
-FROM minio/mc:${MINIO_MC_VERSION} AS minio-mc
+# silo for s3 integration tests
+FROM pgsty/silo:${SILO_VERSION} AS silo
 
 # alpine base for buildkit image
 # TODO: remove this when alpine image supports riscv64
@@ -418,9 +420,9 @@ ENV BUILDKIT_INTEGRATION_SNAPSHOTTER=stargz
 ENV BUILDKIT_SETUP_CGROUPV2_ROOT=1
 ENV CGO_ENABLED=0
 ENV GOTESTSUM_FORMAT=standard-verbose
-COPY --link --from=gotestsum /out /usr/bin/
-COPY --link --from=minio /opt/bin/minio /usr/bin/
-COPY --link --from=minio-mc /usr/bin/mc /usr/bin/
+COPY --link --from=gotestsum /out/gotestsum /usr/bin/
+COPY --link --from=silo /usr/bin/silo /usr/bin/minio
+COPY --link --from=silo /usr/bin/mcli /usr/bin/mc
 COPY --link --from=nydus /out/nydus-static/* /usr/bin/
 COPY --link --from=stargz-snapshotter /out/* /usr/bin/
 COPY --link --from=rootlesskit /rootlesskit /usr/bin/
