@@ -78,7 +78,8 @@ OPTIONS:
    --metadata-file value             Output build metadata (e.g., image digest) to a file as JSON
    --source-policy-file value        Read source policy file from a JSON file
    --ref-file value                  Write build ref to a file
-   --registry-auth-tlscontext value  Overwrite TLS configuration when authenticating with registries, e.g. --registry-auth-tlscontext host=https://myserver:2376,ca=/path/to/my/ca.crt,cert=/path/to/my/cert.crt,key=/path/to/my/key.crt
+   --registry-auth-tlscontext value  Overwrite TLS configuration when authenticating with registries, e.g. --registry-auth-tlscontext host=https://myserver:2376,insecure=false,ca=/path/to/my/ca.crt,cert=/path/to/my/cert.crt,key=/path/to/my/key.crt
+   --debug-json-cache-metrics value  Where to output json cache metrics, use 'stdout' or 'stderr' for standard (error) output.
    
 ```
 <!---GENERATE_END-->
@@ -88,8 +89,8 @@ OPTIONS:
 The build consists of the following key elements:
 
 * [frontend definition](#frontend): parses the build descriptor, e.g. dockerfile
-* [local sources](#local_sources): sets relevant directories and files passed to the build
-* [frontend options](#frontend_options): options that are relevant to the particular frontend
+* [local sources](#local-sources): sets relevant directories and files passed to the build
+* [frontend options](#frontend-options): options that are relevant to the particular frontend
 * [output](#output): defines what format of output to use and where to place it
 * [cache](#cache): defines where to export the cache generated during the build to, or where to import from
 
@@ -131,7 +132,7 @@ Similarly:
 buildctl build --oci-layout foo=/var/lib/oci
 ```
 
-lets `buildkitd` access OCI images under `/var/lib/oci` (relative to wherever `buildctl` is running), referenced via the name `test1`.
+lets `buildkitd` access OCI images under `/var/lib/oci` (relative to wherever `buildctl` is running), referenced via the name `foo`.
 
 These "named references" are used by the frontend, either directly or with explicit options.
 
@@ -168,22 +169,22 @@ with something else entirely.
 To use the build contexts, pass `--opt context:<source>=<target>`, where the `<source>` is the name in the dockerfile,
 and `<target>` is a properly formatted target. These can be the following:
 
-* `--opt context:alpine=foo1` - replace usage of `alpine` with a named context `foo1`, that already should have been loaded via `--local`.
-* `--opt context:alpine=foo2@sha256:bd04a5b26dec16579cd1d7322e949c5905c4742269663fcbc84dcb2e9f4592fb` - replace usage of `alpine` with the image or index whose sha256 hash is `bd04a5b26dec16579cd1d7322e949c5905c4742269663fcbc84dcb2e9f4592fb` from an OCI layout whose named context `foo2`, that already should have been loaded via `--oci-layout`.
+* `--opt context:alpine=local:foo1` - replace usage of `alpine` with a named context `foo1`, that already should have been loaded via `--local`.
+* `--opt context:alpine=oci-layout://foo2@sha256:bd04a5b26dec16579cd1d7322e949c5905c4742269663fcbc84dcb2e9f4592fb` - replace usage of `alpine` with the image or index whose sha256 hash is `bd04a5b26dec16579cd1d7322e949c5905c4742269663fcbc84dcb2e9f4592fb` from an OCI layout whose named context `foo2`, that already should have been loaded via `--oci-layout`.
 * `--opt context:alpine=docker-image://docker.io/library/ubuntu:latest` - replace usage of `alpine` with the docker image `docker.io/library/ubuntu:latest` from the registry.
 * `--opt context:alpine=https://example.com/foo/bar.git` - replace usage of alpine with the contents of the git repository at `https://example.com/foo/bar.git`
 
 Complete examples of using local and OCI layout:
 
 ```sh
-$ buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=. --local foo1=/home/dir/abc --opt context:alpine=foo1
-$ buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=. --oci-layout foo2=/home/dir/oci --opt context:alpine=foo2@sha256:bd04a5b26dec16579cd1d7322e949c5905c4742269663fcbc84dcb2e9f4592fb
+$ buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=. --local foo1=/home/dir/abc --opt context:alpine=local:foo1
+$ buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=. --oci-layout foo2=/home/dir/oci --opt context:alpine=oci-layout://foo2@sha256:bd04a5b26dec16579cd1d7322e949c5905c4742269663fcbc84dcb2e9f4592fb
 ```
 
 #### gateway-specific options
 
 The `gateway.v0` frontend passes all of its `--opt` options on to the OCI image that is called to convert the
-input to LLB. The one requires option is `--opt source=<image>`, which defines the OCI image to use to convert
+input to LLB. The one required option is `--opt source=<image>`, which defines the OCI image to use to convert
 the input to LLB.
 
 For example:

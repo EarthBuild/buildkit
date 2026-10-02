@@ -219,6 +219,7 @@ func (sm *Manager) HandleConn(ctx context.Context, conn net.Conn, opts map[strin
 
 // caller needs to take lock, this function will release it
 func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[string][]string) error {
+<<<<<<< HEAD
 	if sm.stop {
 		sm.mu.Unlock()
 		return errors.New("shutting down")
@@ -226,6 +227,10 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+=======
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(errors.WithStack(context.Canceled))
+>>>>>>> v0.13.2
 
 	opts = canonicalHeaders(opts)
 
@@ -286,8 +291,8 @@ func (sm *Manager) Get(ctx context.Context, id string, noWait bool) (Caller, err
 		id = p[1]
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(errors.WithStack(context.Canceled))
 
 	go func() {
 		<-ctx.Done()
@@ -303,7 +308,7 @@ func (sm *Manager) Get(ctx context.Context, id string, noWait bool) (Caller, err
 		select {
 		case <-ctx.Done():
 			sm.mu.Unlock()
-			return nil, errors.Wrapf(ctx.Err(), "no active session for %s", id)
+			return nil, errors.Wrapf(context.Cause(ctx), "no active session for %s", id)
 		default:
 		}
 		var ok bool

@@ -11,7 +11,7 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/config"
-	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/executor/resources"
 	"github.com/moby/buildkit/exporter/containerimage"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
@@ -19,6 +19,7 @@ import (
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/llbsolver/ops"
 	"github.com/moby/buildkit/solver/llbsolver/provenance"
+	provenancetypes "github.com/moby/buildkit/solver/llbsolver/provenance/types"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
@@ -37,7 +38,7 @@ type provenanceBridge struct {
 	mu  sync.Mutex
 	req *frontend.SolveRequest
 
-	images     []provenance.ImageSource
+	images     []provenancetypes.ImageSource
 	builds     []resultWithBridge
 	subBridges []*provenanceBridge
 }
@@ -56,8 +57,8 @@ func (b *provenanceBridge) eachRef(f func(r solver.ResultProxy) error) error {
 	return nil
 }
 
-func (b *provenanceBridge) allImages() []provenance.ImageSource {
-	res := make([]provenance.ImageSource, 0, len(b.images))
+func (b *provenanceBridge) allImages() []provenancetypes.ImageSource {
+	res := make([]provenancetypes.ImageSource, 0, len(b.images))
 	res = append(res, b.images...)
 	for _, sb := range b.subBridges {
 		res = append(res, sb.allImages()...)
@@ -80,6 +81,9 @@ func (b *provenanceBridge) requests(r *frontend.Result) (*resultRequests, error)
 	}
 
 	for k, ref := range r.Refs {
+		if ref == nil {
+			continue
+		}
 		r, ok := b.findByResult(ref)
 		if !ok {
 			return nil, errors.Errorf("could not find request for ref %s", ref.ID())
@@ -130,21 +134,25 @@ func (b *provenanceBridge) findByResult(rp solver.ResultProxy) (*resultWithBridg
 	return nil, false
 }
 
-func (b *provenanceBridge) ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt) (resolvedRef string, dgst digest.Digest, config []byte, err error) {
-	ref, dgst, config, err = b.llbBridge.ResolveImageConfig(ctx, ref, opt)
+func (b *provenanceBridge) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt) (*sourceresolver.MetaResponse, error) {
+	resp, err := b.llbBridge.ResolveSourceMetadata(ctx, op, opt)
 	if err != nil {
-		return "", "", nil, err
+		return nil, err
 	}
-
-	b.mu.Lock()
-	b.images = append(b.images, provenance.ImageSource{
-		Ref:      ref,
-		Platform: opt.Platform,
-		Digest:   dgst,
-		Local:    opt.ResolverType == llb.ResolverTypeOCILayout,
-	})
-	b.mu.Unlock()
-	return ref, dgst, config, nil
+	if img := resp.Image; img != nil {
+		local := !strings.HasPrefix(resp.Op.Identifier, "docker-image://")
+		ref := strings.TrimPrefix(resp.Op.Identifier, "docker-image://")
+		ref = strings.TrimPrefix(ref, "oci-layout://")
+		b.mu.Lock()
+		b.images = append(b.images, provenancetypes.ImageSource{
+			Ref:      ref,
+			Platform: opt.Platform,
+			Digest:   img.Digest,
+			Local:    local,
+		})
+		b.mu.Unlock()
+	}
+	return resp, nil
 }
 
 func (b *provenanceBridge) Solve(ctx context.Context, req frontend.SolveRequest, sid string) (res *frontend.Result, err error) {
@@ -164,7 +172,7 @@ func (b *provenanceBridge) Solve(ctx context.Context, req frontend.SolveRequest,
 			return nil, errors.Errorf("invalid frontend: %s", req.Frontend)
 		}
 		wb := &provenanceBridge{llbBridge: b.llbBridge, req: &req}
-		res, err = f.Solve(ctx, wb, req.FrontendOpt, req.FrontendInputs, sid, b.llbBridge.sm)
+		res, err = f.Solve(ctx, wb, b.llbBridge, req.FrontendOpt, req.FrontendInputs, sid, b.llbBridge.sm)
 		if err != nil {
 			return nil, err
 		}
@@ -177,7 +185,7 @@ func (b *provenanceBridge) Solve(ctx context.Context, req frontend.SolveRequest,
 	}
 	if req.Evaluate {
 		err = res.EachRef(func(ref solver.ResultProxy) error {
-			_, err := res.Ref.Result(ctx)
+			_, err := ref.Result(ctx)
 			return err
 		})
 	}
@@ -192,7 +200,7 @@ type resultRequests struct {
 }
 
 // filterImagePlatforms filter out images that not for the current platform if an image exists for every platform in a result
-func (reqs *resultRequests) filterImagePlatforms(k string, imgs []provenance.ImageSource) []provenance.ImageSource {
+func (reqs *resultRequests) filterImagePlatforms(k string, imgs []provenancetypes.ImageSource) []provenancetypes.ImageSource {
 	if len(reqs.platforms) == 0 {
 		return imgs
 	}
@@ -230,7 +238,7 @@ func (reqs *resultRequests) filterImagePlatforms(k string, imgs []provenance.Ima
 		}
 	}
 
-	out := make([]provenance.ImageSource, 0, len(imgs))
+	out := make([]provenancetypes.ImageSource, 0, len(imgs))
 	for _, img := range imgs {
 		if _, ok := m[img.Ref]; ok && img.Platform != nil {
 			if current.OS == img.Platform.OS && current.Architecture == img.Platform.Architecture {
@@ -277,20 +285,20 @@ func captureProvenance(ctx context.Context, res solver.CachedResultWithProvenanc
 			pr := op.Proto()
 			for _, m := range pr.Mounts {
 				if m.MountType == pb.MountType_SECRET {
-					c.AddSecret(provenance.Secret{
+					c.AddSecret(provenancetypes.Secret{
 						ID:       m.SecretOpt.GetID(),
 						Optional: m.SecretOpt.GetOptional(),
 					})
 				}
 				if m.MountType == pb.MountType_SSH {
-					c.AddSSH(provenance.SSH{
+					c.AddSSH(provenancetypes.SSH{
 						ID:       m.SSHOpt.GetID(),
 						Optional: m.SSHOpt.GetOptional(),
 					})
 				}
 			}
 			for _, se := range pr.Secretenv {
-				c.AddSecret(provenance.Secret{
+				c.AddSecret(provenancetypes.Secret{
 					ID:       se.GetID(),
 					Optional: se.GetOptional(),
 				})
@@ -317,7 +325,7 @@ func captureProvenance(ctx context.Context, res solver.CachedResultWithProvenanc
 }
 
 type ProvenanceCreator struct {
-	pr        *provenance.ProvenancePredicate
+	pr        *provenancetypes.ProvenancePredicate
 	j         *solver.Job
 	sampler   *resources.SysSampler
 	addLayers func() error
@@ -423,7 +431,7 @@ func NewProvenanceCreator(ctx context.Context, cp *provenance.Capture, res solve
 
 			if len(m) != 0 {
 				if pr.Metadata == nil {
-					pr.Metadata = &provenance.ProvenanceMetadata{}
+					pr.Metadata = &provenancetypes.ProvenanceMetadata{}
 				}
 
 				pr.Metadata.BuildKitMetadata.Layers = m
@@ -446,7 +454,7 @@ func NewProvenanceCreator(ctx context.Context, cp *provenance.Capture, res solve
 	return pc, nil
 }
 
-func (p *ProvenanceCreator) Predicate() (*provenance.ProvenancePredicate, error) {
+func (p *ProvenanceCreator) Predicate() (*provenancetypes.ProvenancePredicate, error) {
 	end := p.j.RegisterCompleteTime()
 	p.pr.Metadata.BuildFinishedOn = &end
 
@@ -490,12 +498,12 @@ func (ce *cacheExporter) Add(dgst digest.Digest) solver.CacheExporterRecord {
 	}
 }
 
-func (ce *cacheExporter) Visit(v interface{}) {
-	ce.m[v] = struct{}{}
+func (ce *cacheExporter) Visit(target any) {
+	ce.m[target] = struct{}{}
 }
 
-func (ce *cacheExporter) Visited(v interface{}) bool {
-	_, ok := ce.m[v]
+func (ce *cacheExporter) Visited(target any) bool {
+	_, ok := ce.m[target]
 	return ok
 }
 
@@ -517,7 +525,7 @@ func (c *cacheRecord) AddResult(dgst digest.Digest, idx int, createdAt time.Time
 		d.Annotations = containerimage.RemoveInternalLayerAnnotations(d.Annotations, true)
 		descs[i] = d
 	}
-	c.ce.layers[e] = append(c.ce.layers[e], descs)
+	c.ce.layers[e] = appendLayerChain(c.ce.layers[e], descs)
 }
 
 func (c *cacheRecord) LinkFrom(rec solver.CacheExporterRecord, index int, selector string) {
@@ -539,14 +547,14 @@ func resolveRemotes(ctx context.Context, res solver.Result) ([]*solver.Remote, e
 	return remotes, nil
 }
 
-func AddBuildConfig(ctx context.Context, p *provenance.ProvenancePredicate, c *provenance.Capture, rp solver.ResultProxy, withUsage bool) (map[digest.Digest]int, error) {
+func AddBuildConfig(ctx context.Context, p *provenancetypes.ProvenancePredicate, c *provenance.Capture, rp solver.ResultProxy, withUsage bool) (map[digest.Digest]int, error) {
 	def := rp.Definition()
 	steps, indexes, err := toBuildSteps(def, c, withUsage)
 	if err != nil {
 		return nil, err
 	}
 
-	bc := &provenance.BuildConfig{
+	bc := &provenancetypes.BuildConfig{
 		Definition:    steps,
 		DigestMapping: digestMap(indexes),
 	}
@@ -554,13 +562,13 @@ func AddBuildConfig(ctx context.Context, p *provenance.ProvenancePredicate, c *p
 	p.BuildConfig = bc
 
 	if def.Source != nil {
-		sis := make([]provenance.SourceInfo, len(def.Source.Infos))
+		sis := make([]provenancetypes.SourceInfo, len(def.Source.Infos))
 		for i, si := range def.Source.Infos {
 			steps, indexes, err := toBuildSteps(si.Definition, c, withUsage)
 			if err != nil {
 				return nil, err
 			}
-			s := provenance.SourceInfo{
+			s := provenancetypes.SourceInfo{
 				Filename:      si.Filename,
 				Data:          si.Data,
 				Language:      si.Language,
@@ -581,9 +589,9 @@ func AddBuildConfig(ctx context.Context, p *provenance.ProvenancePredicate, c *p
 			}
 
 			if p.Metadata == nil {
-				p.Metadata = &provenance.ProvenanceMetadata{}
+				p.Metadata = &provenancetypes.ProvenanceMetadata{}
 			}
-			p.Metadata.BuildKitMetadata.Source = &provenance.Source{
+			p.Metadata.BuildKitMetadata.Source = &provenancetypes.Source{
 				Infos:     sis,
 				Locations: locs,
 			}
@@ -601,7 +609,7 @@ func digestMap(idx map[digest.Digest]int) map[digest.Digest]string {
 	return m
 }
 
-func toBuildSteps(def *pb.Definition, c *provenance.Capture, withUsage bool) ([]provenance.BuildStep, map[digest.Digest]int, error) {
+func toBuildSteps(def *pb.Definition, c *provenance.Capture, withUsage bool) ([]provenancetypes.BuildStep, map[digest.Digest]int, error) {
 	if def == nil || len(def.Def) == 0 {
 		return nil, nil, nil
 	}
@@ -653,7 +661,7 @@ func toBuildSteps(def *pb.Definition, c *provenance.Capture, withUsage bool) ([]
 		indexes[dgst] = i
 	}
 
-	out := make([]provenance.BuildStep, 0, len(dgsts))
+	out := make([]provenancetypes.BuildStep, 0, len(dgsts))
 	for i, dgst := range dgsts {
 		op := *ops[dgst]
 		inputs := make([]string, len(op.Inputs))
@@ -661,7 +669,7 @@ func toBuildSteps(def *pb.Definition, c *provenance.Capture, withUsage bool) ([]
 			inputs[i] = fmt.Sprintf("step%d:%d", indexes[inp.Digest], inp.Index)
 		}
 		op.Inputs = nil
-		s := provenance.BuildStep{
+		s := provenancetypes.BuildStep{
 			ID:     fmt.Sprintf("step%d", i),
 			Inputs: inputs,
 			Op:     op,
@@ -695,4 +703,26 @@ func walkDigests(dgsts []digest.Digest, ops map[digest.Digest]*pb.Op, dgst diges
 	}
 	dgsts = append(dgsts, dgst)
 	return dgsts, nil
+}
+
+// appendLayerChain appends a layer chain to the set of layers while checking for duplicate layer chains.
+func appendLayerChain(layers [][]ocispecs.Descriptor, descs []ocispecs.Descriptor) [][]ocispecs.Descriptor {
+	for _, layerDescs := range layers {
+		if len(layerDescs) != len(descs) {
+			continue
+		}
+
+		matched := true
+		for i, d := range layerDescs {
+			if d.Digest != descs[i].Digest {
+				matched = false
+				break
+			}
+		}
+
+		if matched {
+			return layers
+		}
+	}
+	return append(layers, descs)
 }

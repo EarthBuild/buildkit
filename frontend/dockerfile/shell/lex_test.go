@@ -10,6 +10,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestConvertShellPatternToRegex(t *testing.T) {
+	cases := map[string]string{
+		"*":                       "^.*",
+		"?":                       "^.",
+		"\\*":                     "^\\*",
+		"(()[]{\\}^$.\\*\\?|\\\\": "^\\(\\(\\)\\[\\]\\{\\}\\^\\$\\.\\*\\?\\|\\\\",
+	}
+	for pattern, expected := range cases {
+		res, err := convertShellPatternToRegex(pattern, true, true)
+		require.NoError(t, err)
+		require.Equal(t, expected, res.String())
+	}
+	invalid := []string{
+		"\\", "\\x", "\\\\\\",
+	}
+	for _, pattern := range invalid {
+		_, err := convertShellPatternToRegex(pattern, true, true)
+		require.Error(t, err)
+	}
+}
+
+func TestReverseString(t *testing.T) {
+	require.Equal(t, "12345", reverseString("54321"))
+	require.Equal(t, "👽🚀🖖", reverseString("🖖🚀👽"))
+}
+
+func TestReversePattern(t *testing.T) {
+	cases := map[string]string{
+		"a\\*c":    "c\\*a",
+		"\\\\\\ab": "b\\a\\\\",
+		"ab\\":     "\\ba",
+		"👽\\🚀🖖":    "🖖\\🚀👽",
+		"\\\\b":    "b\\\\",
+	}
+	for pattern, expected := range cases {
+		require.Equal(t, expected, reversePattern(pattern))
+	}
+}
+
 func TestShellParserMandatoryEnvVars(t *testing.T) {
 	var newWord string
 	var err error
@@ -357,6 +396,84 @@ func TestProcessWithMatches(t *testing.T) {
 				"BAR": "",
 			},
 			expectedErr: true,
+		},
+		{
+			// special characters in regular expressions
+			// } needs to be escaped so it doesn't match the
+			// closing brace of ${}
+			input:    "${FOO#()[]{\\}^$.\\*\\?|\\\\}",
+			envs:     map[string]string{"FOO": "()[]{}^$.*?|\\x"},
+			expected: "x",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO%%\\**}",
+			envs:     map[string]string{"FOO": "xx**"},
+			expected: "xx",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO#*x*y}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: "y",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO##*x}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: "yy",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO#?\\?}",
+			envs:     map[string]string{"FOO": "???y"},
+			expected: "?y",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${ABC:-.}${FOO%x}${ABC:-.}",
+			envs:     map[string]string{"FOO": "xxyy"},
+			expected: ".xxyy.",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			input:    "${FOO%%\\**\\*}",
+			envs:     map[string]string{"FOO": "a***yy*"},
+			expected: "a",
+			matches:  map[string]struct{}{"FOO": {}},
+		},
+		{
+			// test: wildcards
+			input:    "${FOO/$NEEDLE/.} - ${FOO//$NEEDLE/.}",
+			envs:     map[string]string{"FOO": "/foo*/*/*.txt", "NEEDLE": "\\*/"},
+			expected: "/foo.*/*.txt - /foo..*.txt",
+			matches:  map[string]struct{}{"FOO": {}, "NEEDLE": {}},
+		},
+		{
+			// test: / in patterns
+			input:    "${FOO/$NEEDLE/} - ${FOO//$NEEDLE/}",
+			envs:     map[string]string{"FOO": "/tmp/tmp/bar.txt", "NEEDLE": "/tmp"},
+			expected: "/tmp/bar.txt - /bar.txt",
+			matches:  map[string]struct{}{"FOO": {}, "NEEDLE": {}},
+		},
+		{
+			input:    "${FOO/$NEEDLE/$REPLACEMENT} - ${FOO//$NEEDLE/$REPLACEMENT}",
+			envs:     map[string]string{"FOO": "/a/foo/b/c.txt", "NEEDLE": "/?/", "REPLACEMENT": "/"},
+			expected: "/foo/b/c.txt - /foo/c.txt",
+			matches:  map[string]struct{}{"FOO": {}, "NEEDLE": {}, "REPLACEMENT": {}},
+		},
+		{
+			input:    "${FOO/$NEEDLE/$REPLACEMENT}",
+			envs:     map[string]string{"FOO": "http://google.de", "NEEDLE": "http://", "REPLACEMENT": "https://"},
+			expected: "https://google.de",
+			matches:  map[string]struct{}{"FOO": {}, "NEEDLE": {}, "REPLACEMENT": {}},
+		},
+		{
+			// test: substitute escaped separator characters
+			input:    "${FOO//\\//\\/}",
+			envs:     map[string]string{"FOO": "/tmp/foo.txt"},
+			expected: "\\/tmp\\/foo.txt",
+			matches:  map[string]struct{}{"FOO": {}},
 		},
 	}
 

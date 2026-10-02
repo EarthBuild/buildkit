@@ -15,7 +15,7 @@ import (
 	"github.com/containerd/containerd/snapshots"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/errdefs"
@@ -45,7 +45,7 @@ type puller struct {
 	layerLimit     *int
 	vtx            solver.Vertex
 	ResolverType
-	store llb.ResolveImageConfigOptStore
+	store sourceresolver.ResolveImageConfigOptStore
 
 	g                flightcontrol.Group[struct{}]
 	cacheKeyErr      error
@@ -60,17 +60,21 @@ type puller struct {
 
 func mainManifestKey(ctx context.Context, desc ocispecs.Descriptor, platform ocispecs.Platform, layerLimit *int) (digest.Digest, error) {
 	dt, err := json.Marshal(struct {
-		Digest  digest.Digest
-		OS      string
-		Arch    string
-		Variant string `json:",omitempty"`
-		Limit   *int   `json:",omitempty"`
+		Digest     digest.Digest
+		OS         string
+		Arch       string
+		Variant    string   `json:",omitempty"`
+		OSVersion  string   `json:",omitempty"`
+		OSFeatures []string `json:",omitempty"`
+		Limit      *int     `json:",omitempty"`
 	}{
-		Digest:  desc.Digest,
-		OS:      platform.OS,
-		Arch:    platform.Architecture,
-		Variant: platform.Variant,
-		Limit:   layerLimit,
+		Digest:     desc.Digest,
+		OS:         platform.OS,
+		Arch:       platform.Architecture,
+		Variant:    platform.Variant,
+		OSVersion:  platform.OSVersion,
+		OSFeatures: platform.OSFeatures,
+		Limit:      layerLimit,
 	})
 	if err != nil {
 		return "", err

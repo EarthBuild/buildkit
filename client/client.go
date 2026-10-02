@@ -52,7 +52,6 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		grpc.WithDefaultCallOptions(grpc_retry.WithBackoff(grpc_retry.BackoffExponentialWithJitter(10*time.Millisecond, 0.1))), //earthly
 	}
 	needDialer := true
-	useDefaultDialer := false // earthly-specific
 
 	var unary []grpc.UnaryClientInterceptor
 	var stream []grpc.StreamClientInterceptor
@@ -61,14 +60,10 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 	var tracerProvider trace.TracerProvider
 	var tracerDelegate TracerDelegate
 	var sessionDialer func(context.Context, string, map[string][]string) (net.Conn, error)
-	var headersKV []string // earthly-specific
 	var customDialOptions []grpc.DialOption
 	var creds *withCredentials
 
 	for _, o := range opts {
-		if _, ok := o.(*withFailFast); ok {
-			gopts = append(gopts, grpc.FailOnNonTempDialError(true))
-		}
 		if credInfo, ok := o.(*withCredentials); ok {
 			if creds == nil {
 				creds = &withCredentials{}
@@ -88,16 +83,6 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		}
 		if sd, ok := o.(*withSessionDialer); ok {
 			sessionDialer = sd.dialer
-		}
-
-		// earthly-specific
-		if h, ok := o.(*withAdditionalHeaders); ok {
-			headersKV = h.kv
-		}
-
-		// earthly-specific
-		if _, ok := o.(*withDefaultGRPCDialer); ok {
-			useDefaultDialer = true
 		}
 
 		if opt, ok := o.(*withGRPCDialOption); ok {
@@ -123,11 +108,11 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 
 	if tracerProvider != nil {
 		var propagators = propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
-		unary = append(unary, filterInterceptor(otelgrpc.UnaryClientInterceptor(otelgrpc.WithTracerProvider(tracerProvider), otelgrpc.WithPropagators(propagators))))
-		stream = append(stream, otelgrpc.StreamClientInterceptor(otelgrpc.WithTracerProvider(tracerProvider), otelgrpc.WithPropagators(propagators)))
+		unary = append(unary, filterInterceptor(otelgrpc.UnaryClientInterceptor(otelgrpc.WithTracerProvider(tracerProvider), otelgrpc.WithPropagators(propagators)))) //nolint:staticcheck // TODO(thaJeztah): ignore SA1019 for deprecated options: see https://github.com/moby/buildkit/issues/4681
+		stream = append(stream, otelgrpc.StreamClientInterceptor(otelgrpc.WithTracerProvider(tracerProvider), otelgrpc.WithPropagators(propagators)))                 //nolint:staticcheck // TODO(thaJeztah): ignore SA1019 for deprecated options: see https://github.com/moby/buildkit/issues/4681
 	}
 
-	if needDialer && !useDefaultDialer {
+	if needDialer {
 		dialFn, err := resolveDialer(address)
 		if err != nil {
 			return nil, err
@@ -136,10 +121,6 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 	}
 	if address == "" {
 		address = appdefaults.Address
-	}
-	if len(headersKV) > 0 {
-		unary = append(unary, headersUnaryInterceptor(headersKV...))
-		stream = append(stream, headersStreamInterceptor(headersKV...))
 	}
 
 	// Setting :authority pseudo header
@@ -169,14 +150,6 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 	gopts = append(gopts, grpc.WithChainUnaryInterceptor(unary...))
 	gopts = append(gopts, grpc.WithChainStreamInterceptor(stream...))
 	gopts = append(gopts, customDialOptions...)
-
-	// earthly-specific
-	if useDefaultDialer {
-		split := strings.Split(address, "://")
-		if len(split) > 0 {
-			address = split[1]
-		}
-	}
 
 	conn, err := grpc.DialContext(ctx, address, gopts...)
 	if err != nil {
@@ -235,7 +208,7 @@ func (c *Client) Wait(ctx context.Context) error {
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case <-time.After(time.Second):
 		}
 		c.conn.ResetConnectBackoff()
@@ -244,14 +217,6 @@ func (c *Client) Wait(ctx context.Context) error {
 
 func (c *Client) Close() error {
 	return c.conn.Close()
-}
-
-type withFailFast struct{}
-
-func (*withFailFast) isClientOpt() {}
-
-func WithFailFast() ClientOpt {
-	return &withFailFast{}
 }
 
 type withDialer struct {

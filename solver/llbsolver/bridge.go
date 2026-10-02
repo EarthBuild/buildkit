@@ -12,8 +12,14 @@ import (
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/client"
+<<<<<<< HEAD
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter"
+=======
+	"github.com/moby/buildkit/client/llb/sourceresolver"
+	"github.com/moby/buildkit/executor"
+	resourcestypes "github.com/moby/buildkit/executor/resources/types"
+>>>>>>> v0.13.2
 	"github.com/moby/buildkit/frontend"
 	gw "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/identity"
@@ -26,6 +32,7 @@ import (
 	"github.com/moby/buildkit/sourcepolicy"
 	spb "github.com/moby/buildkit/sourcepolicy/pb"
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/entitlements"
 	"github.com/moby/buildkit/util/flightcontrol"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/worker"
@@ -43,6 +50,10 @@ type llbBridge struct {
 	cms                       map[string]solver.CacheManager
 	cmsMu                     sync.Mutex
 	sm                        *session.Manager
+
+	executorOnce sync.Once
+	executorErr  error
+	executor     executor.Executor
 }
 
 func (b *llbBridge) Warn(ctx context.Context, dgst digest.Digest, msg string, opts frontend.WarnOpts) error {
@@ -89,6 +100,14 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	}
 	var polEngine SourcePolicyEvaluator
 	if srcPol != nil || len(pol) > 0 {
+		for _, p := range pol {
+			if p == nil {
+				return nil, errors.Errorf("invalid nil policy")
+			}
+			if err := validateSourcePolicy(*p); err != nil {
+				return nil, err
+			}
+		}
 		if srcPol != nil {
 			pol = append([]*spb.Policy{srcPol}, pol...)
 		}
@@ -173,6 +192,7 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	return res, nil
 }
 
+<<<<<<< HEAD
 // getExporter is earthly specific code which extracts the configured exporter
 // from the job's metadata
 func (b *llbBridge) getExporter(ctx context.Context) (*ExporterRequest, error) {
@@ -220,6 +240,52 @@ func (b *llbBridge) Export(ctx context.Context, refs map[string]cache.ImmutableR
 		_, _, err = exp.Exporter.Export(ctx, inp, sessionID)
 		return err
 	})
+=======
+func (b *llbBridge) validateEntitlements(p executor.ProcessInfo) error {
+	ent, err := loadEntitlements(b.builder)
+	if err != nil {
+		return err
+	}
+	v := entitlements.Values{
+		NetworkHost:      p.Meta.NetMode == pb.NetMode_HOST,
+		SecurityInsecure: p.Meta.SecurityMode == pb.SecurityMode_INSECURE,
+	}
+	return ent.Check(v)
+}
+
+func (b *llbBridge) Run(ctx context.Context, id string, rootfs executor.Mount, mounts []executor.Mount, process executor.ProcessInfo, started chan<- struct{}) (resourcestypes.Recorder, error) {
+	if err := b.validateEntitlements(process); err != nil {
+		return nil, err
+	}
+
+	if err := b.loadExecutor(); err != nil {
+		return nil, err
+	}
+	return b.executor.Run(ctx, id, rootfs, mounts, process, started)
+}
+
+func (b *llbBridge) Exec(ctx context.Context, id string, process executor.ProcessInfo) error {
+	if err := b.validateEntitlements(process); err != nil {
+		return err
+	}
+
+	if err := b.loadExecutor(); err != nil {
+		return err
+	}
+	return b.executor.Exec(ctx, id, process)
+}
+
+func (b *llbBridge) loadExecutor() error {
+	b.executorOnce.Do(func() {
+		w, err := b.resolveWorker()
+		if err != nil {
+			b.executorErr = err
+			return
+		}
+		b.executor = w.Executor()
+	})
+	return b.executorErr
+>>>>>>> v0.13.2
 }
 
 type resultProxy struct {
@@ -361,32 +427,44 @@ func (rp *resultProxy) Result(ctx context.Context) (res solver.CachedResult, err
 	})
 }
 
-func (b *llbBridge) ResolveImageConfig(ctx context.Context, ref string, opt llb.ResolveImageConfigOpt) (resolvedRef string, dgst digest.Digest, config []byte, err error) {
+func (b *llbBridge) ResolveSourceMetadata(ctx context.Context, op *pb.SourceOp, opt sourceresolver.Opt) (resp *sourceresolver.MetaResponse, err error) {
 	w, err := b.resolveWorker()
 	if err != nil {
-		return "", "", nil, err
+		return nil, err
 	}
 	if opt.LogName == "" {
-		opt.LogName = fmt.Sprintf("resolve image config for %s", ref)
+		// TODO: better name
+		opt.LogName = fmt.Sprintf("resolve image config for %s", op.Identifier)
 	}
-	id := ref // make a deterministic ID for avoiding duplicates
-	if platform := opt.Platform; platform == nil {
-		id += platforms.Format(platforms.DefaultSpec())
+	id := op.Identifier
+	if opt.Platform != nil {
+		id += platforms.Format(*opt.Platform)
 	} else {
-		id += platforms.Format(*platform)
+		id += platforms.Format(platforms.DefaultSpec())
 	}
 	pol, err := loadSourcePolicy(b.builder)
 	if err != nil {
-		return "", "", nil, err
+		return nil, err
 	}
 	if pol != nil {
 		opt.SourcePolicies = append(opt.SourcePolicies, pol)
 	}
+
+	if _, err := sourcepolicy.NewEngine(opt.SourcePolicies).Evaluate(ctx, op); err != nil {
+		return nil, errors.Wrap(err, "could not resolve image due to policy")
+	}
+
+	// policy is evaluated, so we can remove it from the options
+	opt.SourcePolicies = nil
+
 	err = inBuilderContext(ctx, b.builder, opt.LogName, id, func(ctx context.Context, g session.Group) error {
-		resolvedRef, dgst, config, err = w.ResolveImageConfig(ctx, ref, opt, b.sm, g)
+		resp, err = w.ResolveSourceMetadata(ctx, op, opt, b.sm, g)
 		return err
 	})
-	return resolvedRef, dgst, config, err
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 type lazyCacheManager struct {
