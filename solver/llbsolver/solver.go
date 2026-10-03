@@ -744,7 +744,7 @@ func (s *Solver) runExporters(ctx context.Context, exporters []exporter.Exporter
 	// EarthBuild uses res.Refs as a dictionary of named build outputs, not target platforms.
 	// Platform verification is handled per-image inside the Earthly exporter.
 	for _, exp := range exporters {
-		if exp.Name() == client.ExporterEarthly {
+		if exp.Type() == client.ExporterEarthly {
 			isEarthBuild = true
 			break
 		}
