@@ -455,7 +455,6 @@ github.com/docker/cli/cli/config/configfile
 github.com/docker/cli/cli/config/credentials
 github.com/docker/cli/cli/config/types
 github.com/docker/cli/cli/connhelper/commandconn
-<<<<<<< HEAD
 # github.com/docker/distribution v2.8.2+incompatible
 ## explicit
 github.com/docker/distribution
@@ -495,10 +494,7 @@ github.com/docker/distribution/registry/storage/driver/factory
 github.com/docker/distribution/registry/storage/driver/middleware
 github.com/docker/distribution/uuid
 github.com/docker/distribution/version
-# github.com/docker/docker v25.0.3+incompatible
-=======
 # github.com/docker/docker v26.1.4+incompatible
->>>>>>> v0.14.1
 ## explicit
 github.com/docker/docker/api
 github.com/docker/docker/api/types
@@ -643,7 +639,6 @@ github.com/google/shlex
 # github.com/google/uuid v1.5.0
 ## explicit
 github.com/google/uuid
-<<<<<<< HEAD
 # github.com/gorilla/handlers v1.5.2
 ## explicit; go 1.20
 github.com/gorilla/handlers
@@ -652,12 +647,9 @@ github.com/gorilla/handlers
 github.com/gorilla/mux
 # github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 ## explicit; go 1.14
-github.com/grpc-ecosystem/go-grpc-middleware
 github.com/grpc-ecosystem/go-grpc-middleware/retry
 github.com/grpc-ecosystem/go-grpc-middleware/util/backoffutils
 github.com/grpc-ecosystem/go-grpc-middleware/util/metautils
-=======
->>>>>>> v0.14.1
 # github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0
 ## explicit; go 1.17
 github.com/grpc-ecosystem/grpc-gateway/v2/internal/httprule
@@ -829,13 +821,8 @@ github.com/spdx/tools-golang/spdx/v2/v2_3
 ## explicit; go 1.20
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/require
-<<<<<<< HEAD
-# github.com/tonistiigi/fsutil v0.0.0-20240424095704-91a3fc46842c => github.com/alexcb/fsutil v0.0.0-20231030221755-644b08355b65
-## explicit; go 1.19
-=======
-# github.com/tonistiigi/fsutil v0.0.0-20240424095704-91a3fc46842c
+# github.com/tonistiigi/fsutil v0.0.0-20240424095704-91a3fc46842c => github.com/earthbuild/fsutil v0.0.0-20261002194825-890baaee2294
 ## explicit; go 1.20
->>>>>>> v0.14.1
 github.com/tonistiigi/fsutil
 github.com/tonistiigi/fsutil/copy
 github.com/tonistiigi/fsutil/types
@@ -1153,4 +1140,4 @@ kernel.org/pub/linux/libs/security/libcap/cap
 # kernel.org/pub/linux/libs/security/libcap/psx v1.2.67
 ## explicit; go 1.11
 kernel.org/pub/linux/libs/security/libcap/psx
-# github.com/tonistiigi/fsutil => github.com/alexcb/fsutil v0.0.0-20231030221755-644b08355b65
+# github.com/tonistiigi/fsutil => github.com/earthbuild/fsutil v0.0.0-20261002194825-890baaee2294
