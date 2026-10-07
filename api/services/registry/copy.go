@@ -2,10 +2,9 @@ package earthly_registry_v1 //nolint:revive
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 
+	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -60,7 +59,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 					return nil
 				}
 				conn.Close()
-				return fmt.Errorf("receive from stream: %w", err)
+				return errors.Wrap(err, "receive from stream")
 			}
 
 			select {
@@ -72,7 +71,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 
 			if _, err := conn.Write(msg.GetData()); err != nil {
 				conn.Close()
-				return fmt.Errorf("write to connection: %w", err)
+				return errors.Wrap(err, "write to connection")
 			}
 
 			msg.Data = msg.Data[:0]
@@ -88,7 +87,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 				return nil
 			}
 			if err := stream.SendMsg(&ByteMessage{Data: buf[:n]}); err != nil {
-				return fmt.Errorf("send to stream: %w", err)
+				return errors.Wrap(err, "send to stream")
 			}
 			return nil
 		}
@@ -105,7 +104,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 				}
 				if closeStream != nil {
 					if err := closeStream(); err != nil {
-						return fmt.Errorf("close stream: %w", err)
+						return errors.Wrap(err, "close stream")
 					}
 				}
 				return nil
@@ -113,7 +112,7 @@ func Copy(ctx context.Context, conn io.ReadWriteCloser, stream Stream, closeStre
 				// A read error on the connection is terminal. Whatever is in
 				// the buffer belongs to a response that will never be
 				// completed, so there is nothing worth forwarding.
-				return fmt.Errorf("read from connection: %w", err)
+				return errors.Wrap(err, "read from connection")
 			}
 
 			if err := send(n); err != nil {

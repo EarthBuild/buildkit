@@ -3,7 +3,6 @@ package earthly_registry_v1 //nolint:revive
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )
 

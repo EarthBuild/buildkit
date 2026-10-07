@@ -1,9 +1,10 @@
 package earthly_registry_v1 //nolint:revive
 
 import (
-	"fmt"
 	"net"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 // NewServer creates and returns a new proxy server with a given host and client.
@@ -33,7 +34,7 @@ func (s *Server) Proxy(stream Registry_ProxyServer) error {
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("dial embedded registry at %s: %w", addr, err)
+		return errors.Wrapf(err, "dial embedded registry at %s", addr)
 	}
 
 	// The stream is closed by returning from this handler, so there is no send
