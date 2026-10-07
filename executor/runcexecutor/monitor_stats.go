@@ -37,11 +37,12 @@ func writeStatsToStream(w io.Writer, stats *runc.Stats) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to encode runc stats")
 	}
-	err = binary.Write(w, binary.LittleEndian, uint8(1)) // earthly stats stream protocol v1
-	if err != nil {
-		return err
-	}
-	return writeUint32PrefixedBytes(w, statsJSON)
+	buf := make([]byte, 1+4+len(statsJSON))
+	buf[0] = 1 // earthly stats stream protocol v1
+	binary.LittleEndian.PutUint32(buf[1:5], uint32(len(statsJSON)))
+	copy(buf[5:], statsJSON)
+	_, err = w.Write(buf)
+	return err
 }
 
 func (w *runcExecutor) monitorContainerStats(ctx context.Context, id string, sampleFrequency time.Duration, statsWriter io.WriteCloser) {
