@@ -1275,6 +1275,7 @@ func grpcClientConn(ctx context.Context) (context.Context, *grpc.ClientConn, err
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor),
+		grpc.WithStreamInterceptor(grpcerrors.StreamClientInterceptor),
 		grpc.WithInitialWindowSize(65535 * 32),
 		grpc.WithInitialConnWindowSize(65535 * 16),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
