@@ -31,8 +31,8 @@ var errUnexpectedMessage = errors.New("stream carried a message that was not a B
 func tunnel(t *testing.T, reg *httptest.Server) (*http.Client, func() int) {
 	t.Helper()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(errors.WithStack(context.Canceled)) })
 
 	srv := NewServer(reg.Listener.Addr().String())
 
@@ -301,7 +301,11 @@ func TestProxyServesAResponse(t *testing.T) {
 
 	client, _ := tunnel(t, reg)
 
-	resp, err := client.Get("http://registry.invalid/v2/img/blobs/sha256:0")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://registry.invalid/v2/img/blobs/sha256:0", nil)
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET through the proxy: %v", err)
 	}
@@ -341,7 +345,11 @@ func TestProxyDoesNotTruncateAResponseThatStallsMidBody(t *testing.T) {
 
 	client, _ := tunnel(t, reg)
 
-	resp, err := client.Get("http://registry.invalid/v2/img/blobs/sha256:0")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://registry.invalid/v2/img/blobs/sha256:0", nil)
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET through the proxy: %v", err)
 	}
@@ -375,7 +383,11 @@ func TestProxyReusesOneConnectionForTwoRequests(t *testing.T) {
 			time.Sleep(200 * time.Millisecond)
 		}
 
-		resp, err := client.Get("http://registry.invalid/v2/img/manifests/latest")
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://registry.invalid/v2/img/manifests/latest", nil)
+		if err != nil {
+			t.Fatalf("creating request %d: %v", i+1, err)
+		}
+		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatalf("request %d through the proxy: %v", i+1, err)
 		}
@@ -422,7 +434,12 @@ func TestProxyPassesALargeRequestBodyThrough(t *testing.T) {
 
 	client, _ := tunnel(t, reg)
 
-	resp, err := client.Post("http://registry.invalid/v2/img/blobs/uploads/", "application/octet-stream", bytes.NewReader(sent))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://registry.invalid/v2/img/blobs/uploads/", bytes.NewReader(sent))
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("POST through the proxy: %v", err)
 	}

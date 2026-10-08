@@ -20,18 +20,6 @@ import (
 //   <uint32> length of payload (stored as n)
 //   <bytes> n bytes (a json-encoded string of the go-runc Stats structure)
 
-// writeUint32PrefixedBytes writes a uint32 representing the length of the b byte array, followed by the actual
-// byte array.
-func writeUint32PrefixedBytes(w io.Writer, b []byte) error {
-	n := len(b)
-	err := binary.Write(w, binary.LittleEndian, uint32(n))
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(b)
-	return err
-}
-
 func writeStatsToStream(w io.Writer, stats *runc.Stats) error {
 	statsJSON, err := json.Marshal(stats)
 	if err != nil {
