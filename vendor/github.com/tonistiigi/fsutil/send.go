@@ -114,9 +114,6 @@ func (s *sender) run(ctx context.Context) error {
 }
 
 func (s *sender) updateProgress(size int, last bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.progressCurrent += size
 	if s.progressCb != nil {
 		s.progressCurrentMu.Lock()
 		defer s.progressCurrentMu.Unlock()
@@ -149,7 +146,9 @@ func (s *sender) sendFile(h *sendHandle) error {
 			return err
 		}
 		if s.verboseProgressCb != nil {
-			s.verboseProgressCb(h.path, StatusSent, fs.bytesWritten)
+			// h.path is the unix wire path from s.files; report the native
+			// path, matching the StatusStat path reported by walk.
+			s.verboseProgressCb(filepath.FromSlash(h.path), StatusSent, fs.bytesWritten)
 		}
 	}
 	return s.conn.SendMsg(&types.Packet{ID: h.id, Type: types.PACKET_DATA})

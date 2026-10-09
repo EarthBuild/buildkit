@@ -221,10 +221,6 @@ func (r *receiver) run(ctx context.Context) error {
 					}
 					break
 				}
-				if r.verboseProgressCb != nil {
-					r.verboseProgressCb(p.Stat.Path, StatusStat, p.Size())
-				}
-
 				// normalize unix wire-specific paths to platform-specific paths
 				path := filepath.FromSlash(p.Stat.Path)
 				if filepath.ToSlash(path) != p.Stat.Path {
@@ -233,6 +229,12 @@ func (r *receiver) run(ctx context.Context) error {
 				}
 				p.Stat.Path = path
 				p.Stat.Linkname = filepath.FromSlash(p.Stat.Linkname)
+
+				// earthly-specific: report the native path, matching the
+				// StatusReceiving/StatusReceived paths (r.files keys) and NotifyHashed.
+				if r.verboseProgressCb != nil {
+					r.verboseProgressCb(path, StatusStat, p.Size())
+				}
 
 				if fileCanRequestData(os.FileMode(p.Stat.Mode)) {
 					r.mu.Lock()
