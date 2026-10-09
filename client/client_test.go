@@ -167,10 +167,7 @@ var allTests = []func(t *testing.T, sb integration.Sandbox){
 	testRelativeMountpoint,
 	testLocalSourceDiffer,
 	testLocalSourceWithHardlinksFilter,
-<<<<<<< HEAD
-=======
 	testNoTarOCIIndexMediaType,
->>>>>>> v0.14.1
 	testOCILayoutSource,
 	testOCILayoutPlatformSource,
 	testBuildExportZstd,

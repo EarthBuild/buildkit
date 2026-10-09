@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package runcexecutor
 
 import (
@@ -20,28 +23,17 @@ import (
 //   <uint32> length of payload (stored as n)
 //   <bytes> n bytes (a json-encoded string of the go-runc Stats structure)
 
-// writeUint32PrefixedBytes writes a uint32 representing the length of the b byte array, followed by the actual
-// byte array.
-func writeUint32PrefixedBytes(w io.Writer, b []byte) error {
-	n := len(b)
-	err := binary.Write(w, binary.LittleEndian, uint32(n))
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(b)
-	return err
-}
-
 func writeStatsToStream(w io.Writer, stats *runc.Stats) error {
 	statsJSON, err := json.Marshal(stats)
 	if err != nil {
 		return errors.Wrap(err, "failed to encode runc stats")
 	}
-	err = binary.Write(w, binary.LittleEndian, uint8(1)) // earthly stats stream protocol v1
-	if err != nil {
-		return err
-	}
-	return writeUint32PrefixedBytes(w, statsJSON)
+	buf := make([]byte, 1+4+len(statsJSON))
+	buf[0] = 1 // earthly stats stream protocol v1
+	binary.LittleEndian.PutUint32(buf[1:5], uint32(len(statsJSON)))
+	copy(buf[5:], statsJSON)
+	_, err = w.Write(buf)
+	return err
 }
 
 func (w *runcExecutor) monitorContainerStats(ctx context.Context, id string, sampleFrequency time.Duration, statsWriter io.WriteCloser) {
