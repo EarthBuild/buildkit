@@ -82,18 +82,26 @@ func logOnExec(logLine string) func(context.Context) error {
 	}
 }
 
-// TestEarthlyMergedEdgeLogsDeliveredOnce covers two solves whose vertices
+// TestEarthlyMergedEdgeLogsReachMergedJob covers two solves whose vertices
 // have different digests but the same cache key, so the scheduler merges j1's
 // edge into j0's active edge and the operation runs once.
 //
-// On old EarthBuild main (BuildKit v0.12 base) the log line of the merged
-// operation was delivered only to the job that ran it. Since upstream commit
-// e1da8b7f ("solver: fix printing progress messages after merged edges",
-// first released in v0.13 and therefore part of this v0.14.1 merge),
-// state.setEdge adds the merge source's progress writer to the target, and
-// MultiWriter.Add replays the target's history, so j1 also receives the log
-// line of j0's vertex.
-func TestEarthlyMergedEdgeLogsDeliveredOnce(t *testing.T) {
+// This is a characterisation test of upstream behaviour, not of
+// earthly-specific code. On old EarthBuild main (BuildKit v0.12 base) the log
+// line of the merged operation was delivered only to the job that ran it.
+// Since upstream commit e1da8b7f ("solver: fix printing progress messages
+// after merged edges", first released in v0.13), state.setEdge adds the merge
+// source's progress writer to the target, and MultiWriter.Add replays the
+// target's history, so j1 also receives the log line of j0's vertex.
+//
+// BuildKit is deliberately not patched to suppress this (see AGENTS.md):
+// streaming vertex output to every attached caller is upstream's contract.
+// EarthBuild relies on that contract and must dedupe on its side, by not
+// issuing redundant concurrent solves for the same work, or by
+// deduplicating log output across the Status streams of concurrent solves
+// (earthbuild#1004). If this test starts failing after an upstream bump, the
+// fan-out contract has changed and EarthBuild's dedupe must be revisited.
+func TestEarthlyMergedEdgeLogsReachMergedJob(t *testing.T) {
 	t.Parallel()
 
 	const logLine = "merged-edge-log\n"
@@ -113,7 +121,7 @@ func TestEarthlyMergedEdgeLogsDeliveredOnce(t *testing.T) {
 	j0Count, j1Count := runFanoutJobs(t, e0, e1, logLine)
 
 	require.Equal(t, 1, j0Count, "job that ran the operation should see its log once")
-	require.Equal(t, 0, j1Count, "job whose edge was merged into another job's edge received that job's log line, so the line is printed twice across the two solves")
+	require.Equal(t, 1, j1Count, "job whose edge was merged into another job's edge should have that job's log replayed (upstream e1da8b7f)")
 }
 
 // TestEarthlySharedVertexLogsDeliveredToEveryJob covers two solves that load
