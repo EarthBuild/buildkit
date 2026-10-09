@@ -1,72 +1,35 @@
 package types
 
 import (
-	"github.com/docker/docker/api/types/checkpoint"
-	"github.com/docker/docker/api/types/system"
+	"github.com/docker/docker/api/types/image"
 )
 
-// CheckpointCreateOptions holds parameters to create a checkpoint from a container.
+// ImageImportOptions holds information to import images from the client host.
 //
-// Deprecated: use [checkpoint.CreateOptions].
-type CheckpointCreateOptions = checkpoint.CreateOptions
+// Deprecated: use [image.ImportOptions].
+type ImageImportOptions = image.ImportOptions
 
-// CheckpointListOptions holds parameters to list checkpoints for a container
+// ImageCreateOptions holds information to create images.
 //
-// Deprecated: use [checkpoint.ListOptions].
-type CheckpointListOptions = checkpoint.ListOptions
+// Deprecated: use [image.CreateOptions].
+type ImageCreateOptions = image.CreateOptions
 
-// CheckpointDeleteOptions holds parameters to delete a checkpoint from a container
+// ImagePullOptions holds information to pull images.
 //
-// Deprecated: use [checkpoint.DeleteOptions].
-type CheckpointDeleteOptions = checkpoint.DeleteOptions
+// Deprecated: use [image.PullOptions].
+type ImagePullOptions = image.PullOptions
 
-// Checkpoint represents the details of a checkpoint when listing endpoints.
+// ImagePushOptions holds information to push images.
 //
-// Deprecated: use [checkpoint.Summary].
-type Checkpoint = checkpoint.Summary
+// Deprecated: use [image.PushOptions].
+type ImagePushOptions = image.PushOptions
 
-// Info contains response of Engine API:
-// GET "/info"
+// ImageListOptions holds parameters to list images with.
 //
-// Deprecated: use [system.Info].
-type Info = system.Info
+// Deprecated: use [image.ListOptions].
+type ImageListOptions = image.ListOptions
 
-// Commit holds the Git-commit (SHA1) that a binary was built from, as reported
-// in the version-string of external tools, such as containerd, or runC.
+// ImageRemoveOptions holds parameters to remove images.
 //
-// Deprecated: use [system.Commit].
-type Commit = system.Commit
-
-// PluginsInfo is a temp struct holding Plugins name
-// registered with docker daemon. It is used by [system.Info] struct
-//
-// Deprecated: use [system.PluginsInfo].
-type PluginsInfo = system.PluginsInfo
-
-// NetworkAddressPool is a temp struct used by [system.Info] struct.
-//
-// Deprecated: use [system.NetworkAddressPool].
-type NetworkAddressPool = system.NetworkAddressPool
-
-// Runtime describes an OCI runtime.
-//
-// Deprecated: use [system.Runtime].
-type Runtime = system.Runtime
-
-// SecurityOpt contains the name and options of a security option.
-//
-// Deprecated: use [system.SecurityOpt].
-type SecurityOpt = system.SecurityOpt
-
-// KeyValue holds a key/value pair.
-//
-// Deprecated: use [system.KeyValue].
-type KeyValue = system.KeyValue
-
-// DecodeSecurityOptions decodes a security options string slice to a type safe
-// [system.SecurityOpt].
-//
-// Deprecated: use [system.DecodeSecurityOptions].
-func DecodeSecurityOptions(opts []string) ([]system.SecurityOpt, error) {
-	return system.DecodeSecurityOptions(opts)
-}
+// Deprecated: use [image.RemoveOptions].
+type ImageRemoveOptions = image.RemoveOptions

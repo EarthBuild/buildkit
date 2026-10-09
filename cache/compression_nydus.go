@@ -9,9 +9,8 @@ import (
 	"io"
 
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/labels"
-	"github.com/moby/buildkit/cache/config"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/util/compression"
 	digest "github.com/opencontainers/go-digest"
@@ -26,20 +25,6 @@ func init() {
 		additionalAnnotations,
 		converter.LayerAnnotationNydusBlob, converter.LayerAnnotationNydusBootstrap,
 	)
-}
-
-// Nydus compression type can't be mixed with other compression types in the same image,
-// so if `source` is this kind of layer, but the target is other compression type, we
-// should do the forced compression.
-func needsForceCompression(ctx context.Context, cs content.Store, source ocispecs.Descriptor, refCfg config.RefConfig) bool {
-	if refCfg.Compression.Force {
-		return true
-	}
-	isNydusBlob, _ := compression.Nydus.Is(ctx, cs, source)
-	if refCfg.Compression.Type == compression.Nydus {
-		return !isNydusBlob
-	}
-	return isNydusBlob
 }
 
 // MergeNydus does two steps:
@@ -110,7 +95,7 @@ func MergeNydus(ctx context.Context, ref ImmutableRef, comp compression.Config, 
 	if err := cw.Commit(ctx, 0, compressedDgst, content.WithLabels(map[string]string{
 		labels.LabelUncompressed: uncompressedDgst.Digest().String(),
 	})); err != nil {
-		if !errdefs.IsAlreadyExists(err) {
+		if !cerrdefs.IsAlreadyExists(err) {
 			return nil, errors.Wrap(err, "commit to content store")
 		}
 	}

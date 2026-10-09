@@ -7,6 +7,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/swarm"
@@ -71,19 +72,26 @@ type ImageInspect struct {
 
 	// Created is the date and time at which the image was created, formatted in
 	// RFC 3339 nano-seconds (time.RFC3339Nano).
-	Created string
+	//
+	// This information is only available if present in the image,
+	// and omitted otherwise.
+	Created string `json:",omitempty"`
 
 	// Container is the ID of the container that was used to create the image.
 	//
 	// Depending on how the image was created, this field may be empty.
-	Container string
+	//
+	// Deprecated: this field is omitted in API v1.45, but kept for backward compatibility.
+	Container string `json:",omitempty"`
 
 	// ContainerConfig is an optional field containing the configuration of the
 	// container that was last committed when creating the image.
 	//
 	// Previous versions of Docker builder used this field to store build cache,
 	// and it is not in active use anymore.
-	ContainerConfig *container.Config
+	//
+	// Deprecated: this field is omitted in API v1.45, but kept for backward compatibility.
+	ContainerConfig *container.Config `json:",omitempty"`
 
 	// DockerVersion is the version of Docker that was used to build the image.
 	//
@@ -128,13 +136,7 @@ type ImageInspect struct {
 	// Metadata of the image in the local cache.
 	//
 	// This information is local to the daemon, and not part of the image itself.
-	Metadata ImageMetadata
-}
-
-// ImageMetadata contains engine-local data about the image
-type ImageMetadata struct {
-	// LastTagTime is the date and time at which the image was last tagged.
-	LastTagTime time.Time `json:",omitempty"`
+	Metadata image.Metadata
 }
 
 // Container contains response of Engine API:
@@ -340,17 +342,27 @@ type SummaryNetworkSettings struct {
 	Networks map[string]*network.EndpointSettings
 }
 
-// NetworkSettingsBase holds basic information about networks
+// NetworkSettingsBase holds networking state for a container when inspecting it.
 type NetworkSettingsBase struct {
-	Bridge                 string      // Bridge is the Bridge name the network uses(e.g. `docker0`)
-	SandboxID              string      // SandboxID uniquely represents a container's network stack
-	HairpinMode            bool        // HairpinMode specifies if hairpin NAT should be enabled on the virtual interface
-	LinkLocalIPv6Address   string      // LinkLocalIPv6Address is an IPv6 unicast address using the link-local prefix
-	LinkLocalIPv6PrefixLen int         // LinkLocalIPv6PrefixLen is the prefix length of an IPv6 unicast address
-	Ports                  nat.PortMap // Ports is a collection of PortBinding indexed by Port
-	SandboxKey             string      // SandboxKey identifies the sandbox
-	SecondaryIPAddresses   []network.Address
-	SecondaryIPv6Addresses []network.Address
+	Bridge     string      // Bridge contains the name of the default bridge interface iff it was set through the daemon --bridge flag.
+	SandboxID  string      // SandboxID uniquely represents a container's network stack
+	SandboxKey string      // SandboxKey identifies the sandbox
+	Ports      nat.PortMap // Ports is a collection of PortBinding indexed by Port
+
+	// HairpinMode specifies if hairpin NAT should be enabled on the virtual interface
+	//
+	// Deprecated: This field is never set and will be removed in a future release.
+	HairpinMode bool
+	// LinkLocalIPv6Address is an IPv6 unicast address using the link-local prefix
+	//
+	// Deprecated: This field is never set and will be removed in a future release.
+	LinkLocalIPv6Address string
+	// LinkLocalIPv6PrefixLen is the prefix length of an IPv6 unicast address
+	//
+	// Deprecated: This field is never set and will be removed in a future release.
+	LinkLocalIPv6PrefixLen int
+	SecondaryIPAddresses   []network.Address // Deprecated: This field is never set and will be removed in a future release.
+	SecondaryIPv6Addresses []network.Address // Deprecated: This field is never set and will be removed in a future release.
 }
 
 // DefaultNetworkSettings holds network information
@@ -443,31 +455,26 @@ type EndpointResource struct {
 
 // NetworkCreate is the expected body of the "create network" http request message
 type NetworkCreate struct {
-	// Check for networks with duplicate names.
-	// Network is primarily keyed based on a random ID and not on the name.
-	// Network name is strictly a user-friendly alias to the network
-	// which is uniquely identified using ID.
-	// And there is no guaranteed way to check for duplicates.
-	// Option CheckDuplicate is there to provide a best effort checking of any networks
-	// which has the same name but it is not guaranteed to catch all name collisions.
-	CheckDuplicate bool
-	Driver         string
-	Scope          string
-	EnableIPv6     bool
-	IPAM           *network.IPAM
-	Internal       bool
-	Attachable     bool
-	Ingress        bool
-	ConfigOnly     bool
-	ConfigFrom     *network.ConfigReference
-	Options        map[string]string
-	Labels         map[string]string
+	// Deprecated: CheckDuplicate is deprecated since API v1.44, but it defaults to true when sent by the client
+	// package to older daemons.
+	CheckDuplicate bool                     `json:",omitempty"`
+	Driver         string                   // Driver is the driver-name used to create the network (e.g. `bridge`, `overlay`)
+	Scope          string                   // Scope describes the level at which the network exists (e.g. `swarm` for cluster-wide or `local` for machine level).
+	EnableIPv6     bool                     // EnableIPv6 represents whether to enable IPv6.
+	IPAM           *network.IPAM            // IPAM is the network's IP Address Management.
+	Internal       bool                     // Internal represents if the network is used internal only.
+	Attachable     bool                     // Attachable represents if the global scope is manually attachable by regular containers from workers in swarm mode.
+	Ingress        bool                     // Ingress indicates the network is providing the routing-mesh for the swarm cluster.
+	ConfigOnly     bool                     // ConfigOnly creates a config-only network. Config-only networks are place-holder networks for network configurations to be used by other networks. ConfigOnly networks cannot be used directly to run containers or services.
+	ConfigFrom     *network.ConfigReference // ConfigFrom specifies the source which will provide the configuration for this network. The specified network must be a config-only network; see [NetworkCreate.ConfigOnly].
+	Options        map[string]string        // Options specifies the network-specific options to use for when creating the network.
+	Labels         map[string]string        // Labels holds metadata specific to the network being created.
 }
 
 // NetworkCreateRequest is the request message sent to the server for network create call.
 type NetworkCreateRequest struct {
 	NetworkCreate
-	Name string
+	Name string // Name is the requested name of the network.
 }
 
 // NetworkCreateResponse is the response message sent by the server for network create call
@@ -519,7 +526,7 @@ type DiskUsageOptions struct {
 // GET "/system/df"
 type DiskUsage struct {
 	LayersSize  int64
-	Images      []*ImageSummary
+	Images      []*image.Summary
 	Containers  []*Container
 	Volumes     []*volume.Volume
 	BuildCache  []*BuildCache
@@ -543,7 +550,7 @@ type VolumesPruneReport struct {
 // ImagesPruneReport contains the response for Engine API:
 // POST "/images/prune"
 type ImagesPruneReport struct {
-	ImagesDeleted  []ImageDeleteResponseItem
+	ImagesDeleted  []image.DeleteResponse
 	SpaceReclaimed uint64
 }
 

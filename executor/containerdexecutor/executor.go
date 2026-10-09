@@ -56,6 +56,7 @@ type OnCreateRuntimer interface {
 
 type RuntimeInfo struct {
 	Name    string
+	Path    string
 	Options any
 }
 
@@ -117,7 +118,16 @@ func (w *containerdExecutor) Run(ctx context.Context, id string, root executor.M
 	}()
 
 	meta := process.Meta
-	resolvConf, hostsFile, releasers, err := w.prepareExecutionEnv(ctx, root, mounts, meta, details)
+	if meta.NetMode == pb.NetMode_HOST {
+		bklog.G(ctx).Info("enabling HostNetworking")
+	}
+
+	provider, ok := w.networkProviders[meta.NetMode]
+	if !ok {
+		return nil, errors.Errorf("unknown network mode %s", meta.NetMode)
+	}
+
+	resolvConf, hostsFile, releasers, err := w.prepareExecutionEnv(ctx, root, mounts, meta, details, meta.NetMode)
 	if err != nil {
 		return nil, err
 	}
@@ -130,19 +140,11 @@ func (w *containerdExecutor) Run(ctx context.Context, id string, root executor.M
 		return nil, err
 	}
 
-	provider, ok := w.networkProviders[meta.NetMode]
-	if !ok {
-		return nil, errors.Errorf("unknown network mode %s", meta.NetMode)
-	}
 	namespace, err := provider.New(ctx, meta.Hostname)
 	if err != nil {
 		return nil, err
 	}
 	defer namespace.Close()
-
-	if meta.NetMode == pb.NetMode_HOST {
-		bklog.G(ctx).Info("enabling HostNetworking")
-	}
 
 	spec, releaseSpec, err := w.createOCISpec(ctx, id, resolvConf, hostsFile, namespace, mounts, meta, details)
 	if err != nil {
@@ -179,8 +181,10 @@ func (w *containerdExecutor) Run(ctx context.Context, id string, root executor.M
 	if err != nil {
 		return nil, err
 	}
-
-	task, err := container.NewTask(ctx, cio.NewCreator(cioOpts...), taskOpts)
+	if w.runtime != nil && w.runtime.Path != "" {
+		taskOpts = append(taskOpts, containerd.WithRuntimePath(w.runtime.Path))
+	}
+	task, err := container.NewTask(ctx, cio.NewCreator(cioOpts...), taskOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +244,7 @@ func (w *containerdExecutor) Exec(ctx context.Context, id string, process execut
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case err, ok := <-details.done:
 			if !ok || err == nil {
 				return errors.Errorf("container %s has stopped", id)
@@ -333,8 +337,8 @@ func (w *containerdExecutor) runProcess(ctx context.Context, p containerd.Proces
 
 	// handle signals (and resize) in separate go loop so it does not
 	// potentially block the container cancel/exit status loop below.
-	eventCtx, eventCancel := context.WithCancel(ctx)
-	defer eventCancel()
+	eventCtx, eventCancel := context.WithCancelCause(ctx)
+	defer eventCancel(errors.WithStack(context.Canceled))
 	go func() {
 		for {
 			select {
@@ -368,7 +372,7 @@ func (w *containerdExecutor) runProcess(ctx context.Context, p containerd.Proces
 		}
 	}()
 
-	var cancel func()
+	var cancel func(error)
 	var killCtxDone <-chan struct{}
 	ctxDone := ctx.Done()
 	for {
@@ -376,13 +380,14 @@ func (w *containerdExecutor) runProcess(ctx context.Context, p containerd.Proces
 		case <-ctxDone:
 			ctxDone = nil
 			var killCtx context.Context
-			killCtx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+			killCtx, cancel = context.WithCancelCause(context.Background())
+			killCtx, _ = context.WithTimeoutCause(killCtx, 10*time.Second, errors.WithStack(context.DeadlineExceeded))
 			killCtxDone = killCtx.Done()
 			p.Kill(killCtx, syscall.SIGKILL)
 			io.Cancel()
 		case status := <-statusCh:
 			if cancel != nil {
-				cancel()
+				cancel(errors.WithStack(context.Canceled))
 			}
 			trace.SpanFromContext(ctx).AddEvent(
 				"Container exited",
@@ -400,7 +405,7 @@ func (w *containerdExecutor) runProcess(ctx context.Context, p containerd.Proces
 				}
 				select {
 				case <-ctx.Done():
-					exitErr.Err = errors.Wrap(ctx.Err(), exitErr.Error())
+					exitErr.Err = errors.Wrap(context.Cause(ctx), exitErr.Error())
 				default:
 				}
 				return exitErr
@@ -408,7 +413,7 @@ func (w *containerdExecutor) runProcess(ctx context.Context, p containerd.Proces
 			return nil
 		case <-killCtxDone:
 			if cancel != nil {
-				cancel()
+				cancel(errors.WithStack(context.Canceled))
 			}
 			io.Cancel()
 			return errors.Errorf("failed to kill process on cancel")
