@@ -92,6 +92,11 @@ const (
 	CapSourcePolicy apicaps.CapID = "source.policy"
 
 	CapEarthlyRegistryProxy apicaps.CapID = "earthly.regproxy" // earthly-specific
+
+	// CapEarthlyLocalRegistrySource is the capability of the earthly exporter to
+	// serve the original content of a digest-pinned image from the embedded
+	// registry. See exporter/earthlyoutputs. earthly-specific.
+	CapEarthlyLocalRegistrySource apicaps.CapID = "earthly.localregistry.source"
 )
 
 func init() {
@@ -492,6 +497,12 @@ func init() {
 
 	Caps.Init(apicaps.Cap{
 		ID:      CapEarthlyRegistryProxy,
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
+		ID:      CapEarthlyLocalRegistrySource,
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
 	})
