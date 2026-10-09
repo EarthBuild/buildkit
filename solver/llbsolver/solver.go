@@ -739,19 +739,25 @@ func runInlineCacheExporter(ctx context.Context, e exporter.ExporterInstance, in
 }
 
 func (s *Solver) runExporters(ctx context.Context, exporters []exporter.ExporterInstance, inlineCacheExporter inlineCacheExporter, job *solver.Job, cached *result.Result[solver.CachedResult], inp *result.Result[cache.ImmutableRef]) (exporterResponse map[string]string, descrefs []exporter.DescriptorReference, err error) {
-	var isEarthBuild bool
-
-	// EarthBuild uses res.Refs as a dictionary of named build outputs, not target platforms.
-	// Platform verification is handled per-image inside the Earthly exporter.
+	// earthly-specific: the EarthBuild frontend uses inp.Refs as a dictionary
+	// of named build outputs, not target platforms, and sets no platforms
+	// mapping, so CheckInvalidPlatforms always rejects its result. The
+	// EarthBuild exporter does not verify platforms itself either; it only
+	// groups refs into images by their "platform" metadata. Skip the check
+	// only when every exporter is the EarthBuild exporter. All exporters
+	// share inp, so a solve that mixes the EarthBuild exporter with another
+	// exporter is still checked for the other exporter's sake, which rejects
+	// an EarthBuild-shaped result. EarthBuild never issues such solves.
+	onlyEarthBuild := len(exporters) > 0
 	for _, exp := range exporters {
-		if exp.Type() == client.ExporterEarthly {
-			isEarthBuild = true
+		if exp.Type() != client.ExporterEarthly {
+			onlyEarthBuild = false
 			break
 		}
 	}
 
 	var warnings []client.VertexWarning
-	if !isEarthBuild {
+	if !onlyEarthBuild {
 		warnings, err = verifier.CheckInvalidPlatforms(ctx, inp)
 		if err != nil {
 			return nil, nil, err

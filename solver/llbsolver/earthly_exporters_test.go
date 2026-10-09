@@ -32,10 +32,10 @@ func (e *fakeExporterInstance) Export(_ context.Context, _ *exporter.Source, _ e
 	return nil, nil, nil
 }
 
-// earthly-specific: runExporters skips verifier.CheckInvalidPlatforms for
-// the whole solve as soon as any exporter is the EarthBuild exporter, so a
-// non-EarthBuild exporter in the same solve loses the upstream v0.14 result
-// validation and is handed a multi-ref result without a platforms mapping.
+// earthly-specific: runExporters skips verifier.CheckInvalidPlatforms only
+// when every exporter is the EarthBuild exporter. A non-EarthBuild exporter in
+// the same solve must keep the upstream v0.14 result validation rather than
+// be handed a multi-ref result without a platforms mapping.
 func TestRunExportersValidatesNonEarthlyExporterAlongsideEarthly(t *testing.T) {
 	t.Parallel()
 	ctx := context.TODO()
@@ -64,6 +64,12 @@ func TestRunExportersValidatesNonEarthlyExporterAlongsideEarthly(t *testing.T) {
 	require.ErrorContains(t, err, "build result contains multiple refs without platforms mapping")
 	require.False(t, imageOnly.exported.Load())
 
+	// EarthBuild-only solve: its named-output refs skip the check.
+	earthlyOnly := &fakeExporterInstance{typ: client.ExporterEarthly}
+	_, _, err = s.runExporters(ctx, []exporter.ExporterInstance{earthlyOnly}, nil, job, nil, inp)
+	require.NoError(t, err)
+	require.True(t, earthlyOnly.exported.Load())
+
 	// Mixed solve: the image exporter must still be protected by the check.
 	earthly := &fakeExporterInstance{typ: client.ExporterEarthly}
 	image := &fakeExporterInstance{typ: client.ExporterImage}
@@ -71,4 +77,5 @@ func TestRunExportersValidatesNonEarthlyExporterAlongsideEarthly(t *testing.T) {
 	require.ErrorContains(t, err, "build result contains multiple refs without platforms mapping",
 		"platform validation was skipped for the image exporter because an EarthBuild exporter was also present")
 	require.False(t, image.exported.Load(), "image exporter ran on a result that failed platform validation")
+	require.False(t, earthly.exported.Load())
 }
