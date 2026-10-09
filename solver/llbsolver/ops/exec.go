@@ -292,6 +292,8 @@ func (e *ExecOp) getMountDeps() ([]dep, error) {
 		switch m.MountType {
 		case pb.MountType_SECRET, pb.MountType_SSH, pb.MountType_TMPFS:
 			continue
+		case pb.MountType_SOCKET: // earthly-specific: socket mounts have no input vertex either
+			continue
 		}
 
 		if m.Input == pb.Empty {
