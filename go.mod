@@ -183,4 +183,6 @@ require (
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.67 // indirect
 )
 
-replace github.com/tonistiigi/fsutil => github.com/earthbuild/fsutil v0.0.0-20261002194825-890baaee2294
+// TODO: fsutil points at the head of the unmerged EarthBuild/fsutil#4 (stacked on #3).
+// Advance this to the merged commit on EarthBuild/fsutil earthly-main once those land.
+replace github.com/tonistiigi/fsutil => github.com/earthbuild/fsutil v0.0.0-20261009204740-e66a226757f7
