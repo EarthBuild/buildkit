@@ -61,7 +61,13 @@ type ExportEntry struct {
 	OutputDir          string                                          // for ExporterLocal
 	OutputDirFunc      func(map[string]string) (string, error)         // for ExporterEarthly
 	OutputPullCallback pullping.PullCallback                           // for ExporterEarthly
-	VerboseProgressCB  fsutil.VerboseProgressCB
+	// OnReceiveProgress is called periodically as files/artifacts are received from the daemon
+	// via diffcopy (e.g. during artifact export in EarthBuild). It reports the cumulative bytes received
+	// and whether the transfer is complete (done=true), allowing the client to render progress bars
+	// and transfer metrics.
+	OnReceiveProgress func(bytes int, done bool) // for ExporterEarthly
+	// OnReceiveFile is called for each file received from the daemon during export
+	OnReceiveFile func(path string, size int64) // for ExporterEarthly
 }
 
 type CacheOptionsEntry struct {
@@ -197,9 +203,9 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 				if ex.OutputPullCallback != nil {
 					s.Allow(pullping.NewPullPing(ex.OutputPullCallback))
 				}
-				s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.VerboseProgressCB))
+				s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.OnReceiveProgress, ex.OnReceiveFile))
 			} else {
-				s.Allow(filesync.NewFSSyncTarget(ex.Output, ex.VerboseProgressCB))
+				s.Allow(filesync.NewFSSyncTarget(ex.Output))
 			}
 		}
 		if supportDir {
@@ -218,7 +224,7 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 				contentStores["export"] = cs
 				storesToUpdate = append(storesToUpdate, ex.OutputDir)
 			default:
-				s.Allow(filesync.NewFSSyncTargetDir(ex.OutputDir, ex.VerboseProgressCB))
+				s.Allow(filesync.NewFSSyncTargetDir(ex.OutputDir))
 			}
 		}
 

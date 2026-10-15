@@ -25,14 +25,13 @@ type Stream interface {
 	Context() context.Context
 }
 
-func Send(ctx context.Context, conn Stream, fs FS, progressCb func(int, bool), verboseProgressCb VerboseProgressCB) error {
+func Send(ctx context.Context, conn Stream, fs FS, progressCb func(int, bool)) error {
 	s := &sender{
-		conn:              &syncStream{Stream: conn},
-		fs:                fs,
-		files:             make(map[uint32]string),
-		progressCb:        progressCb,
-		verboseProgressCb: verboseProgressCb,
-		sendpipeline:      make(chan *sendHandle, 128),
+		conn:         &syncStream{Stream: conn},
+		fs:           fs,
+		files:        make(map[uint32]string),
+		progressCb:   progressCb,
+		sendpipeline: make(chan *sendHandle, 128),
 	}
 	return s.run(ctx)
 }
@@ -43,14 +42,13 @@ type sendHandle struct {
 }
 
 type sender struct {
-	conn              Stream
-	fs                FS
-	files             map[uint32]string
-	mu                sync.RWMutex
-	progressCb        func(int, bool)
-	verboseProgressCb VerboseProgressCB
-	progressCurrent   int
-	sendpipeline      chan *sendHandle
+	conn            Stream
+	fs              FS
+	files           map[uint32]string
+	mu              sync.RWMutex
+	progressCb      func(int, bool)
+	progressCurrent int
+	sendpipeline    chan *sendHandle
 }
 
 func (s *sender) run(ctx context.Context) error {
@@ -112,10 +110,8 @@ func (s *sender) run(ctx context.Context) error {
 }
 
 func (s *sender) updateProgress(size int, last bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.progressCurrent += size
 	if s.progressCb != nil {
+		s.progressCurrent += size
 		s.progressCb(s.progressCurrent, last)
 	}
 }
@@ -139,12 +135,8 @@ func (s *sender) sendFile(h *sendHandle) error {
 		defer f.Close()
 		buf := bufPool.Get().(*[]byte)
 		defer bufPool.Put(buf)
-		fs := fileSender{sender: s, id: h.id}
-		if _, err := io.CopyBuffer(&fs, struct{ io.Reader }{f}, *buf); err != nil {
+		if _, err := io.CopyBuffer(&fileSender{sender: s, id: h.id}, struct{ io.Reader }{f}, *buf); err != nil {
 			return err
-		}
-		if s.verboseProgressCb != nil {
-			s.verboseProgressCb(h.path, StatusSent, fs.bytesWritten)
 		}
 	}
 	return s.conn.SendMsg(&types.Packet{ID: h.id, Type: types.PACKET_DATA})
@@ -176,11 +168,6 @@ func (s *sender) walk(ctx context.Context) error {
 		}
 		i++
 		s.updateProgress(p.Size(), false)
-
-		if s.verboseProgressCb != nil {
-			s.verboseProgressCb(path, StatusStat, p.Size())
-		}
-
 		return errors.Wrapf(s.conn.SendMsg(p), "failed to send stat %s", path)
 	})
 	if err != nil {
@@ -196,9 +183,8 @@ func fileCanRequestData(m os.FileMode) bool {
 }
 
 type fileSender struct {
-	sender       *sender
-	id           uint32
-	bytesWritten int
+	sender *sender
+	id     uint32
 }
 
 func (fs *fileSender) Write(dt []byte) (int, error) {
@@ -210,7 +196,6 @@ func (fs *fileSender) Write(dt []byte) (int, error) {
 		return 0, err
 	}
 	fs.sender.updateProgress(p.Size(), false)
-	fs.bytesWritten += len(dt)
 	return len(dt), nil
 }
 
