@@ -21,6 +21,7 @@ import (
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
@@ -84,6 +85,7 @@ func (e *imageExporter) Resolve(ctx context.Context, id int, opt map[string]stri
 	i := &imageExporterInstance{
 		imageExporter: e,
 		id:            id,
+		attrs:         opt,
 		opts: containerimage.ImageCommitOpts{
 			RefCfg: cacheconfig.RefConfig{
 				Compression: compression.New(compression.Default),
@@ -185,6 +187,7 @@ func (e *imageExporter) Resolve(ctx context.Context, id int, opt map[string]stri
 type imageExporterInstance struct {
 	*imageExporter
 	id                   int
+	attrs                map[string]string
 	opts                 containerimage.ImageCommitOpts
 	push                 bool
 	pushByDigest         bool
@@ -203,6 +206,14 @@ func (e *imageExporterInstance) ID() int {
 
 func (e *imageExporterInstance) Name() string {
 	return "[output] exporting outputs"
+}
+
+func (e *imageExporterInstance) Type() string {
+	return client.ExporterEarthly
+}
+
+func (e *imageExporterInstance) Attrs() map[string]string {
+	return e.attrs
 }
 
 type imgData struct {
@@ -820,10 +831,10 @@ func exportDirFunc(ctx context.Context, md map[string]string, caller session.Cal
 				// apply host uid/gid
 				res = idMapFunc(p, st)
 			}
-			//TODO if opt.Epoch != nil {
-			//TODO 	// apply used-specified epoch time
-			//TODO 	st.ModTime = opt.Epoch.UnixNano()
-			//TODO }
+			// TODO if opt.Epoch != nil {
+			// TODO 	// apply used-specified epoch time
+			// TODO 	st.ModTime = opt.Epoch.UnixNano()
+			// TODO }
 			return res
 		}
 		fs, err = fsutil.NewFilterFS(fs, filterOpt)

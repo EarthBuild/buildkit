@@ -289,6 +289,13 @@ type dep struct {
 func (e *ExecOp) getMountDeps() ([]dep, error) {
 	deps := make([]dep, e.numInputs)
 	for _, m := range e.op.Mounts {
+		switch m.MountType {
+		case pb.MountType_SECRET, pb.MountType_SSH, pb.MountType_TMPFS:
+			continue
+		case pb.MountType_SOCKET, pb.MountType_HOST_BIND: // earth-specific: socket and host-bind mounts have no input vertex
+			continue
+		}
+
 		if m.Input == pb.Empty {
 			continue
 		}
@@ -532,17 +539,17 @@ func (e *ExecOp) doFromLocalHack(ctx context.Context, root executor.Mount, mount
 	}
 	switch cmd {
 	case localhost.CopyFileMagicStr:
-		return true, e.copyLocally(ctx, root, g, meta, stdout, stderr)
+		return true, e.copyLocally(ctx, root, g, meta)
 	case localhost.RunOnLocalHostMagicStr:
-		return true, e.execLocally(ctx, root, g, meta, stdout, stderr)
+		return true, e.execLocally(ctx, g, meta, stdout, stderr)
 	case localhost.SendFileMagicStr:
-		return true, e.sendLocally(ctx, root, mounts, g, meta, stdout, stderr)
+		return true, e.sendLocally(ctx, mounts, g, meta)
 	default:
 		return false, nil
 	}
 }
 
-func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
+func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session.Group, meta executor.Meta) error {
 	if len(meta.Args) != 3 {
 		return errors.Errorf("CopyFileMagicStr takes exactly 2 args")
 	}
@@ -596,7 +603,7 @@ func (e *ExecOp) copyLocally(ctx context.Context, root executor.Mount, g session
 
 var errSendFileMagicStrMissingArgs = errors.Errorf("SendFileMagicStr args missing; should be SendFileMagicStr [--dir] [--] <src> [<src> ...] <dst>")
 
-func (e *ExecOp) sendLocally(ctx context.Context, root executor.Mount, mounts []executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
+func (e *ExecOp) sendLocally(ctx context.Context, mounts []executor.Mount, g session.Group, meta executor.Meta) error {
 	i := 0
 	nArgs := len(meta.Args)
 
@@ -678,7 +685,7 @@ func (e *ExecOp) sendLocally(ctx context.Context, root executor.Mount, mounts []
 	})
 }
 
-func (e *ExecOp) execLocally(ctx context.Context, root executor.Mount, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
+func (e *ExecOp) execLocally(ctx context.Context, g session.Group, meta executor.Meta, stdout, stderr io.WriteCloser) error {
 	if len(meta.Args) == 0 || meta.Args[0] != localhost.RunOnLocalHostMagicStr {
 		panic("first arg should be RunOnLocalHostMagicStr; this should not happen")
 	}

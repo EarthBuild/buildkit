@@ -68,11 +68,7 @@ require (
 	github.com/spdx/tools-golang v0.5.3
 	github.com/stretchr/testify v1.8.4
 	github.com/tonistiigi/fsutil v0.0.0-20240424095704-91a3fc46842c
-<<<<<<< HEAD
-	github.com/tonistiigi/go-actions-cache v0.0.0-20240227172821-a0b64f338598
-=======
 	github.com/tonistiigi/go-actions-cache v0.0.0-20240320205438-9794bdbb2fb4
->>>>>>> v0.14.1
 	github.com/tonistiigi/go-archvariant v1.0.0
 	github.com/tonistiigi/units v0.0.0-20180711220420-6950e57a87ea
 	github.com/tonistiigi/vt100 v0.0.0-20240514184818-90bafcd6abab
@@ -95,11 +91,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.21.0
 	go.opentelemetry.io/proto/otlp v1.0.0
 	golang.org/x/crypto v0.21.0
-<<<<<<< HEAD
-	golang.org/x/mod v0.13.0
-=======
 	golang.org/x/mod v0.17.0
->>>>>>> v0.14.1
 	golang.org/x/net v0.23.0
 	golang.org/x/sync v0.5.0
 	golang.org/x/sys v0.18.0
@@ -112,6 +104,7 @@ require (
 
 require (
 	github.com/docker/distribution v2.8.2+incompatible
+	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/moby/sys/mount v0.3.5
 )
 

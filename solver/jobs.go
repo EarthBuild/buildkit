@@ -517,12 +517,7 @@ func (jl *Solver) loadUnlocked(ctx context.Context, v, parent Vertex, j *Job, ca
 			origDigest:   origVtx.Digest(),
 		}
 		jl.actives[dgst] = st
-<<<<<<< HEAD
 		dgstTrackerInst.add(dgst, "loadUnlocked-add")
-	} else {
-		dgstTrackerInst.add(dgst, "loadUnlocked-exists")
-=======
-
 		if debugScheduler {
 			lg := bklog.G(ctx).
 				WithField("vertex_name", v.Name()).
@@ -540,16 +535,18 @@ func (jl *Solver) loadUnlocked(ctx context.Context, v, parent Vertex, j *Job, ca
 					Debug("new active vertex input")
 			}
 		}
-	} else if debugScheduler {
-		lg := bklog.G(ctx).
-			WithField("vertex_name", v.Name()).
-			WithField("vertex_digest", v.Digest()).
-			WithField("actives_digest_key", dgst)
-		if j != nil {
-			lg = lg.WithField("job", j.id)
+	} else {
+		dgstTrackerInst.add(dgst, "loadUnlocked-exists")
+		if debugScheduler {
+			lg := bklog.G(ctx).
+				WithField("vertex_name", v.Name()).
+				WithField("vertex_digest", v.Digest()).
+				WithField("actives_digest_key", dgst)
+			if j != nil {
+				lg = lg.WithField("job", j.id)
+			}
+			lg.Debug("reusing active vertex")
 		}
-		lg.Debug("reusing active vertex")
->>>>>>> v0.14.1
 	}
 
 	st.mu.Lock()
@@ -689,9 +686,7 @@ func (jl *Solver) deleteIfUnreferenced(k digest.Digest, st *state) {
 		}
 		st.Release()
 		delete(jl.actives, k)
-<<<<<<< HEAD
 		dgstTrackerInst.add(k, "delete")
-=======
 	} else if debugScheduler {
 		var jobIDs []string
 		for j := range st.jobs {
@@ -703,7 +698,6 @@ func (jl *Solver) deleteIfUnreferenced(k digest.Digest, st *state) {
 			WithField("actives_key", k).
 			WithField("jobs", jobIDs).
 			Debug("not deleting referenced active vertex")
->>>>>>> v0.14.1
 	}
 }
 

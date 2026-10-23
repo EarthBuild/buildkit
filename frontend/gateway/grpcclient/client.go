@@ -1276,22 +1276,13 @@ func grpcClientConn(ctx context.Context) (context.Context, *grpc.ClientConn, err
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor),
 		grpc.WithStreamInterceptor(grpcerrors.StreamClientInterceptor),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(16 << 20)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(16 << 20)),
+		grpc.WithInitialWindowSize(65535 * 32),
+		grpc.WithInitialConnWindowSize(65535 * 16),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
+		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)),
 	}
 
-<<<<<<< HEAD
-	cc, err := grpc.DialContext(ctx, "localhost", dialOpt,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(grpcerrors.UnaryClientInterceptor),
-		grpc.WithStreamInterceptor(grpcerrors.StreamClientInterceptor),
-		grpc.WithInitialWindowSize(65535*32),
-		grpc.WithInitialConnWindowSize(65535*16),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(defaults.DefaultMaxRecvMsgSize)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(defaults.DefaultMaxSendMsgSize)))
-=======
 	cc, err := grpc.DialContext(ctx, "localhost", dialOpts...)
->>>>>>> v0.14.1
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to create grpc client")
 	}

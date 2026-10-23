@@ -236,17 +236,17 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 	return pr.recvFn(stream, opt.DestDir, opt.CacheUpdater, opt.ProgressCb, opt.Differ, opt.Filter)
 }
 
-<<<<<<< HEAD
 type FSSyncTarget interface {
 	target() *fsSyncTarget
 }
 
 type fsSyncTarget struct {
-	id                int
-	outdir            string
-	outdirFunc        func(map[string]string) (string, error) // earthly
-	f                 FileOutputFunc
-	verboseProgressCB fsutil.VerboseProgressCB
+	id         int
+	outdir     string
+	outdirFunc func(map[string]string) (string, error) // earthly
+	f          FileOutputFunc
+	progress   progressCb
+	onFile     fileCb
 }
 
 func (target *fsSyncTarget) target() *fsSyncTarget {
@@ -257,20 +257,6 @@ func WithFSSync(id int, f FileOutputFunc) FSSyncTarget {
 	return &fsSyncTarget{
 		id: id,
 		f:  f,
-=======
-// NewFSSyncTargetDir allows writing into a directory
-func NewFSSyncTargetDir(outdir string) session.Attachable {
-	p := &fsSyncTarget{
-		outdir: outdir,
-	}
-	return p
-}
-
-// NewFSSyncTarget allows writing into an io.WriteCloser
-func NewFSSyncTarget(f func(map[string]string) (io.WriteCloser, error)) session.Attachable {
-	p := &fsSyncTarget{
-		f: f,
->>>>>>> origin/main
 	}
 }
 
@@ -282,24 +268,23 @@ func WithFSSyncDir(id int, outdir string) FSSyncTarget {
 }
 
 // NewFSSyncTargetDir allows writing into a directory
-func NewFSSyncTargetDir(outdir string, verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
+func NewFSSyncTargetDir(outdir string) session.Attachable {
 	return NewFSSyncTarget(&fsSyncTarget{
-		id:                0,
-		outdir:            outdir,
-		verboseProgressCB: verboseProgressCB,
+		id:     0,
+		outdir: outdir,
 	})
 }
 
 type fileCb func(string, int64)
 
 // NewFSSyncTarget allows writing into an io.WriteCloser; it is earthly-specific
-<<<<<<< HEAD
-func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
+func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progress progressCb, onFile fileCb) session.Attachable {
 	return NewFSSyncTarget(&fsSyncTarget{
-		id:                0,
-		f:                 f,
-		outdirFunc:        outdirFunc,
-		verboseProgressCB: verboseProgressCB,
+		id:         0,
+		f:          f,
+		outdirFunc: outdirFunc,
+		progress:   progress,
+		onFile:     onFile,
 	})
 }
 
@@ -307,7 +292,8 @@ func NewFSSyncTarget(targets ...FSSyncTarget) session.Attachable {
 	fs := make(map[int]FileOutputFunc)
 	outdirs := make(map[int]string)
 	outdirFuncs := make(map[int]func(map[string]string) (string, error))
-	progressCBs := make(map[int]fsutil.VerboseProgressCB)
+	progressCBs := make(map[int]progressCb)
+	onFileCBs := make(map[int]fileCb)
 	for _, t := range targets {
 		t := t.target()
 		if t.f != nil {
@@ -319,8 +305,11 @@ func NewFSSyncTarget(targets ...FSSyncTarget) session.Attachable {
 		if t.outdirFunc != nil {
 			outdirFuncs[t.id] = t.outdirFunc
 		}
-		if t.verboseProgressCB != nil {
-			progressCBs[t.id] = t.verboseProgressCB
+		if t.progress != nil {
+			progressCBs[t.id] = t.progress
+		}
+		if t.onFile != nil {
+			onFileCBs[t.id] = t.onFile
 		}
 	}
 	return &fsSyncAttachable{
@@ -328,39 +317,22 @@ func NewFSSyncTarget(targets ...FSSyncTarget) session.Attachable {
 		outdirs:     outdirs,
 		outdirFuncs: outdirFuncs,
 		progressCBs: progressCBs,
-=======
-func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progress progressCb, onFile fileCb) session.Attachable {
-	p := &fsSyncTarget{
-		f:          f,
-		outdirFunc: outdirFunc,
-		progress:   progress,
-		onFile:     onFile,
->>>>>>> origin/main
+		onFileCBs:   onFileCBs,
 	}
 }
 
-<<<<<<< HEAD
 type fsSyncAttachable struct {
 	fs          map[int]FileOutputFunc
 	outdirs     map[int]string
 	outdirFuncs map[int]func(map[string]string) (string, error)
-	progressCBs map[int]fsutil.VerboseProgressCB
-=======
-type fsSyncTarget struct {
-	outdir     string
-	outdirFunc func(map[string]string) (string, error) // earthly
-	f          func(map[string]string) (io.WriteCloser, error)
-
-	progress progressCb
-	onFile   fileCb
->>>>>>> origin/main
+	progressCBs map[int]progressCb
+	onFileCBs   map[int]fileCb
 }
 
 func (sp *fsSyncAttachable) Register(server *grpc.Server) {
 	RegisterFileSendServer(server, sp)
 }
 
-<<<<<<< HEAD
 func (sp *fsSyncAttachable) chooser(ctx context.Context) int {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -379,21 +351,20 @@ func (sp *fsSyncAttachable) chooser(ctx context.Context) int {
 
 func (sp *fsSyncAttachable) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 	id := sp.chooser(stream.Context())
-	var verboseCB fsutil.VerboseProgressCB
+	var progressCB progressCb
 	if sp.progressCBs != nil {
-		verboseCB = sp.progressCBs[id]
+		progressCB = sp.progressCBs[id]
+	}
+	var onFileCB fileCb
+	if sp.onFileCBs != nil {
+		onFileCB = sp.onFileCBs[id]
 	}
 	if outdir, ok := sp.outdirs[id]; ok {
-		return syncTargetDiffCopy(stream, outdir, verboseCB)
+		return syncTargetDiffCopy(stream, outdir, progressCB, onFileCB)
 	}
 	f, ok := sp.fs[id]
 	if !ok {
 		return errors.Errorf("exporter %d not found", id)
-=======
-func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
-	if sp.outdir != "" {
-		return syncTargetDiffCopy(stream, sp.outdir, sp.progress, sp.onFile)
->>>>>>> origin/main
 	}
 
 	opts, _ := metadata.FromIncomingContext(stream.Context()) // if no metadata continue with empty object
@@ -403,7 +374,6 @@ func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 			md[strings.TrimPrefix(k, keyExporterMetaPrefix)] = strings.Join(v, ",")
 		}
 	}
-<<<<<<< HEAD
 	if sp.outdirFuncs != nil {
 		if outdirFunc, ok := sp.outdirFuncs[id]; ok && outdirFunc != nil {
 			outdir, err := outdirFunc(md)
@@ -411,17 +381,8 @@ func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 				return err
 			}
 			if outdir != "" {
-				return syncTargetDiffCopy(stream, outdir, verboseCB)
+				return syncTargetDiffCopy(stream, outdir, progressCB, onFileCB)
 			}
-=======
-	if sp.outdirFunc != nil {
-		outdir, err := sp.outdirFunc(md)
-		if err != nil {
-			return err
-		}
-		if outdir != "" {
-			return syncTargetDiffCopy(stream, outdir, sp.progress, sp.onFile)
->>>>>>> origin/main
 		}
 	}
 	wc, err := f(md)

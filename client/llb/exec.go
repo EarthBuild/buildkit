@@ -389,7 +389,7 @@ func (e *ExecOp) Marshal(ctx context.Context, c *Constraints) (digest.Digest, []
 				Size_: m.tmpfsOpt.Size,
 			}
 		}
-		if m.hostBind { //earthly
+		if m.hostBind { // earthly
 			pm.MountType = pb.MountType_HOST_BIND
 		}
 		peo.Mounts = append(peo.Mounts, pm)

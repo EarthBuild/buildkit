@@ -329,7 +329,20 @@ ARG TARGETPLATFORM
 RUN --mount=target=/root/.cache,type=cache <<EOT
   set -ex
   xx-go install "gotest.tools/gotestsum@${GOTESTSUM_VERSION}"
-  xx-go install "github.com/wadey/gocovmerge@latest"
+  # NOTE for future upstream merges:
+  # Upstream uses: xx-go install "github.com/wadey/gocovmerge@latest"
+  # However, gocovmerge has no go.mod and unpinned dependencies. Under Go 1.21,
+  # 'go install ...@latest' dynamically resolves transitive dependency golang.org/x/tools/cover
+  # to the latest version (v0.51.0+), which requires go >= 1.26.0 and fails the build.
+  # When upstream upgrades the builder to Go >= 1.26 (or pins gocovmerge),
+  # this temporary module workaround can be reverted back to upstream's single xx-go install line.
+  mkdir -p /tmp/gocovmerge && cd /tmp/gocovmerge
+  go mod init gocovmerge
+  go get golang.org/x/tools@v0.21.0
+  go get github.com/wadey/gocovmerge@b5bfa59ec0ad
+  xx-go install github.com/wadey/gocovmerge
+  cd /
+  rm -rf /tmp/gocovmerge
   mkdir /out
   if ! xx-info is-cross; then
     /go/bin/gotestsum --version
@@ -419,7 +432,11 @@ ENV BUILDKIT_INTEGRATION_SNAPSHOTTER=stargz
 ENV BUILDKIT_SETUP_CGROUPV2_ROOT=1
 ENV CGO_ENABLED=0
 ENV GOTESTSUM_FORMAT=standard-verbose
-COPY --link --from=gotestsum /out/gotestsum /usr/bin/
+# NOTE for future upstream merges:
+# Upstream copies all test helpers (/out) to /usr/bin/ because it includes
+# gotestsum, gocovmerge, and the gotestsumandcover runner script.
+# Do NOT change this to /out/gotestsum or gotestsumandcover will be missing at test runtime.
+COPY --link --from=gotestsum /out /usr/bin/
 COPY --link --from=silo /usr/bin/silo /usr/bin/minio
 COPY --link --from=silo /usr/bin/mcli /usr/bin/mc
 COPY --link --from=nydus /out/nydus-static/* /usr/bin/

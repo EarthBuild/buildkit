@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/pkg/seed" //nolint:staticcheck // SA1019 deprecated
 	"github.com/containerd/containerd/pkg/userns"
 	"github.com/containerd/containerd/platforms"
@@ -25,12 +24,8 @@ import (
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/gofrs/flock"
-<<<<<<< HEAD
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	regproxy "github.com/moby/buildkit/api/services/registry"
-=======
 	"github.com/hashicorp/go-multierror"
->>>>>>> v0.14.1
+	regproxy "github.com/moby/buildkit/api/services/registry"
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/cache/remotecache/azblob"
 	"github.com/moby/buildkit/cache/remotecache/gha"
@@ -270,15 +265,13 @@ func main() {
 			logrus.SetLevel(logrus.TraceLevel)
 		}
 
-<<<<<<< HEAD
 		logrus.SetOutput(os.Stderr) // earthly-specific: force logs to show up under earthly-buildkitd container logs
-=======
+
 		if sc := cfg.System; sc != nil {
 			if v := sc.PlatformsCacheMaxAge; v != nil {
 				archutil.CacheMaxAge = v.Duration
 			}
 		}
->>>>>>> v0.14.1
 
 		if cfg.GRPC.DebugAddress != "" {
 			if err := setupDebugHandlers(cfg.GRPC.DebugAddress); err != nil {
@@ -303,29 +296,15 @@ func main() {
 			otelgrpc.WithMeterProvider(mp),
 			otelgrpc.WithPropagators(propagators),
 		)
-<<<<<<< HEAD
-
-		unary := grpc_middleware.ChainUnaryServer(unaryInterceptor(ctx, tp, mp), grpcerrors.UnaryServerInterceptor,
-			unaryTimeoutInterceptor(), // earthly-specific
-		)
-		stream := grpc_middleware.ChainStreamServer(streamTracer, grpcerrors.StreamServerInterceptor,
-			streamTimeoutInterceptor(), // earthly-specific
-		)
-
 		maxMsgSize := 67108864 // 64MB
 		opts := []grpc.ServerOption{
-			grpc.UnaryInterceptor(unary), grpc.StreamInterceptor(stream),
-			grpc.MaxRecvMsgSize(maxMsgSize), grpc.MaxSendMsgSize(maxMsgSize),
+			grpc.StatsHandler(statsHandler),
+			grpc.ChainUnaryInterceptor(unaryInterceptor, grpcerrors.UnaryServerInterceptor, unaryTimeoutInterceptor()),
+			grpc.ChainStreamInterceptor(grpcerrors.StreamServerInterceptor, streamTimeoutInterceptor()),
+			grpc.MaxRecvMsgSize(maxMsgSize),
+			grpc.MaxSendMsgSize(maxMsgSize),
 			grpc.InitialWindowSize(65535 * 32),
 			grpc.InitialConnWindowSize(65535 * 16),
-=======
-		opts := []grpc.ServerOption{
-			grpc.StatsHandler(statsHandler),
-			grpc.ChainUnaryInterceptor(unaryInterceptor, grpcerrors.UnaryServerInterceptor),
-			grpc.StreamInterceptor(grpcerrors.StreamServerInterceptor),
-			grpc.MaxRecvMsgSize(defaults.DefaultMaxRecvMsgSize),
-			grpc.MaxSendMsgSize(defaults.DefaultMaxSendMsgSize),
->>>>>>> v0.14.1
 		}
 		server := grpc.NewServer(opts...)
 

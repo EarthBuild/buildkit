@@ -216,12 +216,6 @@ func (r *receiver) run(ctx context.Context) error {
 					}
 					break
 				}
-<<<<<<< HEAD
-<<<<<<< HEAD
-				if r.verboseProgressCb != nil {
-					r.verboseProgressCb(p.Stat.Path, StatusStat, p.Size())
-				}
-=======
 
 				// normalize unix wire-specific paths to platform-specific paths
 				path := filepath.FromSlash(p.Stat.Path)
@@ -232,9 +226,6 @@ func (r *receiver) run(ctx context.Context) error {
 				p.Stat.Path = path
 				p.Stat.Linkname = filepath.FromSlash(p.Stat.Linkname)
 
->>>>>>> v0.14.1
-=======
->>>>>>> origin/main
 				if fileCanRequestData(os.FileMode(p.Stat.Mode)) {
 					r.mu.Lock()
 					r.files[p.Stat.Path] = i
