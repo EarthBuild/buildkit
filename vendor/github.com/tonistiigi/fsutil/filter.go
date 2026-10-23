@@ -30,8 +30,7 @@ type FilterOpt struct {
 	// Map is called for each path that is included in the result.
 	// The function can modify the stat info for each element, while the result
 	// of the function controls both how Walk continues.
-	Map               MapFunc
-	VerboseProgressCB VerboseProgressCB // earthly-specific
+	Map MapFunc
 }
 
 type MapFunc func(string, *types.Stat) MapResult
@@ -62,8 +61,7 @@ type filterFS struct {
 	onlyPrefixIncludes          bool
 	onlyPrefixExcludeExceptions bool
 
-	mapFn             MapFunc
-	verboseProgressCB VerboseProgressCB // earthly-specific
+	mapFn MapFunc
 }
 
 // NewFilterFS creates a new FS that filters the given FS using the given
@@ -146,7 +144,6 @@ func NewFilterFS(fs FS, opt *FilterOpt) (FS, error) {
 		onlyPrefixIncludes:          onlyPrefixIncludes,
 		onlyPrefixExcludeExceptions: onlyPrefixExcludeExceptions,
 		mapFn:                       opt.Map,
-		verboseProgressCB:           opt.VerboseProgressCB, // earthly-specific
 	}, nil
 }
 
@@ -269,9 +266,6 @@ func (fs *filterFS) Walk(ctx context.Context, target string, fn gofs.WalkDirFunc
 			}
 
 			if m {
-				if fs.verboseProgressCB != nil { // earthly-specific
-					fs.verboseProgressCB(path, StatusSkipped, 0)
-				}
 				if isDir && fs.onlyPrefixExcludeExceptions {
 					// Optimization: we can skip walking this dir if no
 					// exceptions to exclude patterns could match anything
