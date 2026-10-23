@@ -739,19 +739,19 @@ func runInlineCacheExporter(ctx context.Context, e exporter.ExporterInstance, in
 }
 
 func (s *Solver) runExporters(ctx context.Context, exporters []exporter.ExporterInstance, inlineCacheExporter inlineCacheExporter, job *solver.Job, cached *result.Result[solver.CachedResult], inp *result.Result[cache.ImmutableRef]) (exporterResponse map[string]string, descrefs []exporter.DescriptorReference, err error) {
-	var isEarthBuild bool
-
-	// EarthBuild uses res.Refs as a dictionary of named build outputs, not target platforms.
-	// Platform verification is handled per-image inside the Earthly exporter.
+	// earthly-specific: EarthBuild uses inp.Refs for named outputs without an
+	// ExporterPlatformsKey mapping, which CheckInvalidPlatforms rejects. Skip
+	// the check only when every exporter is client.ExporterEarthly.
+	onlyEarthBuild := len(exporters) > 0
 	for _, exp := range exporters {
-		if exp.Type() == client.ExporterEarthly {
-			isEarthBuild = true
+		if exp.Type() != client.ExporterEarthly {
+			onlyEarthBuild = false
 			break
 		}
 	}
 
 	var warnings []client.VertexWarning
-	if !isEarthBuild {
+	if !onlyEarthBuild {
 		warnings, err = verifier.CheckInvalidPlatforms(ctx, inp)
 		if err != nil {
 			return nil, nil, err
