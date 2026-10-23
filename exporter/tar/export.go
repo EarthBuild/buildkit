@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/exporter/local"
@@ -33,8 +34,12 @@ func New(opt Opt) (exporter.Exporter, error) {
 	return le, nil
 }
 
-func (e *localExporter) Resolve(ctx context.Context, opt map[string]string) (exporter.ExporterInstance, error) {
-	li := &localExporterInstance{localExporter: e}
+func (e *localExporter) Resolve(ctx context.Context, id int, opt map[string]string) (exporter.ExporterInstance, error) {
+	li := &localExporterInstance{
+		localExporter: e,
+		id:            id,
+		attrs:         opt,
+	}
 	_, err := li.opts.Load(opt)
 	if err != nil {
 		return nil, err
@@ -46,18 +51,33 @@ func (e *localExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 
 type localExporterInstance struct {
 	*localExporter
+	id    int
+	attrs map[string]string
+
 	opts local.CreateFSOpts
+}
+
+func (e *localExporterInstance) ID() int {
+	return e.id
 }
 
 func (e *localExporterInstance) Name() string {
 	return "exporting to client tarball"
 }
 
+func (e *localExporterInstance) Type() string {
+	return client.ExporterTar
+}
+
+func (e *localExporterInstance) Attrs() map[string]string {
+	return e.attrs
+}
+
 func (e *localExporterInstance) Config() *exporter.Config {
 	return exporter.NewConfig()
 }
 
-func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source, sessionID string) (map[string]string, exporter.DescriptorReference, error) {
+func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source, _ exptypes.InlineCache, sessionID string) (map[string]string, exporter.DescriptorReference, error) {
 	var defers []func() error
 
 	defer func() {
@@ -87,7 +107,7 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 
 		st := fstypes.Stat{
 			Mode: uint32(os.ModeDir | 0755),
-			Path: strings.Replace(k, "/", "_", -1),
+			Path: strings.ReplaceAll(k, "/", "_"),
 		}
 		if e.opts.Epoch != nil {
 			st.ModTime = e.opts.Epoch.UnixNano()
@@ -143,15 +163,16 @@ func (e *localExporterInstance) Export(ctx context.Context, inp *exporter.Source
 		fs = d.FS
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	timeoutCtx, cancel := context.WithCancelCause(ctx)
+	timeoutCtx, _ = context.WithTimeoutCause(timeoutCtx, 5*time.Second, errors.WithStack(context.DeadlineExceeded))
+	defer cancel(errors.WithStack(context.Canceled))
 
 	caller, err := e.opt.SessionManager.Get(timeoutCtx, sessionID, false)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	w, err := filesync.CopyFileWriter(ctx, nil, caller)
+	w, err := filesync.CopyFileWriter(ctx, nil, e.id, caller)
 	if err != nil {
 		return nil, nil, err
 	}

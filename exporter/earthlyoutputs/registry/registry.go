@@ -10,6 +10,7 @@ import (
 	"github.com/docker/distribution/registry/handlers"
 	"github.com/docker/distribution/registry/listener"
 	_ "github.com/moby/buildkit/exporter/earthlyoutputs/registry/eodriver" // register the driver
+	"github.com/pkg/errors"
 )
 
 // Serve creates a registry service and starts listening for connections on listenAddr.
@@ -35,10 +36,10 @@ storage:
 		Handler:           app,
 		ReadHeaderTimeout: 30 * time.Second,
 	}
-	ctx2, cancel := context.WithCancel(ctx)
+	ctx2, cancel := context.WithCancelCause(ctx)
 	go func() {
 		serveErr <- server.Serve(ln)
-		cancel()
+		cancel(errors.WithStack(context.Canceled))
 	}()
 	go func() {
 		<-ctx2.Done()

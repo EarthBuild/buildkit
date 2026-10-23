@@ -85,11 +85,13 @@ func (m *staticEmulatorMount) IdentityMapping() *idtools.IdentityMapping {
 	return m.idmap
 }
 
-func getEmulator(ctx context.Context, p *pb.Platform, idmap *idtools.IdentityMapping) (*emulator, error) {
+func getEmulator(ctx context.Context, p *pb.Platform) (*emulator, error) {
 	all := archutil.SupportedPlatforms(false)
 	pp := platforms.Normalize(ocispecs.Platform{
 		Architecture: p.Architecture,
 		OS:           p.OS,
+		OSVersion:    p.OSVersion,
+		OSFeatures:   p.OSFeatures,
 		Variant:      p.Variant,
 	})
 

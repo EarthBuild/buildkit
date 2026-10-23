@@ -262,6 +262,15 @@ func (cli *GitCLI) Run(ctx context.Context, args ...string) (_ []byte, err error
 		}
 
 		if err != nil {
+			select {
+			case <-ctx.Done():
+				cerr := context.Cause(ctx)
+				if cerr != nil {
+					return buf.Bytes(), errors.Wrapf(cerr, "context completed: git stderr:\n%s", errbuf.String())
+				}
+			default:
+			}
+
 			if strings.Contains(errbuf.String(), "--depth") || strings.Contains(errbuf.String(), "shallow") {
 				if newArgs := argsNoDepth(args); len(args) > len(newArgs) {
 					args = newArgs
@@ -269,6 +278,7 @@ func (cli *GitCLI) Run(ctx context.Context, args ...string) (_ []byte, err error
 				}
 			}
 
+<<<<<<< HEAD
 			// Earthly-TODO: moby/master didn't use to include the git stderr; however, change it at some point AFTER we added in this EARTHLY_GIT_STDERR hack; however we will keep ours for the time being (since we look specifically for EARTHLY_GIT_STDERR in earthly)
 			//return buf.Bytes(), errors.Errorf("git error: %s\nstderr:\n%s", err, errbuf.String())
 
@@ -280,6 +290,9 @@ func (cli *GitCLI) Run(ctx context.Context, args ...string) (_ []byte, err error
 			}
 			err = errors.Wrapf(err, "EARTHLY_GIT_STDERR: %s", base64.StdEncoding.EncodeToString([]byte(urlutil.RedactAllCredentials(fmt.Sprintf("git %s\n%s", strings.Join(args, " "), errbuf.String()))))) // earthly-specific
 			return buf.Bytes(), err
+=======
+			return buf.Bytes(), errors.Wrapf(err, "git stderr:\n%s", errbuf.String())
+>>>>>>> v0.14.1
 		}
 
 		return buf.Bytes(), nil

@@ -26,9 +26,9 @@ func NewMultiMultiProvider() *MultiMultiProvider {
 }
 
 type imgData struct {
-	base     content.Provider
+	base     content.InfoReaderProvider
 	baseDgst digest.Digest
-	subs     map[digest.Digest]content.Provider
+	subs     map[digest.Digest]content.InfoReaderProvider
 }
 
 // MultiMultiProvider is a provider backed by a set of images, each of which is made out of
@@ -74,7 +74,7 @@ func (mmp *MultiMultiProvider) getNoLock(ctx context.Context, imgName string) (*
 }
 
 // AddImgSub adds a new child content provider for an image.
-func (mmp *MultiMultiProvider) AddImgSub(imgName string, dgst digest.Digest, p content.Provider) error {
+func (mmp *MultiMultiProvider) AddImgSub(imgName string, dgst digest.Digest, p content.InfoReaderProvider) error {
 	mmp.mu.Lock()
 	defer mmp.mu.Unlock()
 	imgData, ok := mmp.imgs[imgName]
@@ -87,7 +87,7 @@ func (mmp *MultiMultiProvider) AddImgSub(imgName string, dgst digest.Digest, p c
 }
 
 // AddImg adds a new child image. The image is removed from the collection when the context is canceled.
-func (mmp *MultiMultiProvider) AddImg(ctx context.Context, imgName string, base content.Provider, baseDigest digest.Digest) error {
+func (mmp *MultiMultiProvider) AddImg(ctx context.Context, imgName string, base content.InfoReaderProvider, baseDigest digest.Digest) error {
 	if baseDigest == "" {
 		return errors.Errorf("baseDigest cant be empty")
 	}
@@ -123,7 +123,7 @@ func (mmp *MultiMultiProvider) AddImg(ctx context.Context, imgName string, base 
 	imgData := &imgData{
 		base:     base,
 		baseDgst: baseDigest,
-		subs:     make(map[digest.Digest]content.Provider),
+		subs:     make(map[digest.Digest]content.InfoReaderProvider),
 	}
 	mmp.imgs[imgName] = imgData
 	imgData.subs[baseDigest] = base

@@ -229,7 +229,7 @@ func (s State) Output() Output {
 	return s.out
 }
 
-// WithOutput creats a new state with the output set to the given output.
+// WithOutput creates a new state with the output set to the given output.
 func (s State) WithOutput(o Output) State {
 	prev := s
 	s = State{
@@ -258,11 +258,16 @@ func (s State) WithImageConfig(c []byte) (State, error) {
 	}
 	s = s.Dir(img.Config.WorkingDir)
 	if img.Architecture != "" && img.OS != "" {
-		s = s.Platform(ocispecs.Platform{
+		plat := ocispecs.Platform{
 			OS:           img.OS,
 			Architecture: img.Architecture,
 			Variant:      img.Variant,
-		})
+			OSVersion:    img.OSVersion,
+		}
+		if img.OSFeatures != nil {
+			plat.OSFeatures = append([]string{}, img.OSFeatures...)
+		}
+		s = s.Platform(plat)
 	}
 	return s, nil
 }

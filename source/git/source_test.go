@@ -33,7 +33,7 @@ import (
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/progress/logs"
 	"github.com/moby/buildkit/util/winlayers"
-	"github.com/stretchr/testify/assert"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -92,10 +92,10 @@ func testRepeatedFetch(t *testing.T, keepGitDir bool) {
 	require.Equal(t, "bar\n", string(dt))
 
 	_, err = os.Lstat(filepath.Join(dir, "ghi"))
-	require.ErrorAs(t, err, &os.ErrNotExist)
+	require.ErrorIs(t, err, os.ErrNotExist)
 
 	_, err = os.Lstat(filepath.Join(dir, "sub/subfile"))
-	require.ErrorAs(t, err, &os.ErrNotExist)
+	require.ErrorIs(t, err, os.ErrNotExist)
 
 	// second fetch returns same dir
 	id = &GitIdentifier{Remote: repo.mainURL, Ref: "master", KeepGitDir: keepGitDir}
@@ -225,12 +225,44 @@ func TestFetchByTagKeepGitDir(t *testing.T) {
 	testFetchByTag(t, "lightweight-tag", "third", false, true, true)
 }
 
+func TestFetchByTagFull(t *testing.T) {
+	testFetchByTag(t, "refs/tags/lightweight-tag", "third", false, true, true)
+}
+
 func TestFetchByAnnotatedTag(t *testing.T) {
 	testFetchByTag(t, "v1.2.3", "second", true, false, false)
 }
 
 func TestFetchByAnnotatedTagKeepGitDir(t *testing.T) {
 	testFetchByTag(t, "v1.2.3", "second", true, false, true)
+}
+
+func TestFetchByAnnotatedTagFull(t *testing.T) {
+	testFetchByTag(t, "refs/tags/v1.2.3", "second", true, false, true)
+}
+
+func TestFetchByBranch(t *testing.T) {
+	testFetchByTag(t, "feature", "withsub", false, true, false)
+}
+
+func TestFetchByBranchKeepGitDir(t *testing.T) {
+	testFetchByTag(t, "feature", "withsub", false, true, true)
+}
+
+func TestFetchByBranchFull(t *testing.T) {
+	testFetchByTag(t, "refs/heads/feature", "withsub", false, true, true)
+}
+
+func TestFetchByRef(t *testing.T) {
+	testFetchByTag(t, "test", "feature", false, true, false)
+}
+
+func TestFetchByRefKeepGitDir(t *testing.T) {
+	testFetchByTag(t, "test", "feature", false, true, true)
+}
+
+func TestFetchByRefFull(t *testing.T) {
+	testFetchByTag(t, "refs/test", "feature", false, true, true)
 }
 
 func testFetchByTag(t *testing.T, tag, expectedCommitSubject string, isAnnotatedTag, hasFoo13File, keepGitDir bool) {
@@ -281,10 +313,10 @@ func testFetchByTag(t *testing.T, tag, expectedCommitSubject string, isAnnotated
 
 	dt, err = os.ReadFile(filepath.Join(dir, "foo13"))
 	if hasFoo13File {
-		require.Nil(t, err)
+		require.NoError(t, err)
 		require.Equal(t, "sbb\n", string(dt))
 	} else {
-		require.ErrorAs(t, err, &os.ErrNotExist)
+		require.ErrorIs(t, err, os.ErrNotExist)
 	}
 
 	if keepGitDir {
@@ -296,13 +328,16 @@ func testFetchByTag(t *testing.T, tag, expectedCommitSubject string, isAnnotated
 			gitutil.WithWorkTree(dir),
 		)
 
+		// get current commit sha
+		headCommit, err := git.Run(ctx, "rev-parse", "HEAD")
+		require.NoError(t, err)
+
+		// ensure that we checked out the same commit as was in the cache key
+		require.Equal(t, strings.TrimSpace(string(headCommit)), pin1)
+
 		if isAnnotatedTag {
 			// get commit sha that the annotated tag points to
 			annotatedTagCommit, err := git.Run(ctx, "rev-list", "-n", "1", tag)
-			require.NoError(t, err)
-
-			// get current commit sha
-			headCommit, err := git.Run(ctx, "rev-parse", "HEAD")
 			require.NoError(t, err)
 
 			// HEAD should match the actual commit sha (and not the sha of the annotated tag,
@@ -510,7 +545,7 @@ func testSubdir(t *testing.T, keepGitDir bool) {
 
 func setupGitSource(t *testing.T, tmpdir string) source.Source {
 	snapshotter, err := native.NewSnapshotter(filepath.Join(tmpdir, "snapshots"))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	store, err := local.NewStore(tmpdir)
 	require.NoError(t, err)
@@ -582,6 +617,7 @@ func setupGitRepo(t *testing.T) gitRepoFixture {
 		"echo foo > abc",
 		"git add abc",
 		"git commit -m initial",
+		"git tag --no-sign a/v1.2.3",
 		"echo bar > def",
 		"git add def",
 		"git commit -m second",
@@ -594,6 +630,7 @@ func setupGitRepo(t *testing.T) gitRepoFixture {
 		"echo baz > ghi",
 		"git add ghi",
 		"git commit -m feature",
+		"git update-ref refs/test $(git rev-parse HEAD)",
 		"git submodule add "+fixture.subURL+" sub",
 		"git add -A",
 		"git commit -m withsub",
@@ -663,7 +700,7 @@ func logProgressStreams(ctx context.Context, t *testing.T) context.Context {
 	pr, ctx, cancel := progress.NewContext(ctx)
 	done := make(chan struct{})
 	t.Cleanup(func() {
-		cancel()
+		cancel(errors.WithStack(context.Canceled))
 		<-done
 	})
 	go func() {

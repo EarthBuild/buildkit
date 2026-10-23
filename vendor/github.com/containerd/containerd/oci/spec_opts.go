@@ -35,8 +35,8 @@ import (
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/continuity/fs"
+	"github.com/moby/sys/user"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/opencontainers/runc/libcontainer/user"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -183,13 +183,6 @@ func WithEnv(environmentVariables []string) SpecOpts {
 		}
 		return nil
 	}
-}
-
-// WithDefaultPathEnv sets the $PATH environment variable to the
-// default PATH defined in this package.
-func WithDefaultPathEnv(_ context.Context, _ Client, _ *containers.Container, s *Spec) error {
-	s.Process.Env = replaceOrAppendEnvValues(s.Process.Env, defaultUnixEnv)
-	return nil
 }
 
 // replaceOrAppendEnvValues returns the defaults with the overrides either
@@ -464,6 +457,7 @@ func WithImageConfigArgs(image Image, args []string) SpecOpts {
 				return errors.New("no arguments specified")
 			}
 
+			//nolint:staticcheck // ArgsEscaped is deprecated
 			if config.ArgsEscaped && (len(config.Entrypoint) > 0 || cmdFromImage) {
 				s.Process.Args = nil
 				s.Process.CommandLine = cmd[0]
@@ -900,9 +894,9 @@ func WithAppendAdditionalGroups(groups ...string) SpecOpts {
 			if err != nil {
 				return err
 			}
-			ugroups, err := user.ParseGroupFile(gpath)
-			if err != nil {
-				return err
+			ugroups, groupErr := user.ParseGroupFile(gpath)
+			if groupErr != nil && !os.IsNotExist(groupErr) {
+				return groupErr
 			}
 			groupMap := make(map[string]user.Group)
 			for _, group := range ugroups {
@@ -916,6 +910,9 @@ func WithAppendAdditionalGroups(groups ...string) SpecOpts {
 				} else {
 					g, ok := groupMap[group]
 					if !ok {
+						if groupErr != nil {
+							return fmt.Errorf("unable to find group %s: %w", group, groupErr)
+						}
 						return fmt.Errorf("unable to find group %s", group)
 					}
 					gids = append(gids, uint32(g.Gid))

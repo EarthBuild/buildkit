@@ -55,6 +55,8 @@ func InitContainerdWorker() {
 				GID:         gid,
 				Snapshotter: "native", // TODO: test with fuse-overlayfs as well, or automatically determine snapshotter
 			})
+
+			// TODO: add RootlessKitDetachNetNS after updating containerd-rootless.sh to include https://github.com/containerd/nerdctl/pull/2723
 		}
 	}
 
@@ -84,13 +86,19 @@ func (c *Containerd) Rootless() bool {
 	return c.UID != 0
 }
 
+func (c *Containerd) NetNSDetached() bool {
+	return false
+}
+
 func (c *Containerd) New(ctx context.Context, cfg *integration.BackendConfig) (b integration.Backend, cl func() error, err error) {
 	if err := integration.LookupBinary(c.Containerd); err != nil {
 		return nil, nil, err
 	}
+
 	if err := integration.LookupBinary("buildkitd"); err != nil {
 		return nil, nil, err
 	}
+
 	if err := requireRoot(); err != nil {
 		return nil, nil, err
 	}
@@ -117,6 +125,7 @@ func (c *Containerd) New(ctx context.Context, cfg *integration.BackendConfig) (b
 	if err != nil {
 		return nil, nil, err
 	}
+
 	if rootless {
 		if err := os.Chown(tmpdir, c.UID, c.GID); err != nil {
 			return nil, nil, err
@@ -125,7 +134,7 @@ func (c *Containerd) New(ctx context.Context, cfg *integration.BackendConfig) (b
 
 	deferF.Append(func() error { return os.RemoveAll(tmpdir) })
 
-	address := filepath.Join(tmpdir, "containerd.sock")
+	address := getContainerdSock(tmpdir)
 	config := fmt.Sprintf(`root = %q
 state = %q
 # CRI plugins listens on 10010/tcp for stream server.
@@ -137,8 +146,11 @@ disabled_plugins = ["cri"]
 
 [debug]
   level = "debug"
-  address = %q
-`, filepath.Join(tmpdir, "root"), filepath.Join(tmpdir, "state"), address, filepath.Join(tmpdir, "debug.sock"))
+  address = %q`,
+		filepath.Join(tmpdir, "root"),
+		filepath.Join(tmpdir, "state"),
+		address, getContainerdDebugSock(tmpdir),
+	)
 
 	var snBuildkitdArgs []string
 	if c.Snapshotter != "" {
@@ -185,19 +197,23 @@ disabled_plugins = ["cri"]
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := integration.WaitUnix(address, 10*time.Second, cmd); err != nil {
+	if err := integration.WaitSocket(address, 10*time.Second, cmd); err != nil {
 		ctdStop()
 		return nil, nil, errors.Wrapf(err, "containerd did not start up: %s", integration.FormatLogs(cfg.Logs))
 	}
 	deferF.Append(ctdStop)
 
-	buildkitdArgs := append([]string{"buildkitd",
-		"--oci-worker=false",
+	// handles only windows case, no effect on unix
+	address = normalizeAddress(address)
+	buildkitdArgs := []string{
+		"buildkitd",
 		"--containerd-worker-gc=false",
 		"--containerd-worker=true",
 		"--containerd-worker-addr", address,
 		"--containerd-worker-labels=org.mobyproject.buildkit.worker.sandbox=true", // Include use of --containerd-worker-labels to trigger https://github.com/moby/buildkit/pull/603
-	}, snBuildkitdArgs...)
+	}
+	buildkitdArgs = applyBuildkitdPlatformFlags(buildkitdArgs)
+	buildkitdArgs = append(buildkitdArgs, snBuildkitdArgs...)
 
 	if runtime.GOOS != "windows" && c.Snapshotter != "native" {
 		c.ExtraEnv = append(c.ExtraEnv, "BUILDKIT_DEBUG_FORCE_OVERLAY_DIFF=true")
@@ -215,7 +231,7 @@ disabled_plugins = ["cri"]
 			"nsenter", "-U", "--preserve-credentials", "-m", "-t", fmt.Sprintf("%d", pid)},
 			append(buildkitdArgs, "--containerd-worker-snapshotter=native")...)
 	}
-	buildkitdSock, stop, err := runBuildkitd(ctx, cfg, buildkitdArgs, cfg.Logs, c.UID, c.GID, c.ExtraEnv)
+	buildkitdSock, stop, err := runBuildkitd(cfg, buildkitdArgs, cfg.Logs, c.UID, c.GID, c.ExtraEnv)
 	if err != nil {
 		integration.PrintLogs(cfg.Logs, log.Println)
 		return nil, nil, err
@@ -226,7 +242,9 @@ disabled_plugins = ["cri"]
 		address:           buildkitdSock,
 		containerdAddress: address,
 		rootless:          rootless,
+		netnsDetached:     false,
 		snapshotter:       c.Snapshotter,
+		extraEnv:          c.ExtraEnv,
 	}, cl, nil
 }
 
@@ -266,7 +284,7 @@ func runStargzSnapshotter(cfg *integration.BackendConfig) (address string, cl fu
 	if err != nil {
 		return "", nil, err
 	}
-	if err = integration.WaitUnix(address, 10*time.Second, cmd); err != nil {
+	if err = integration.WaitSocket(address, 10*time.Second, cmd); err != nil {
 		snStop()
 		return "", nil, errors.Wrapf(err, "containerd-stargz-grpc did not start up: %s", integration.FormatLogs(cfg.Logs))
 	}

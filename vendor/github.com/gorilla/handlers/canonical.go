@@ -18,16 +18,14 @@ type canonical struct {
 //
 // Note: If the provided domain is considered invalid by url.Parse or otherwise
 // returns an empty scheme or host, clients are not re-directed.
-// not re-directed.
 //
 // Example:
 //
-//  r := mux.NewRouter()
-//  canonical := handlers.CanonicalHost("http://www.gorillatoolkit.org", 302)
-//  r.HandleFunc("/route", YourHandler)
+//	r := mux.NewRouter()
+//	canonical := handlers.CanonicalHost("http://www.gorillatoolkit.org", 302)
+//	r.HandleFunc("/route", YourHandler)
 //
-//  log.Fatal(http.ListenAndServe(":7000", canonical(r)))
-//
+//	log.Fatal(http.ListenAndServe(":7000", canonical(r)))
 func CanonicalHost(domain string, code int) func(h http.Handler) http.Handler {
 	fn := func(h http.Handler) http.Handler {
 		return canonical{h, domain, code}
@@ -54,7 +52,11 @@ func (c canonical) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.EqualFold(cleanHost(r.Host), dest.Host) {
 		// Re-build the destination URL
 		dest := dest.Scheme + "://" + dest.Host + r.URL.Path
+		if r.URL.RawQuery != "" {
+			dest += "?" + r.URL.RawQuery
+		}
 		http.Redirect(w, r, dest, c.code)
+		return
 	}
 
 	c.h.ServeHTTP(w, r)

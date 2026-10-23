@@ -7,15 +7,15 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/content"
-	containerderrdefs "github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/snapshots"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/errdefs"
@@ -45,7 +45,7 @@ type puller struct {
 	layerLimit     *int
 	vtx            solver.Vertex
 	ResolverType
-	store llb.ResolveImageConfigOptStore
+	store sourceresolver.ResolveImageConfigOptStore
 
 	g                flightcontrol.Group[struct{}]
 	cacheKeyErr      error
@@ -58,19 +58,23 @@ type puller struct {
 	*pull.Puller
 }
 
-func mainManifestKey(ctx context.Context, desc ocispecs.Descriptor, platform ocispecs.Platform, layerLimit *int) (digest.Digest, error) {
+func mainManifestKey(desc ocispecs.Descriptor, platform ocispecs.Platform, layerLimit *int) (digest.Digest, error) {
 	dt, err := json.Marshal(struct {
-		Digest  digest.Digest
-		OS      string
-		Arch    string
-		Variant string `json:",omitempty"`
-		Limit   *int   `json:",omitempty"`
+		Digest     digest.Digest
+		OS         string
+		Arch       string
+		Variant    string   `json:",omitempty"`
+		OSVersion  string   `json:",omitempty"`
+		OSFeatures []string `json:",omitempty"`
+		Limit      *int     `json:",omitempty"`
 	}{
-		Digest:  desc.Digest,
-		OS:      platform.OS,
-		Arch:    platform.Architecture,
-		Variant: platform.Variant,
-		Limit:   layerLimit,
+		Digest:     desc.Digest,
+		OS:         platform.OS,
+		Arch:       platform.Architecture,
+		Variant:    platform.Variant,
+		OSVersion:  platform.OSVersion,
+		OSFeatures: platform.OSFeatures,
+		Limit:      layerLimit,
 	})
 	if err != nil {
 		return "", err
@@ -160,7 +164,7 @@ func (p *puller) CacheKey(ctx context.Context, g session.Group, index int) (cach
 		}
 
 		desc := p.manifest.MainManifestDesc
-		k, err := mainManifestKey(ctx, desc, p.Platform, p.layerLimit)
+		k, err := mainManifestKey(desc, p.Platform, p.layerLimit)
 		if err != nil {
 			return struct{}{}, err
 		}
@@ -245,7 +249,7 @@ func (p *puller) Snapshot(ctx context.Context, g session.Group) (ir cache.Immuta
 	}
 
 	for _, desc := range p.manifest.Nonlayers {
-		if _, err := p.ContentStore.Info(ctx, desc.Digest); containerderrdefs.IsNotFound(err) {
+		if _, err := p.ContentStore.Info(ctx, desc.Digest); cerrdefs.IsNotFound(err) {
 			// manifest or config must have gotten gc'd after CacheKey, re-pull them
 			ctx, done, err := leaseutil.WithLease(ctx, p.LeaseManager, leaseutil.MakeTemporary)
 			if err != nil {

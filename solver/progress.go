@@ -103,7 +103,7 @@ func (j *Job) Status(ctx context.Context, statsStream bool, ch chan *client.Solv
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case ch <- ss:
 		}
 	}
