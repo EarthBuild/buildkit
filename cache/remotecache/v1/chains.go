@@ -60,13 +60,18 @@ func (c *CacheChains) normalize(ctx context.Context) error {
 	c.items = validated
 
 	for _, it := range c.items {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		_, err := normalizeItem(it, st)
 		if err != nil {
 			return err
 		}
 	}
 
-	st.removeLoops(ctx)
+	if err := st.removeLoops(ctx); err != nil {
+		return err
+	}
 
 	items := make([]*item, 0, len(st.byKey))
 	for _, it := range st.byKey {

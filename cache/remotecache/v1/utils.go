@@ -128,7 +128,7 @@ type normalizeState struct {
 	next  int
 }
 
-func (s *normalizeState) removeLoops(ctx context.Context) {
+func (s *normalizeState) removeLoops(ctx context.Context) error {
 	roots := []digest.Digest{}
 	for dgst, it := range s.byKey {
 		if len(it.links) == 0 {
@@ -136,21 +136,35 @@ func (s *normalizeState) removeLoops(ctx context.Context) {
 		}
 	}
 
+	// visited holds the digests on the current DFS path; done holds the
+	// digests whose subtrees have been fully explored. Without done, every
+	// root-to-leaf path is enumerated, which is exponential in the number of
+	// fan-in "diamonds" (A->{B,C}->D) in the graph.
 	visited := map[digest.Digest]struct{}{}
+	done := map[digest.Digest]struct{}{}
 
 	for _, d := range roots {
-		s.checkLoops(ctx, d, visited)
+		if err := s.checkLoops(ctx, d, visited, done); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (s *normalizeState) checkLoops(ctx context.Context, d digest.Digest, visited map[digest.Digest]struct{}) {
+func (s *normalizeState) checkLoops(ctx context.Context, d digest.Digest, visited, done map[digest.Digest]struct{}) error {
+	if _, ok := done[d]; ok {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	it, ok := s.byKey[d]
 	if !ok {
-		return
+		return nil
 	}
 	links, ok := s.links[it]
 	if !ok {
-		return
+		return nil
 	}
 	visited[d] = struct{}{}
 	defer func() {
@@ -168,11 +182,13 @@ func (s *normalizeState) checkLoops(ctx context.Context, d digest.Digest, visite
 					bklog.G(ctx).Warnf("failed to remove looping cache key %s %s", d, id)
 				}
 				delete(links[l], id)
-			} else {
-				s.checkLoops(ctx, id, visited)
+			} else if err := s.checkLoops(ctx, id, visited, done); err != nil {
+				return err
 			}
 		}
 	}
+	done[d] = struct{}{}
+	return nil
 }
 
 func normalizeItem(it *item, state *normalizeState) (*item, error) {
