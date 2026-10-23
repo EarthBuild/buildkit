@@ -71,6 +71,7 @@ func (sp *fsSyncProvider) Register(server *grpc.Server) {
 func (sp *fsSyncProvider) DiffCopy(stream FileSync_DiffCopyServer) error {
 	return sp.handle("diffcopy", stream)
 }
+
 func (sp *fsSyncProvider) TarStream(stream FileSync_TarStreamServer) error {
 	return sp.handle("tarstream", stream)
 }
@@ -235,6 +236,7 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 	return pr.recvFn(stream, opt.DestDir, opt.CacheUpdater, opt.ProgressCb, opt.Differ, opt.Filter)
 }
 
+<<<<<<< HEAD
 type FSSyncTarget interface {
 	target() *fsSyncTarget
 }
@@ -255,6 +257,20 @@ func WithFSSync(id int, f FileOutputFunc) FSSyncTarget {
 	return &fsSyncTarget{
 		id: id,
 		f:  f,
+=======
+// NewFSSyncTargetDir allows writing into a directory
+func NewFSSyncTargetDir(outdir string) session.Attachable {
+	p := &fsSyncTarget{
+		outdir: outdir,
+	}
+	return p
+}
+
+// NewFSSyncTarget allows writing into an io.WriteCloser
+func NewFSSyncTarget(f func(map[string]string) (io.WriteCloser, error)) session.Attachable {
+	p := &fsSyncTarget{
+		f: f,
+>>>>>>> origin/main
 	}
 }
 
@@ -274,7 +290,10 @@ func NewFSSyncTargetDir(outdir string, verboseProgressCB fsutil.VerboseProgressC
 	})
 }
 
+type fileCb func(string, int64)
+
 // NewFSSyncTarget allows writing into an io.WriteCloser; it is earthly-specific
+<<<<<<< HEAD
 func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
 	return NewFSSyncTarget(&fsSyncTarget{
 		id:                0,
@@ -309,20 +328,39 @@ func NewFSSyncTarget(targets ...FSSyncTarget) session.Attachable {
 		outdirs:     outdirs,
 		outdirFuncs: outdirFuncs,
 		progressCBs: progressCBs,
+=======
+func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progress progressCb, onFile fileCb) session.Attachable {
+	p := &fsSyncTarget{
+		f:          f,
+		outdirFunc: outdirFunc,
+		progress:   progress,
+		onFile:     onFile,
+>>>>>>> origin/main
 	}
 }
 
+<<<<<<< HEAD
 type fsSyncAttachable struct {
 	fs          map[int]FileOutputFunc
 	outdirs     map[int]string
 	outdirFuncs map[int]func(map[string]string) (string, error)
 	progressCBs map[int]fsutil.VerboseProgressCB
+=======
+type fsSyncTarget struct {
+	outdir     string
+	outdirFunc func(map[string]string) (string, error) // earthly
+	f          func(map[string]string) (io.WriteCloser, error)
+
+	progress progressCb
+	onFile   fileCb
+>>>>>>> origin/main
 }
 
 func (sp *fsSyncAttachable) Register(server *grpc.Server) {
 	RegisterFileSendServer(server, sp)
 }
 
+<<<<<<< HEAD
 func (sp *fsSyncAttachable) chooser(ctx context.Context) int {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -351,6 +389,11 @@ func (sp *fsSyncAttachable) DiffCopy(stream FileSend_DiffCopyServer) (err error)
 	f, ok := sp.fs[id]
 	if !ok {
 		return errors.Errorf("exporter %d not found", id)
+=======
+func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
+	if sp.outdir != "" {
+		return syncTargetDiffCopy(stream, sp.outdir, sp.progress, sp.onFile)
+>>>>>>> origin/main
 	}
 
 	opts, _ := metadata.FromIncomingContext(stream.Context()) // if no metadata continue with empty object
@@ -360,6 +403,7 @@ func (sp *fsSyncAttachable) DiffCopy(stream FileSend_DiffCopyServer) (err error)
 			md[strings.TrimPrefix(k, keyExporterMetaPrefix)] = strings.Join(v, ",")
 		}
 	}
+<<<<<<< HEAD
 	if sp.outdirFuncs != nil {
 		if outdirFunc, ok := sp.outdirFuncs[id]; ok && outdirFunc != nil {
 			outdir, err := outdirFunc(md)
@@ -369,6 +413,15 @@ func (sp *fsSyncAttachable) DiffCopy(stream FileSend_DiffCopyServer) (err error)
 			if outdir != "" {
 				return syncTargetDiffCopy(stream, outdir, verboseCB)
 			}
+=======
+	if sp.outdirFunc != nil {
+		outdir, err := sp.outdirFunc(md)
+		if err != nil {
+			return err
+		}
+		if outdir != "" {
+			return syncTargetDiffCopy(stream, outdir, sp.progress, sp.onFile)
+>>>>>>> origin/main
 		}
 	}
 	wc, err := f(md)

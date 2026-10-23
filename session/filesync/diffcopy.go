@@ -22,7 +22,7 @@ type Stream interface {
 }
 
 func sendDiffCopy(stream Stream, fs fsutil.FS, progress progressCb) error {
-	return errors.WithStack(fsutil.Send(stream.Context(), stream, fs, progress, nil)) //earthly needs to pass nil
+	return errors.WithStack(fsutil.Send(stream.Context(), stream, fs, progress))
 }
 
 func newStreamWriter(stream grpc.ClientStream) io.WriteCloser {
@@ -114,11 +114,12 @@ func recvDiffCopy(ds grpc.ClientStream, dest string, cu CacheUpdater, progress p
 	}))
 }
 
-func syncTargetDiffCopy(ds grpc.ServerStream, dest string, verboseProgressCB fsutil.VerboseProgressCB) error {
+func syncTargetDiffCopy(ds grpc.ServerStream, dest string, progress progressCb, onFile fileCb) error {
 	if err := os.MkdirAll(dest, 0700); err != nil {
 		return errors.Wrapf(err, "failed to create synctarget dest dir %s", dest)
 	}
 	modTime := time.Now().UnixNano() // earthly-specific
+	seen := make(map[string]struct{})
 	return errors.WithStack(fsutil.Receive(ds.Context(), ds, dest, fsutil.ReceiveOpt{
 		Merge: true,
 		Filter: func() func(string, *fstypes.Stat) bool {
@@ -130,10 +131,16 @@ func syncTargetDiffCopy(ds grpc.ServerStream, dest string, verboseProgressCB fsu
 				if st.ModTime == 0 {
 					st.ModTime = modTime
 				}
+				if onFile != nil && !st.IsDir() {
+					if _, ok := seen[p]; !ok {
+						seen[p] = struct{}{}
+						onFile(p, st.GetSize_())
+					}
+				}
 				return true
 			}
 		}(),
-		VerboseProgressCb: verboseProgressCB,
+		ProgressCb: progress,
 	}))
 }
 

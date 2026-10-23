@@ -57,11 +57,25 @@ type SolveOpt struct {
 type ExportEntry struct {
 	Type               string
 	Attrs              map[string]string
+<<<<<<< HEAD
 	Output             filesync.FileOutputFunc                 // for ExporterOCI and ExporterDocker
 	OutputDir          string                                  // for ExporterLocal
 	OutputDirFunc      func(map[string]string) (string, error) // for ExporterEarthly
 	OutputPullCallback pullping.PullCallback                   // for ExporterEarthly
 	VerboseProgressCB  fsutil.VerboseProgressCB
+=======
+	Output             func(map[string]string) (io.WriteCloser, error) // for ExporterOCI, ExporterDocker and ExporterEarthly
+	OutputDir          string                                          // for ExporterLocal
+	OutputDirFunc      func(map[string]string) (string, error)         // for ExporterEarthly
+	OutputPullCallback pullping.PullCallback                           // for ExporterEarthly
+	// OnReceiveProgress is called periodically as files/artifacts are received from the daemon
+	// via diffcopy (e.g. during artifact export in EarthBuild). It reports the cumulative bytes received
+	// and whether the transfer is complete (done=true), allowing the client to render progress bars
+	// and transfer metrics.
+	OnReceiveProgress func(bytes int, done bool) // for ExporterEarthly
+	// OnReceiveFile is called for each file received from the daemon during export
+	OnReceiveFile func(path string, size int64) // for ExporterEarthly
+>>>>>>> origin/main
 }
 
 type CacheOptionsEntry struct {
@@ -157,10 +171,54 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			contentStores[key2] = store
 		}
 
+<<<<<<< HEAD
 		var syncTargets []filesync.FSSyncTarget
 		for exID, ex := range opt.Exports {
 			var supportFile bool
 			var supportDir bool
+=======
+		var supportFile bool
+		var supportDir bool
+		switch ex.Type {
+		case ExporterLocal:
+			supportDir = true
+		case ExporterTar:
+			supportFile = true
+		case ExporterOCI, ExporterDocker:
+			supportDir = ex.OutputDir != ""
+			supportFile = ex.Output != nil
+		case ExporterEarthly:
+			supportFile = true
+		}
+
+		if supportFile && supportDir {
+			return nil, errors.Errorf("both file and directory output is not supported by %s exporter", ex.Type)
+		}
+		if !supportFile && ex.Output != nil {
+			return nil, errors.Errorf("output file writer is not supported by %s exporter", ex.Type)
+		}
+		if !supportDir && ex.OutputDir != "" {
+			return nil, errors.Errorf("output directory is not supported by %s exporter", ex.Type)
+		}
+
+		if supportFile {
+			if ex.Output == nil {
+				return nil, errors.Errorf("output file writer is required for %s exporter", ex.Type)
+			}
+			if ex.Type == ExporterEarthly {
+				if ex.OutputPullCallback != nil {
+					s.Allow(pullping.NewPullPing(ex.OutputPullCallback))
+				}
+				s.Allow(filesync.NewFSSyncMultiTarget(ex.Output, ex.OutputDirFunc, ex.OnReceiveProgress, ex.OnReceiveFile))
+			} else {
+				s.Allow(filesync.NewFSSyncTarget(ex.Output))
+			}
+		}
+		if supportDir {
+			if ex.OutputDir == "" {
+				return nil, errors.Errorf("output directory is required for %s exporter", ex.Type)
+			}
+>>>>>>> origin/main
 			switch ex.Type {
 			case ExporterLocal:
 				supportDir = true
@@ -212,6 +270,13 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 				default:
 					syncTargets = append(syncTargets, filesync.WithFSSyncDir(exID, ex.OutputDir))
 				}
+<<<<<<< HEAD
+=======
+				contentStores["export"] = cs
+				storesToUpdate = append(storesToUpdate, ex.OutputDir)
+			default:
+				s.Allow(filesync.NewFSSyncTargetDir(ex.OutputDir))
+>>>>>>> origin/main
 			}
 		}
 
