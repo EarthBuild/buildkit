@@ -1415,6 +1415,115 @@ func TestMultipleCacheSources(t *testing.T) {
 	j1 = nil
 }
 
+// TestCacheSourceLookupAfterDepMerge covers a consumer whose dependency edge
+// is merged into an equivalent edge that has already completed. The consumer
+// first receives a key from its own dependency edge that only the local cache
+// can resolve, then the dependency merges into the completed edge, whose key
+// the imported cache can resolve. The consumer must probe that key too, and
+// load its result from the imported cache instead of executing.
+//
+// This is how a frontend that solves part of a graph and then the whole graph
+// in the same session sees a local source: the source key is session-scoped,
+// so the imported cache can only match its dependants through the content
+// based key that the first solve computed.
+func TestCacheSourceLookupAfterDepMerge(t *testing.T) {
+	t.Parallel()
+	ctx := context.TODO()
+
+	// Build the graph once in another session to fill the cache that is
+	// imported below.
+	importStorage := NewInMemoryCacheStorage()
+	importResults := NewInMemoryResultStorage()
+	exportCache := NewCacheManager(ctx, "imported", importStorage, importResults)
+
+	l0 := NewSolver(SolverOpt{
+		ResolveOpFunc: testOpResolver,
+		DefaultCache:  exportCache,
+	})
+	defer l0.Close()
+
+	// graph copies src onto base and runs a step on the result. sessionSeed
+	// stands in for the session-scoped key of a local source; the copy also
+	// has a content based key for src.
+	graph := func(suffix, sessionSeed, runValue string, cacheSource CacheManager) (copied, run Edge) {
+		base := Edge{Vertex: vtx(vtxOpt{
+			name:         "base-" + suffix,
+			cacheKeySeed: "base",
+			value:        "base",
+			cacheSource:  cacheSource,
+		})}
+		src := Edge{Vertex: vtx(vtxOpt{
+			name:         "src-" + suffix,
+			cacheKeySeed: sessionSeed,
+			value:        "content",
+			cacheSource:  cacheSource,
+		})}
+		copied = Edge{Vertex: vtx(vtxOpt{
+			name:             "copy-" + suffix,
+			cacheKeySeed:     "copy",
+			value:            "copied",
+			inputs:           []Edge{base, src},
+			slowCacheCompute: map[int]ResultBasedCacheFunc{1: digestFromResult},
+			cacheSource:      cacheSource,
+		})}
+		run = Edge{Vertex: vtx(vtxOpt{
+			name:         "run-" + suffix,
+			cacheKeySeed: "run",
+			value:        runValue,
+			inputs:       []Edge{copied},
+			cacheSource:  cacheSource,
+		})}
+		return copied, run
+	}
+
+	j0, err := l0.NewJob("j0")
+	require.NoError(t, err)
+	_, run := graph("export", "session-0", "result-run", nil)
+	res, err := j0.Build(ctx, run)
+	require.NoError(t, err)
+	require.Equal(t, "result-run", unwrap(res))
+	require.NoError(t, j0.Discard())
+
+	// The imported cache cannot record links, like a cache imported from a
+	// registry.
+	importCache := NewCacheManager(ctx, "imported", readOnlyCacheKeyStorage{importStorage}, importResults)
+
+	l := NewSolver(SolverOpt{
+		ResolveOpFunc: testOpResolver,
+		DefaultCache:  NewInMemoryCacheManager(),
+	})
+	defer l.Close()
+
+	j1, err := l.NewJob("j1")
+	require.NoError(t, err)
+	defer j1.Discard()
+
+	// The first solve computes the copy through its content based key and
+	// loads it from the imported cache. Storing that result links the
+	// session-scoped key of src to the copy in the local cache.
+	copied, _ := graph("sub", "session-1", "", importCache)
+	sub := Edge{Vertex: vtx(vtxOpt{
+		name:         "sub",
+		cacheKeySeed: "sub",
+		value:        "result-sub",
+		inputs:       []Edge{copied},
+		cacheSource:  importCache,
+	})}
+	res, err = j1.Build(ctx, sub)
+	require.NoError(t, err)
+	require.Equal(t, "result-sub", unwrap(res))
+
+	// The second solve uses new vertices for the same steps in the same
+	// session. Its copy first finds the local copy through the session-scoped
+	// key and then merges into the copy from the first solve.
+	_, run = graph("main", "session-1", "result-run-executed", importCache)
+	run.Vertex.(*vertex).setupCallCounters()
+	res, err = j1.Build(ctx, run)
+	require.NoError(t, err)
+	require.Equal(t, "result-run", unwrap(res))
+	require.Equal(t, int64(0), *run.Vertex.(*vertex).execCallCount)
+}
+
 func TestRepeatBuildWithIgnoreCache(t *testing.T) {
 	t.Parallel()
 	ctx := context.TODO()
@@ -3870,6 +3979,16 @@ func (cm *trackingCacheManager) Load(ctx context.Context, rec *CacheRecord) (Res
 		return nil, errors.Errorf("force fail")
 	}
 	return cm.CacheManager.Load(ctx, rec)
+}
+
+// readOnlyCacheKeyStorage ignores new links, like the storage of a cache
+// imported from a registry.
+type readOnlyCacheKeyStorage struct {
+	CacheKeyStorage
+}
+
+func (readOnlyCacheKeyStorage) AddLink(string, CacheInfoLink, string) error {
+	return nil
 }
 
 func digestFromResult(ctx context.Context, res Result, _ session.Group) (digest.Digest, error) {

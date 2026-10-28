@@ -479,8 +479,7 @@ func (e *edge) processUpdate(upt pipe.Receiver) (depChanged bool) {
 			return
 		}
 
-		if len(dep.keys) < len(state.keys) {
-			newKeys := state.keys[len(dep.keys):]
+		if newKeys := unseenKeys(dep.keys, state.keys); len(newKeys) > 0 {
 			if e.cacheMap != nil {
 				e.probeCache(dep, withSelector(newKeys, e.cacheMap.Deps[dep.index].Selector))
 				dep.edgeState.keys = state.keys
@@ -985,6 +984,41 @@ func toResultSlice(cres []CachedResult) (out []Result) {
 func isEqualState(s1, s2 edgeState) bool {
 	if s1.state != s2.state || s1.result != s2.result || s1.cacheMap != s2.cacheMap || len(s1.keys) != len(s2.keys) {
 		return false
+	}
+	return true
+}
+
+// unseenKeys returns the keys in next that are not in prev. The keys of a
+// dependency normally only grow, so next extends prev. But when the
+// dependency's edge has been merged into another edge, the update carries the
+// keys of that edge instead, which can differ from prev at every position. A
+// length comparison would skip those keys, and they would never be probed.
+func unseenKeys(prev, next []ExportableCacheKey) []ExportableCacheKey {
+	if extendsKeys(prev, next) {
+		return next[len(prev):]
+	}
+	seen := make(map[*CacheKey]struct{}, len(prev))
+	for _, k := range prev {
+		seen[k.CacheKey] = struct{}{}
+	}
+	var out []ExportableCacheKey
+	for _, k := range next {
+		if _, ok := seen[k.CacheKey]; !ok {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// extendsKeys reports whether next starts with the keys of prev.
+func extendsKeys(prev, next []ExportableCacheKey) bool {
+	if len(prev) > len(next) {
+		return false
+	}
+	for i, k := range prev {
+		if k.CacheKey != next[i].CacheKey {
+			return false
+		}
 	}
 	return true
 }
