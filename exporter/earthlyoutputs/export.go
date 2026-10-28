@@ -28,12 +28,14 @@ import (
 	"github.com/moby/buildkit/session/filesync"
 	"github.com/moby/buildkit/session/pullping"
 	"github.com/moby/buildkit/snapshot"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/grpcerrors"
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/push"
+	"github.com/moby/buildkit/util/resolver"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -203,6 +205,9 @@ type imgData struct {
 	// localRegExport is set when the image should be exported via local registry. The value
 	// represents the image name that can be used to pull the image from the local registry.
 	localRegExport string
+	// localRegSource is the digest-pinned image a local registry export was pulled from,
+	// if any. See keyLocalRegistrySource.
+	localRegSource reference.Canonical
 
 	// shouldPush is set when the image should be pushed.
 	shouldPush bool
@@ -288,6 +293,13 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			eilr = string(simpleMd["export-image-local-registry"])
 			hasAnyLocalRegExport = true
 		}
+		var eilrSrc reference.Canonical
+		if v := string(simpleMd[keyLocalRegistrySource]); v != "" && eilr != "" {
+			eilrSrc, err = parseSourceRef(v)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		sp := false
 		if string(simpleMd["export-image-push"]) == "true" {
 			isImage = true
@@ -332,6 +344,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 				}
 				img.localExport = img.localExport || le
 				img.localRegExport = eilr
+				img.localRegSource = eilrSrc
 				img.shouldPush = img.shouldPush || sp
 				img.insecurePush = img.insecurePush || ip
 				img.opts = opts
@@ -550,6 +563,10 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			}
 		}
 
+		if img.localRegSource != nil {
+			e.addLocalRegSource(ctx, sessionID, img)
+		}
+
 		if img.shouldPush {
 			err := push.Push(
 				ctx, e.opt.SessionManager, sessionID, img.mp,
@@ -639,6 +656,35 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	}
 
 	return resp, nil, nil
+}
+
+// addLocalRegSource serves the original content of img.localRegSource from the
+// embedded registry as part of img. This is best effort: on failure, clients
+// pulling the source reference fall back to the upstream registry.
+func (e *imageExporterInstance) addLocalRegSource(ctx context.Context, sessionID string, img *imgData) {
+	cs := e.opt.ImageWriter.ContentStore()
+	err := func() error {
+		platform, err := imagePlatform(ctx, cs, *img.mfstDesc)
+		if err != nil {
+			return err
+		}
+		ref := img.localRegSource.String()
+		rslvr := resolver.DefaultPool.GetResolver(e.opt.RegistryHosts, ref, "pull", e.opt.SessionManager, session.NewGroup(sessionID))
+		descs, err := sourceContent(ctx, cs, rslvr, img.localRegSource, platform)
+		if err != nil {
+			return err
+		}
+		mmp := eodriver.MultiMultiProviderSingleton
+		for _, desc := range descs {
+			if err := mmp.AddImgSub(img.localRegExport, desc.Digest, cs); err != nil {
+				return err
+			}
+		}
+		return nil
+	}()
+	if err != nil {
+		bklog.G(ctx).WithError(err).Warnf("not serving original content of %s from the local registry", img.localRegSource)
+	}
 }
 
 func (e *imageExporterInstance) Config() *exporter.Config {

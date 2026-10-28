@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/errdefs"
 	storagedriver "github.com/docker/distribution/registry/storage/driver"
 	"github.com/docker/distribution/registry/storage/driver/base"
 	"github.com/docker/distribution/registry/storage/driver/factory"
@@ -166,7 +167,7 @@ func (d *driver) get(ctx context.Context, path string, offset int64) (io.ReadClo
 				fullImgName := fmt.Sprintf("%s:%s", imgName, tag)
 				_, baseDigest, err := d.mmp.Get(ctx, fullImgName)
 				if err != nil {
-					return nil, 0, errors.Wrapf(err, "get %s", path)
+					return nil, 0, notFoundOr(err, path)
 				}
 				return stringReadCloserOffset(baseDigest.String(), offset)
 			case "revisions":
@@ -204,7 +205,7 @@ func (d *driver) get(ctx context.Context, path string, offset int64) (io.ReadClo
 		}
 		ra, err := d.mmp.ReaderAt(ctx, desc)
 		if err != nil {
-			return nil, 0, errors.Wrapf(err, "blob %s", path)
+			return nil, 0, notFoundOr(err, path)
 		}
 		return &readerAtReadCloser{
 			ra:     ra,
@@ -292,6 +293,17 @@ func (fi fileInfo) ModTime() time.Time {
 // IsDir returns true if the path is a directory.
 func (fi fileInfo) IsDir() bool {
 	return false
+}
+
+// notFoundOr maps a not found error to storagedriver.PathNotFoundError, which
+// the registry reports as an unknown manifest or blob (404) rather than an
+// internal error (500). This matters when the registry is used as a mirror:
+// most requests are for content it does not have.
+func notFoundOr(err error, path string) error {
+	if errdefs.IsNotFound(err) {
+		return storagedriver.PathNotFoundError{Path: path, DriverName: driverName}
+	}
+	return errors.Wrapf(err, "get %s", path)
 }
 
 func stringReadCloserOffset(str string, offset int64) (io.ReadCloser, int64, error) {
