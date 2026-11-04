@@ -235,7 +235,7 @@ func (a *applier) Apply(ctx context.Context, c *change) error {
 		dstStat: dstStat,
 	}
 
-	if done, err := a.applyDelete(ctx, ca); err != nil {
+	if done, err := a.applyDelete(ca); err != nil {
 		return errors.Wrap(err, "failed to delete during apply")
 	} else if done {
 		return nil
@@ -253,7 +253,7 @@ func (a *applier) Apply(ctx context.Context, c *change) error {
 	return nil
 }
 
-func (a *applier) applyDelete(ctx context.Context, ca *changeApply) (bool, error) {
+func (a *applier) applyDelete(ca *changeApply) (bool, error) {
 	// Even when not deleting, we may be overwriting a file, in which case we should
 	// delete the existing file at the path, if any. Don't delete when both are dirs
 	// in this case though because they should get merged, not overwritten.
@@ -600,8 +600,10 @@ func (d *differ) doubleWalkingChanges(ctx context.Context, handle func(context.C
 		if prevErr != nil {
 			return prevErr
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		default:
 		}
 
 		if kind == fs.ChangeKindUnmodified {
@@ -689,8 +691,11 @@ func (d *differ) overlayChanges(ctx context.Context, handle func(context.Context
 		if prevErr != nil {
 			return prevErr
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		default:
 		}
 
 		if kind == fs.ChangeKindUnmodified {
@@ -719,7 +724,10 @@ func (d *differ) overlayChanges(ctx context.Context, handle func(context.Context
 				return errors.Errorf("unhandled stat type for %+v", srcfi)
 			}
 
-			if !srcfi.IsDir() && c.srcStat.Nlink > 1 {
+			// Changes with Delete kind may share the same inode even if they are unrelated.
+			// Skip them to avoid creating hardlinks between whiteouts as whiteouts are not
+			// always created and may leave the hardlink dangling.
+			if !srcfi.IsDir() && c.srcStat.Nlink > 1 && c.kind != fs.ChangeKindDelete {
 				if linkSubPath, ok := d.inodes[statInode(c.srcStat)]; ok {
 					c.linkSubPath = linkSubPath
 				} else {

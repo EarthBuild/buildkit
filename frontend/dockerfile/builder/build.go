@@ -7,19 +7,22 @@ import (
 
 	"github.com/containerd/containerd/platforms"
 	"github.com/moby/buildkit/client/llb"
-	"github.com/moby/buildkit/exporter/containerimage/image"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/frontend"
 	"github.com/moby/buildkit/frontend/attestations/sbom"
 	"github.com/moby/buildkit/frontend/dockerfile/dockerfile2llb"
+	"github.com/moby/buildkit/frontend/dockerfile/linter"
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 	"github.com/moby/buildkit/frontend/dockerui"
 	"github.com/moby/buildkit/frontend/gateway/client"
 	gwpb "github.com/moby/buildkit/frontend/gateway/pb"
+	"github.com/moby/buildkit/frontend/subrequests/lint"
 	"github.com/moby/buildkit/frontend/subrequests/outline"
 	"github.com/moby/buildkit/frontend/subrequests/targets"
 	"github.com/moby/buildkit/solver/errdefs"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/solver/result"
+	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
@@ -72,8 +75,13 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 		Client:       bc,
 		SourceMap:    src.SourceMap,
 		MetaResolver: c,
-		Warn: func(msg, url string, detail [][]byte, location *parser.Range) {
-			src.Warn(ctx, msg, warnOpts(location, detail, url))
+		Warn: func(rulename, description, url, msg string, location []parser.Range) {
+			startLine := 0
+			if len(location) > 0 {
+				startLine = location[0].Start.Line
+			}
+			msg = linter.LintFormatShort(rulename, msg, startLine)
+			src.Warn(ctx, msg, warnOpts(location, [][]byte{[]byte(description)}, url))
 		},
 	}
 
@@ -84,6 +92,9 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 		ListTargets: func(ctx context.Context) (*targets.List, error) {
 			return dockerfile2llb.ListTargets(ctx, src.Data)
 		},
+		Lint: func(ctx context.Context) (*lint.LintResults, error) {
+			return dockerfile2llb.DockerfileLint(ctx, src.Data, convertOpt)
+		},
 	}); err != nil {
 		return nil, err
 	} else if ok {
@@ -93,14 +104,19 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 	defer func() {
 		var el *parser.ErrorLocation
 		if errors.As(err, &el) {
-			err = wrapSource(err, src.SourceMap, el.Location)
+			for _, l := range el.Locations {
+				err = wrapSource(err, src.SourceMap, l)
+			}
 		}
 	}()
 
 	var scanner sbom.Scanner
 	if bc.SBOM != nil {
-		scanner, err = sbom.CreateSBOMScanner(ctx, c, bc.SBOM.Generator, llb.ResolveImageConfigOpt{
-			ResolveMode: opts["image-resolve-mode"],
+		// TODO: scanner should pass policy
+		scanner, err = sbom.CreateSBOMScanner(ctx, c, bc.SBOM.Generator, sourceresolver.Opt{
+			ImageOpt: &sourceresolver.ResolveImageOpt{
+				ResolveMode: opts["image-resolve-mode"],
+			},
 		})
 		if err != nil {
 			return nil, err
@@ -109,21 +125,21 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 
 	scanTargets := sync.Map{}
 
-	rb, err := bc.Build(ctx, func(ctx context.Context, platform *ocispecs.Platform, idx int) (client.Reference, *image.Image, error) {
+	rb, err := bc.Build(ctx, func(ctx context.Context, platform *ocispecs.Platform, idx int) (client.Reference, *dockerspec.DockerOCIImage, *dockerspec.DockerOCIImage, error) {
 		opt := convertOpt
 		opt.TargetPlatform = platform
 		if idx != 0 {
 			opt.Warn = nil
 		}
 
-		st, img, scanTarget, err := dockerfile2llb.Dockerfile2LLB(ctx, src.Data, opt)
+		st, img, baseImg, scanTarget, err := dockerfile2llb.Dockerfile2LLB(ctx, src.Data, opt)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		def, err := st.Marshal(ctx)
 		if err != nil {
-			return nil, nil, errors.Wrapf(err, "failed to marshal LLB definition")
+			return nil, nil, nil, errors.Wrapf(err, "failed to marshal LLB definition")
 		}
 
 		r, err := c.Solve(ctx, client.SolveRequest{
@@ -131,12 +147,12 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 			CacheImports: bc.CacheImports,
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		ref, err := r.SingleRef()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		p := platforms.DefaultSpec()
@@ -145,7 +161,7 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 		}
 		scanTargets.Store(platforms.Format(platforms.Normalize(p)), scanTarget)
 
-		return ref, img, nil
+		return ref, img, baseImg, nil
 	})
 	if err != nil {
 		return nil, err
@@ -230,21 +246,24 @@ func forwardGateway(ctx context.Context, c client.Client, ref string, cmdline st
 	})
 }
 
-func warnOpts(r *parser.Range, detail [][]byte, url string) client.WarnOpts {
+func warnOpts(r []parser.Range, detail [][]byte, url string) client.WarnOpts {
 	opts := client.WarnOpts{Level: 1, Detail: detail, URL: url}
 	if r == nil {
 		return opts
 	}
-	opts.Range = []*pb.Range{{
-		Start: pb.Position{
-			Line:      int32(r.Start.Line),
-			Character: int32(r.Start.Character),
-		},
-		End: pb.Position{
-			Line:      int32(r.End.Line),
-			Character: int32(r.End.Character),
-		},
-	}}
+	opts.Range = []*pb.Range{}
+	for _, r := range r {
+		opts.Range = append(opts.Range, &pb.Range{
+			Start: pb.Position{
+				Line:      int32(r.Start.Line),
+				Character: int32(r.Start.Character),
+			},
+			End: pb.Position{
+				Line:      int32(r.End.Line),
+				Character: int32(r.End.Character),
+			},
+		})
+	}
 	return opts
 }
 

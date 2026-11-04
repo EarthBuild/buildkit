@@ -5,13 +5,14 @@ import (
 	"time"
 
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
-func configurableMonitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelConn func(), healthCfg ManagerHealthCfg) {
-	defer cancelConn()
+func configurableMonitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelCause context.CancelCauseFunc, healthCfg ManagerHealthCfg) {
+	defer cancelCause(errors.WithStack(context.Canceled))
 	defer cc.Close()
 
 	ticker := time.NewTicker(healthCfg.frequency)
@@ -27,9 +28,10 @@ func configurableMonitorHealth(ctx context.Context, cc *grpc.ClientConn, cancelC
 		case <-ticker.C:
 			timeoutStart := time.Now().UTC()
 
-			ctx, cancel := context.WithTimeout(ctx, healthCfg.timeout)
+			ctx, cancel := context.WithCancelCause(ctx)
+			ctx, _ = context.WithTimeoutCause(ctx, healthCfg.timeout, errors.WithStack(context.DeadlineExceeded))
 			_, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
-			cancel()
+			cancel(errors.WithStack(context.Canceled))
 
 			logFields := logrus.Fields{
 				"timeout":        healthCfg.timeout,

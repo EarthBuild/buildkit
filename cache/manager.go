@@ -10,11 +10,11 @@ import (
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/diff"
-	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/filters"
 	"github.com/containerd/containerd/gc"
 	"github.com/containerd/containerd/labels"
 	"github.com/containerd/containerd/leases"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/client"
@@ -36,6 +36,8 @@ var (
 	errNotFound = errors.New("not found")
 	errInvalid  = errors.New("invalid")
 )
+
+const maxPruneBatch = 10 // maximum number of refs to prune while holding the manager lock
 
 type ManagerOpt struct {
 	Snapshotter     snapshot.Snapshotter
@@ -141,7 +143,7 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 
 	descHandlers := descHandlersOf(opts...)
 	if desc.Digest != "" && (descHandlers == nil || descHandlers[desc.Digest] == nil) {
-		if _, err := cm.ContentStore.Info(ctx, desc.Digest); errors.Is(err, errdefs.ErrNotFound) {
+		if _, err := cm.ContentStore.Info(ctx, desc.Digest); errors.Is(err, cerrdefs.ErrNotFound) {
 			return nil, NeedsRemoteProviderError([]digest.Digest{desc.Digest})
 		} else if err != nil {
 			return nil, err
@@ -257,7 +259,7 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 	if err := cm.LeaseManager.AddResource(ctx, l, leases.Resource{
 		ID:   snapshotID,
 		Type: "snapshots/" + cm.Snapshotter.Name(),
-	}); err != nil && !errdefs.IsAlreadyExists(err) {
+	}); err != nil && !cerrdefs.IsAlreadyExists(err) {
 		return nil, errors.Wrapf(err, "failed to add snapshot %s to lease", id)
 	}
 
@@ -378,7 +380,7 @@ func (cm *cacheManager) get(ctx context.Context, id string, pg progress.Controll
 		if rec.equalImmutable != nil {
 			return rec.equalImmutable.ref(triggerUpdate, descHandlers, pg), nil
 		}
-		return rec.mref(triggerUpdate, descHandlers).commit(ctx)
+		return rec.mref(triggerUpdate, descHandlers).commit()
 	}
 
 	return rec.ref(triggerUpdate, descHandlers, pg), nil
@@ -488,7 +490,7 @@ func (cm *cacheManager) getRecord(ctx context.Context, id string, opts ...RefOpt
 	if rec.mutable {
 		// If the record is mutable, then the snapshot must exist
 		if _, err := cm.Snapshotter.Stat(ctx, rec.ID()); err != nil {
-			if !errdefs.IsNotFound(err) {
+			if !cerrdefs.IsNotFound(err) {
 				return nil, errors.Wrap(err, "failed to check mutable ref snapshot")
 			}
 			// the snapshot doesn't exist, clear this record
@@ -613,7 +615,7 @@ func (cm *cacheManager) New(ctx context.Context, s ImmutableRef, sess session.Gr
 	if err := cm.LeaseManager.AddResource(ctx, l, leases.Resource{
 		ID:   snapshotID,
 		Type: "snapshots/" + cm.Snapshotter.Name(),
-	}); err != nil && !errdefs.IsAlreadyExists(err) {
+	}); err != nil && !cerrdefs.IsAlreadyExists(err) {
 		return nil, errors.Wrapf(err, "failed to add snapshot %s to lease", snapshotID)
 	}
 
@@ -1102,7 +1104,7 @@ func (cm *cacheManager) pruneOnce(ctx context.Context, ch chan client.UsageInfo,
 	return retErr
 }
 
-func (cm *cacheManager) prune(ctx context.Context, ch chan client.UsageInfo, opt pruneOpt) error {
+func (cm *cacheManager) prune(ctx context.Context, ch chan client.UsageInfo, opt pruneOpt) (err error) {
 	var toDelete []*deleteRecord
 
 	if opt.keepBytes != 0 && opt.totalSize < opt.keepBytes {
@@ -1152,10 +1154,11 @@ func (cm *cacheManager) prune(ctx context.Context, ch chan client.UsageInfo, opt
 			}
 
 			c := &client.UsageInfo{
-				ID:         cr.ID(),
-				Mutable:    cr.mutable,
-				RecordType: recordType,
-				Shared:     shared,
+				ID:          cr.ID(),
+				Mutable:     cr.mutable,
+				RecordType:  recordType,
+				Shared:      shared,
+				Description: cr.GetDescription(),
 			}
 
 			usageCount, lastUsedAt := cr.getLastUsed()
@@ -1175,48 +1178,49 @@ func (cm *cacheManager) prune(ctx context.Context, ch chan client.UsageInfo, opt
 					lastUsedAt:  c.LastUsedAt,
 					usageCount:  c.UsageCount,
 				})
-				if !gcMode {
-					cr.dead = true
-
-					// mark metadata as deleted in case we crash before cleanup finished
-					if err := cr.queueDeleted(); err != nil {
-						cr.mu.Unlock()
-						cm.mu.Unlock()
-						return err
-					}
-					if err := cr.commitMetadata(); err != nil {
-						cr.mu.Unlock()
-						cm.mu.Unlock()
-						return err
-					}
-				} else {
-					locked[cr.mu] = struct{}{}
-					continue // leave the record locked
-				}
+				locked[cr.mu] = struct{}{}
+				continue // leave the record locked
 			}
 		}
 		cr.mu.Unlock()
 	}
 
+	batchSize := len(toDelete)
 	if gcMode && len(toDelete) > 0 {
+		batchSize = 1
 		sortDeleteRecords(toDelete)
-		var err error
-		for i, cr := range toDelete {
-			// only remove single record at a time
-			if i == 0 {
-				cr.dead = true
-				err = cr.queueDeleted()
-				if err == nil {
-					err = cr.commitMetadata()
-				}
-			}
-			cr.mu.Unlock()
-		}
-		if err != nil {
-			return err
-		}
-		toDelete = toDelete[:1]
+	} else if batchSize > maxPruneBatch {
+		batchSize = maxPruneBatch
 	}
+
+	releaseLocks := func() {
+		for _, cr := range toDelete {
+			if !cr.released {
+				cr.released = true
+				cr.mu.Unlock()
+			}
+		}
+		cm.mu.Unlock()
+	}
+
+	for i, cr := range toDelete {
+		// only remove single record at a time
+		if i < batchSize {
+			cr.dead = true
+			// mark metadata as deleted in case we crash before cleanup finished
+			if err := cr.queueDeleted(); err != nil {
+				releaseLocks()
+				return err
+			}
+			if err := cr.commitMetadata(); err != nil {
+				releaseLocks()
+				return err
+			}
+		}
+		cr.mu.Unlock()
+		cr.released = true
+	}
+	toDelete = toDelete[:batchSize]
 
 	cm.mu.Unlock()
 
@@ -1240,7 +1244,6 @@ func (cm *cacheManager) prune(ctx context.Context, ch chan client.UsageInfo, opt
 	}
 
 	cm.mu.Lock()
-	var err error
 	for _, cr := range toDelete {
 		cr.mu.Lock()
 
@@ -1301,7 +1304,7 @@ func (cm *cacheManager) prune(ctx context.Context, ch chan client.UsageInfo, opt
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return context.Cause(ctx)
 	default:
 		return cm.prune(ctx, ch, opt)
 	}
@@ -1658,6 +1661,7 @@ type deleteRecord struct {
 	usageCount      int
 	lastUsedAtIndex int
 	usageCountIndex int
+	released        bool
 }
 
 func sortDeleteRecords(toDelete []*deleteRecord) {

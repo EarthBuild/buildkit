@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 package runc
 
 import (
@@ -76,7 +79,7 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 		SELinux:             selinux,
 		TracingSocket:       traceSocket,
 		DefaultCgroupParent: defaultCgroupParent,
-		Hooks:               hooks, //earthly-specific
+		Hooks:               hooks, // earthly-specific
 		ResourceMonitor:     rm,
 		SampleFrequency:     sampleFrequency, // earthly-specific
 	}, np)

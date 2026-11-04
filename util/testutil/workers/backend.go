@@ -10,7 +10,9 @@ type backend struct {
 	dockerAddress       string
 	containerdAddress   string
 	rootless            bool
+	netnsDetached       bool
 	snapshotter         string
+	extraEnv            []string
 	unsupportedFeatures []string
 	isDockerd           bool
 }
@@ -31,8 +33,16 @@ func (b backend) Rootless() bool {
 	return b.rootless
 }
 
+func (b backend) NetNSDetached() bool {
+	return b.netnsDetached
+}
+
 func (b backend) Snapshotter() string {
 	return b.snapshotter
+}
+
+func (b backend) ExtraEnv() []string {
+	return b.extraEnv
 }
 
 func (b backend) Supports(feature string) bool {

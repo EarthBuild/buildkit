@@ -7,12 +7,14 @@ of daemon configuration.
 The file path is `/etc/buildkit/buildkitd.toml` for rootful mode,
 `~/.config/buildkit/buildkitd.toml` for rootless mode.
 
-The following is a complete `buildkitd.toml` configuration example, please
-note some configuration is only good for edge cases, please take care of it
-carefully.
+The following is a complete `buildkitd.toml` configuration example.
+Note that some configuration options are only useful in edge cases.
 
 ```toml
+# debug enables additional debug logging
 debug = true
+# trace enables additional trace logging (very verbose, with potential performance impacts)
+trace = true
 # root is where all buildkit state is stored.
 root = "/var/lib/buildkit"
 # insecure-entitlements allows insecure entitlements, disabled by default.
@@ -109,6 +111,7 @@ insecure-entitlements = [ "network.host", "security.insecure" ]
   # configure the containerd runtime
   [worker.containerd.runtime]
     name = "io.containerd.runc.v2"
+    path = "/path/to/containerd/runc/shim"
     options = { BinaryName = "runc" }
 
   [[worker.containerd.gcpolicy]]
@@ -133,4 +136,25 @@ insecure-entitlements = [ "network.host", "security.insecure" ]
 # optionally mirror configuration can be done by defining it as a registry.
 [registry."yourmirror.local:5000"]
   http = true
+
+# Frontend control
+[frontend."dockerfile.v0"]
+  enabled = true
+
+[frontend."gateway.v0"]
+  enabled = true
+
+  # If allowedRepositories is empty, all gateway sources are allowed.
+  # Otherwise, only the listed repositories are allowed as a gateway source.
+  # 
+  # NOTE: Only the repository name (without tag) is compared.
+  #
+  # Example:
+  # allowedRepositories = [ "docker-registry.wikimedia.org/repos/releng/blubber/buildkit" ]
+  allowedRepositories = []
+
+[system]
+  # how often buildkit scans for changes in the supported emulated platforms
+  platformsCacheMaxAge = "1h"
+
 ```

@@ -44,6 +44,7 @@ platforms=["linux/amd64"]
 address="containerd.sock"
 [worker.containerd.runtime]
 name="exotic"
+path="/usr/bin/exotic"
 options.foo="bar"
 [[worker.containerd.gcpolicy]]
 all=true
@@ -107,6 +108,7 @@ searchDomains=["example.com"]
 	require.Equal(t, 0, len(cfg.Workers.OCI.GCPolicy))
 	require.Equal(t, "non-default", cfg.Workers.Containerd.Namespace)
 	require.Equal(t, "exotic", cfg.Workers.Containerd.Runtime.Name)
+	require.Equal(t, "/usr/bin/exotic", cfg.Workers.Containerd.Runtime.Path)
 	require.Equal(t, "bar", cfg.Workers.Containerd.Runtime.Options["foo"])
 	require.Equal(t, 3, len(cfg.Workers.Containerd.GCPolicy))
 
@@ -123,16 +125,16 @@ searchDomains=["example.com"]
 	require.Equal(t, 1, len(cfg.Workers.Containerd.GCPolicy[0].Filters))
 	require.Equal(t, 0, len(cfg.Workers.Containerd.GCPolicy[1].Filters))
 
-	require.Equal(t, *cfg.Registries["docker.io"].PlainHTTP, true)
-	require.Equal(t, *cfg.Registries["docker.io"].Insecure, true)
-	require.Equal(t, cfg.Registries["docker.io"].Mirrors[0], "hub.docker.io")
-	require.Equal(t, cfg.Registries["docker.io"].RootCAs, []string{"myca.pem"})
-	require.Equal(t, cfg.Registries["docker.io"].TLSConfigDir, []string{"/etc/buildkitd/myregistry"})
-	require.Equal(t, cfg.Registries["docker.io"].KeyPairs[0].Key, "key.pem")
-	require.Equal(t, cfg.Registries["docker.io"].KeyPairs[0].Certificate, "cert.pem")
+	require.Equal(t, true, *cfg.Registries["docker.io"].PlainHTTP)
+	require.Equal(t, true, *cfg.Registries["docker.io"].Insecure)
+	require.Equal(t, "hub.docker.io", cfg.Registries["docker.io"].Mirrors[0])
+	require.Equal(t, []string{"myca.pem"}, cfg.Registries["docker.io"].RootCAs)
+	require.Equal(t, []string{"/etc/buildkitd/myregistry"}, cfg.Registries["docker.io"].TLSConfigDir)
+	require.Equal(t, "key.pem", cfg.Registries["docker.io"].KeyPairs[0].Key)
+	require.Equal(t, "cert.pem", cfg.Registries["docker.io"].KeyPairs[0].Certificate)
 
 	require.NotNil(t, cfg.DNS)
-	require.Equal(t, cfg.DNS.Nameservers, []string{"1.1.1.1", "8.8.8.8"})
-	require.Equal(t, cfg.DNS.SearchDomains, []string{"example.com"})
-	require.Equal(t, cfg.DNS.Options, []string{"edns0"})
+	require.Equal(t, []string{"1.1.1.1", "8.8.8.8"}, cfg.DNS.Nameservers)
+	require.Equal(t, []string{"example.com"}, cfg.DNS.SearchDomains)
+	require.Equal(t, []string{"edns0"}, cfg.DNS.Options)
 }

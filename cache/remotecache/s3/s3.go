@@ -11,11 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	aws_config "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/smithy-go"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/labels"
 	"github.com/moby/buildkit/cache/remotecache"
@@ -172,6 +173,12 @@ func (e *exporter) Config() remotecache.Config {
 	}
 }
 
+type nopCloserSectionReader struct {
+	*io.SectionReader
+}
+
+func (*nopCloserSectionReader) Close() error { return nil }
+
 func (e *exporter) Finalize(ctx context.Context) (map[string]string, error) {
 	cacheConfig, descs, err := e.chains.Marshal(ctx)
 	if err != nil {
@@ -209,11 +216,15 @@ func (e *exporter) Finalize(ctx context.Context) (map[string]string, error) {
 			}
 		} else {
 			layerDone := progress.OneOff(ctx, fmt.Sprintf("writing layer %s", l.Blob))
-			dt, err := content.ReadBlob(ctx, dgstPair.Provider, dgstPair.Descriptor)
+			// TODO: once buildkit uses v2, start using
+			// https://github.com/containerd/containerd/pull/9657
+			// currently inline data should never happen.
+			ra, err := dgstPair.Provider.ReaderAt(ctx, dgstPair.Descriptor)
 			if err != nil {
-				return nil, layerDone(err)
+				return nil, layerDone(errors.Wrap(err, "error reading layer blob from provider"))
 			}
-			if err := e.s3Client.saveMutable(ctx, key, dt); err != nil {
+			defer ra.Close()
+			if err := e.s3Client.saveMutableAt(ctx, key, &nopCloserSectionReader{io.NewSectionReader(ra, 0, ra.Size())}); err != nil {
 				return nil, layerDone(errors.Wrap(err, "error writing layer blob"))
 			}
 			layerDone(nil)
@@ -364,7 +375,7 @@ func newS3Client(ctx context.Context, config Config) (*s3Client, error) {
 		}
 		if config.EndpointURL != "" {
 			options.UsePathStyle = config.UsePathStyle
-			options.EndpointResolver = s3.EndpointResolverFromURL(config.EndpointURL)
+			options.BaseEndpoint = aws.String(config.EndpointURL)
 		}
 	})
 
@@ -425,6 +436,16 @@ func (s3Client *s3Client) saveMutable(ctx context.Context, key string, value []b
 	return err
 }
 
+func (s3Client *s3Client) saveMutableAt(ctx context.Context, key string, body io.ReadSeekCloser) error {
+	input := &s3.PutObjectInput{
+		Bucket: &s3Client.bucket,
+		Key:    &key,
+		Body:   body,
+	}
+	_, err := s3Client.Upload(ctx, input)
+	return err
+}
+
 func (s3Client *s3Client) exists(ctx context.Context, key string) (*time.Time, error) {
 	input := &s3.HeadObjectInput{
 		Bucket: &s3Client.bucket,
@@ -472,6 +493,7 @@ func (s3Client *s3Client) blobKey(dgst digest.Digest) string {
 }
 
 func isNotFound(err error) bool {
-	var errapi smithy.APIError
-	return errors.As(err, &errapi) && (errapi.ErrorCode() == "NoSuchKey" || errapi.ErrorCode() == "NotFound")
+	var nf *s3types.NotFound
+	var nsk *s3types.NoSuchKey
+	return errors.As(err, &nf) || errors.As(err, &nsk)
 }

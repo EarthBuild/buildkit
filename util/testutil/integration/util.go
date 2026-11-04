@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,12 +16,23 @@ import (
 	"github.com/containerd/continuity/fs/fstest"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
+	"github.com/tonistiigi/fsutil"
 	"golang.org/x/sync/errgroup"
 )
 
 var ErrRequirements = errors.Errorf("missing requirements")
 
-func Tmpdir(t *testing.T, appliers ...fstest.Applier) string {
+type TmpDirWithName struct {
+	fsutil.FS
+	Name string
+}
+
+// This allows TmpDirWithName to continue being used with the `%s` 'verb' on Printf.
+func (d *TmpDirWithName) String() string {
+	return d.Name
+}
+
+func Tmpdir(t *testing.T, appliers ...fstest.Applier) *TmpDirWithName {
 	t.Helper()
 
 	// We cannot use t.TempDir() to create a temporary directory here because
@@ -39,7 +49,10 @@ func Tmpdir(t *testing.T, appliers ...fstest.Applier) string {
 	err = fstest.Apply(appliers...).Apply(tmpdir)
 	require.NoError(t, err)
 
-	return tmpdir
+	mount, err := fsutil.NewFS(tmpdir)
+	require.NoError(t, err)
+
+	return &TmpDirWithName{FS: mount, Name: tmpdir}
 }
 
 func RunCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) error {
@@ -100,13 +113,11 @@ func StartCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) (func() error, error
 	}, nil
 }
 
-func WaitUnix(address string, d time.Duration, cmd *exec.Cmd) error {
-	address = strings.TrimPrefix(address, "unix://")
-	addr, err := net.ResolveUnixAddr("unix", address)
-	if err != nil {
-		return errors.Wrapf(err, "failed resolving unix addr: %s", address)
-	}
-
+// WaitSocket will dial a socket opened by a command passed in as cmd.
+// On Linux this socket is typically a Unix socket,
+// while on Windows this will be a named pipe.
+func WaitSocket(address string, d time.Duration, cmd *exec.Cmd) error {
+	address = strings.TrimPrefix(address, socketScheme)
 	step := 50 * time.Millisecond
 	i := 0
 	for {
@@ -114,7 +125,7 @@ func WaitUnix(address string, d time.Duration, cmd *exec.Cmd) error {
 			return errors.Errorf("process exited: %s", cmd.String())
 		}
 
-		if conn, err := net.DialUnix("unix", nil, addr); err == nil {
+		if conn, err := dialPipe(address); err == nil {
 			conn.Close()
 			break
 		}
