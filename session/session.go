@@ -52,20 +52,14 @@ type Session struct {
 func NewSession(ctx context.Context, name, sharedKey string) (*Session, error) {
 	id := identity.NewID()
 
-<<<<<<< HEAD
-	var unary []grpc.UnaryServerInterceptor
-	var stream []grpc.StreamServerInterceptor
-
 	maxMsgSize := 67108864 // 64MB
-	serverOpts := []grpc.ServerOption{
-		grpc.MaxRecvMsgSize(maxMsgSize), grpc.MaxSendMsgSize(maxMsgSize),
-		grpc.InitialWindowSize(65535 * 32),
-		grpc.InitialConnWindowSize(65535 * 16),
-=======
 	serverOpts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(grpcerrors.UnaryServerInterceptor),
 		grpc.StreamInterceptor(grpcerrors.StreamServerInterceptor),
->>>>>>> v0.14.1
+		grpc.MaxRecvMsgSize(maxMsgSize),
+		grpc.MaxSendMsgSize(maxMsgSize),
+		grpc.InitialWindowSize(65535 * 32),
+		grpc.InitialConnWindowSize(65535 * 16),
 	}
 
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {

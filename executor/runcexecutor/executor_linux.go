@@ -24,15 +24,10 @@ func updateRuncFieldsForHostOS(runtime *runc.Runc) {
 
 func (w *runcExecutor) run(ctx context.Context, id, bundle string, process executor.ProcessInfo, started func(), keep bool) error {
 	killer := newRunProcKiller(w.runc, id)
-<<<<<<< HEAD
-	return w.callWithIO(ctx, id, bundle, process, started, killer, func(ctx context.Context, started chan<- int, io runc.IO, pidfile string) error {
+	return w.callWithIO(ctx, process, started, killer, func(ctx context.Context, started chan<- int, io runc.IO, pidfile string) error {
 		// earthly-specific; without this runc processes sometimes exit with -1; the +test target in the root earthly repo reproduces it
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
-
-=======
-	return w.callWithIO(ctx, process, started, killer, func(ctx context.Context, started chan<- int, io runc.IO, pidfile string) error {
->>>>>>> v0.14.1
 		extraArgs := []string{}
 		if keep {
 			extraArgs = append(extraArgs, "--keep")

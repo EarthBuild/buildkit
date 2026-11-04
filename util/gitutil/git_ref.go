@@ -58,11 +58,7 @@ func ParseGitRef(ref string) (*GitRef, error) {
 	)
 
 	if strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "../") {
-<<<<<<< HEAD
-		return nil, errdefs.ErrInvalidArgument
-=======
 		return nil, cerrdefs.ErrInvalidArgument
->>>>>>> v0.14.1
 	} else if strings.HasPrefix(ref, "github.com/") {
 		res.IndistinguishableFromLocal = true // Deprecated
 		remote = fromURL(&url.URL{

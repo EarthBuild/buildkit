@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/buildkit/util/contentutil"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -45,26 +45,26 @@ func (mmp *MultiMultiProvider) ReaderAt(ctx context.Context, desc ocispecs.Descr
 	imgs := mmp.digests[desc.Digest]
 	// take the first one if multiple are found.
 	for imgName := range imgs {
-		mp, _, err := mmp.getNoLock(ctx, imgName)
+		mp, _, err := mmp.getNoLock(imgName)
 		if err != nil {
 			continue
 		}
 		return mp.ReaderAt(ctx, desc)
 	}
-	return nil, errors.Wrapf(errdefs.ErrNotFound, "content %v", desc.Digest)
+	return nil, errors.Wrapf(cerrdefs.ErrNotFound, "content %v", desc.Digest)
 }
 
 // Get returns a read-only MultiProvider and the base digest for a given imgName.
 func (mmp *MultiMultiProvider) Get(ctx context.Context, imgName string) (*contentutil.MultiProvider, digest.Digest, error) {
 	mmp.mu.RLock()
 	defer mmp.mu.RUnlock()
-	return mmp.getNoLock(ctx, imgName)
+	return mmp.getNoLock(imgName)
 }
 
-func (mmp *MultiMultiProvider) getNoLock(ctx context.Context, imgName string) (*contentutil.MultiProvider, digest.Digest, error) {
+func (mmp *MultiMultiProvider) getNoLock(imgName string) (*contentutil.MultiProvider, digest.Digest, error) {
 	imgData, ok := mmp.imgs[imgName]
 	if !ok {
-		return nil, "", errors.Wrapf(errdefs.ErrNotFound, "img name %v", imgName)
+		return nil, "", errors.Wrapf(cerrdefs.ErrNotFound, "img name %v", imgName)
 	}
 	mp := contentutil.NewMultiProvider(imgData.base)
 	for dgst, p := range imgData.subs {
@@ -79,7 +79,7 @@ func (mmp *MultiMultiProvider) AddImgSub(imgName string, dgst digest.Digest, p c
 	defer mmp.mu.Unlock()
 	imgData, ok := mmp.imgs[imgName]
 	if !ok {
-		return errors.Wrapf(errdefs.ErrNotFound, "img name %v", imgName)
+		return errors.Wrapf(cerrdefs.ErrNotFound, "img name %v", imgName)
 	}
 	imgData.subs[dgst] = p
 	mmp.addDigestEntry(dgst, imgName)

@@ -415,16 +415,13 @@ type pipeFactory struct {
 func (pf *pipeFactory) NewInputRequest(ee Edge, req *edgeRequest) pipe.Receiver {
 	target := pf.s.ef.getEdge(ee)
 	if target == nil {
-<<<<<<< HEAD
-		dgst := ee.Vertex.Digest()
-		bklog.G(context.TODO()).Errorf("failed to get edge dgst=%s name=%s desiredState=%s; actives history: %s", dgst, ee.Vertex.Name(), req.desiredState, dgstTrackerInst.String()) // earthly-specific
-=======
 		bklog.G(context.TODO()).
 			WithField("edge_vertex_name", ee.Vertex.Name()).
 			WithField("edge_vertex_digest", ee.Vertex.Digest()).
 			WithField("edge_index", ee.Index).
+			WithField("desired_state", req.desiredState).
+			WithField("actives_history", dgstTrackerInst.String()).
 			Error("failed to get edge: inconsistent graph state")
->>>>>>> v0.14.1
 		return pf.NewFuncRequest(func(_ context.Context) (interface{}, error) {
 			return nil, errors.Errorf("failed to get edge: inconsistent graph state in edge %s %s %d", ee.Vertex.Name(), ee.Vertex.Digest(), ee.Index)
 		})

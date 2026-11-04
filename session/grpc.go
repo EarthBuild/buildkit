@@ -26,14 +26,7 @@ func serve(ctx context.Context, grpcServer *grpc.Server, conn net.Conn) {
 	(&http2.Server{}).ServeConn(conn, &http2.ServeConnOpts{Handler: grpcServer})
 }
 
-<<<<<<< HEAD
 func grpcClientConn(ctx context.Context, conn net.Conn, healthCfg ManagerHealthCfg) (context.Context, *grpc.ClientConn, error) {
-	var unary []grpc.UnaryClientInterceptor
-	var stream []grpc.StreamClientInterceptor
-
-=======
-func grpcClientConn(ctx context.Context, conn net.Conn) (context.Context, *grpc.ClientConn, error) {
->>>>>>> v0.14.1
 	var dialCount int64
 	dialer := grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 		if c := atomic.AddInt64(&dialCount, 1); c > 1 {
