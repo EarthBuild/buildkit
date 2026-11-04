@@ -62,6 +62,7 @@ func (sp *fsSyncProvider) Register(server *grpc.Server) {
 func (sp *fsSyncProvider) DiffCopy(stream FileSync_DiffCopyServer) error {
 	return sp.handle("diffcopy", stream)
 }
+
 func (sp *fsSyncProvider) TarStream(stream FileSync_TarStreamServer) error {
 	return sp.handle("tarstream", stream)
 }
@@ -227,39 +228,41 @@ func FSSync(ctx context.Context, c session.Caller, opt FSSendRequestOpt) error {
 }
 
 // NewFSSyncTargetDir allows writing into a directory
-func NewFSSyncTargetDir(outdir string, verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
+func NewFSSyncTargetDir(outdir string) session.Attachable {
 	p := &fsSyncTarget{
-		outdir:            outdir,
-		verboseProgressCB: verboseProgressCB,
+		outdir: outdir,
 	}
 	return p
 }
 
 // NewFSSyncTarget allows writing into an io.WriteCloser
-func NewFSSyncTarget(f func(map[string]string) (io.WriteCloser, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
+func NewFSSyncTarget(f func(map[string]string) (io.WriteCloser, error)) session.Attachable {
 	p := &fsSyncTarget{
-		f:                 f,
-		verboseProgressCB: verboseProgressCB,
+		f: f,
 	}
 	return p
 }
 
+type fileCb func(string, int64)
+
 // NewFSSyncTarget allows writing into an io.WriteCloser; it is earthly-specific
-func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), verboseProgressCB fsutil.VerboseProgressCB) session.Attachable {
+func NewFSSyncMultiTarget(f func(map[string]string) (io.WriteCloser, error), outdirFunc func(map[string]string) (string, error), progress progressCb, onFile fileCb) session.Attachable {
 	p := &fsSyncTarget{
-		f:                 f,
-		outdirFunc:        outdirFunc,
-		verboseProgressCB: verboseProgressCB,
+		f:          f,
+		outdirFunc: outdirFunc,
+		progress:   progress,
+		onFile:     onFile,
 	}
 	return p
 }
 
 type fsSyncTarget struct {
 	outdir     string
-	outdirFunc func(map[string]string) (string, error) //earthly
+	outdirFunc func(map[string]string) (string, error) // earthly
 	f          func(map[string]string) (io.WriteCloser, error)
 
-	verboseProgressCB fsutil.VerboseProgressCB
+	progress progressCb
+	onFile   fileCb
 }
 
 func (sp *fsSyncTarget) Register(server *grpc.Server) {
@@ -268,7 +271,7 @@ func (sp *fsSyncTarget) Register(server *grpc.Server) {
 
 func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 	if sp.outdir != "" {
-		return syncTargetDiffCopy(stream, sp.outdir, sp.verboseProgressCB)
+		return syncTargetDiffCopy(stream, sp.outdir, sp.progress, sp.onFile)
 	}
 
 	if sp.f == nil {
@@ -287,7 +290,7 @@ func (sp *fsSyncTarget) DiffCopy(stream FileSend_DiffCopyServer) (err error) {
 			return err
 		}
 		if outdir != "" {
-			return syncTargetDiffCopy(stream, outdir, sp.verboseProgressCB)
+			return syncTargetDiffCopy(stream, outdir, sp.progress, sp.onFile)
 		}
 	}
 	wc, err := sp.f(md)
