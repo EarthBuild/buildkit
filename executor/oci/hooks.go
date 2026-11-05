@@ -33,7 +33,7 @@ func WithHook(hook OciHook) oci.SpecOpts {
 		// Yes, its verbose... but it reads _so much better_ than the golang reflection version
 		switch hook.Phase {
 		case "prestart":
-			s.Hooks.Prestart = append(s.Hooks.Prestart, h)
+			s.Hooks.Prestart = append(s.Hooks.Prestart, h) //nolint:staticcheck // SA1019 deprecated in runtime-spec v1.2.0; still accepted from config
 		case "createRuntime":
 			s.Hooks.CreateRuntime = append(s.Hooks.CreateRuntime, h)
 		case "createContainer":
