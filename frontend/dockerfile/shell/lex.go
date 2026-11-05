@@ -169,7 +169,7 @@ func (sw *shellWord) processStopOn(stopChar rune, rawEscapes bool) (string, []st
 	// result buffer can't be currently shared for shellWord as it is called internally
 	// by processDollar
 	var result strings.Builder
-	// earthly-specific: the words buffer can't be shared either; processDollar
+	// earth-specific: the words buffer can't be shared either; processDollar
 	// re-enters processStopOn for ${var:-default}, and a shared buffer drops the
 	// text before the expansion (e.g. ProcessWords("80${unset:-80}") -> ["80"]).
 	var wordsBuffer strings.Builder

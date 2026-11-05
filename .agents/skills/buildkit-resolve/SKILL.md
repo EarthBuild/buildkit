@@ -14,6 +14,8 @@ user-invocable: false
 ## Protocol
 1. **Layer 1 (`gh stack init chore-buildkit-merge-<target>-unresolved --base "$fork"`)**: Require clean `git status --short` (else `STATUS: ESCALATE`) and record `fork=$(git branch --show-current)` before `gh stack init`. Read `<base>` from `custom-patches.md` (default `<target>`: next minor release with highest stable patch). Run `tree=$(git merge-tree --write-tree --merge-base=<base> "$fork" <target> || true); git read-tree -u --reset "${tree%%$'\n'*}"; git add -A && git commit -m "chore: merge <target> (unresolved)"` so PR #1 commits all `<<<<<<<`/`=======`/`>>>>>>>` conflict markers as a single-parent commit.
 2. **Layer 2 (`gh stack add chore-buildkit-merge-<target>`)**: Branch atop Layer 1; follow `buildkit-audit` plan and `.agents/skills/buildkit-sync/references/custom-patches.md`.
-3. Resolve conflict markers in Layer 2: preserve active ADRs (`ADR-001`..`ADR-007`), delete retired patches, keep `version.Package` (`github.com/EarthBuild/buildkit`), and run codegen/vendor updates so PR #2 isolates conflict resolutions.
-4. Clean auto-merges can break fork code -> compile all packages + tests in container.
-5. Run `go_diagnostics` on modified `.go` files and return `BLUF-SBAR`.
+3. Resolve conflict markers in Layer 2: preserve active ADRs, delete retired patches, keep `version.Package` (`github.com/EarthBuild/buildkit`), and run codegen/vendor updates so PR #2 isolates conflict resolutions.
+4. `.github/workflows` conflicts -> keep fork's full-SHA pins + `TODO(jhorsts)` deviations; take upstream action version bumps, re-pinned to full SHA (`# vX.Y.Z`). Fork pin older than upstream's major = conflict lost.
+5. New fork-only code -> mark `// earth-specific: <why>`; leave legacy `earthly-specific` markers.
+6. Clean auto-merges can break fork code -> compile all packages + tests in container.
+7. Run `go_diagnostics` on modified `.go` files and return `BLUF-SBAR`.
