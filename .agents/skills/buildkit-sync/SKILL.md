@@ -8,6 +8,7 @@ user-invocable: true
 ## ROE
 - **Scope**: Orchestrator (`READ_ONLY` in main context; delegates writes to subagents; `../earthbuild` is `READ_ONLY`).
 - **Remotes**: `moby` (`moby/buildkit`), `origin` (`EarthBuild/buildkit`).
+- **Default `<target>`**: Omitted -> next minor release after `<base>` with highest stable patch (`git tag -l 'v0.<next-minor>.*' --sort=v:refname | grep -E '^v0\.[0-9]+\.[0-9]+$' | tail -n1`).
 
 ## Workflow
 1. **Audit (`buildkit-audit`)**: Diff `<base>..HEAD` vs `<base>..<target>` against `references/custom-patches.md` and check `../earthbuild` imports.

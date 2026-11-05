@@ -12,7 +12,7 @@ user-invocable: true
 - **Forbidden**: File writes or mutating `git` commands.
 
 ## Protocol
-1. Read `.agents/skills/buildkit-sync/references/custom-patches.md`.
+1. Read `<base>` from `.agents/skills/buildkit-sync/references/custom-patches.md`. Default `<target>` (if omitted): next minor release with highest stable patch (`git tag -l 'v0.<next-minor>.*' --sort=v:refname | grep -E '^v0\.[0-9]+\.[0-9]+$' | tail -n1`).
 2. Intersect non-vendor diffs: `git diff --name-only <base>..HEAD -- ':!vendor'` vs `git diff --name-only <base>..<target> -- ':!vendor'`.
 3. Check `github.com/moby/buildkit` imports in `../earthbuild` against upstream signature changes.
 4. Per overlap/ADR:
