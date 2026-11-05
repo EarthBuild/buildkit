@@ -1,20 +1,26 @@
-# Repository Information
+# earthbuild/buildkit
 
-This repository is a fork of [moby/buildkit](https://github.com/moby/buildkit). Its primary use is by [earthbuild/earthbuild](https://github.com/earthbuild/earthbuild).
+Fork of `moby/buildkit` used by `earthbuild/earthbuild` (`../earthbuild`).
 
-## Naming
+## Invariants
 
-The project is being renamed from Earthly to EarthBuild. When writing new code,
-comments, docs or commit messages:
+- **Naming**: New code/docs/commits -> `earth` (CLI) and `EarthBuild` (project), never `earthly`. Keep literal `earthly` identifiers (`+earthly-docker`, `earthlyoutputs`, image/repo names) until renamed.
+- **Minimal Diff**: Minimize divergence from `moby/buildkit`. Fixed upstream -> suggest version bump, not local patch.
+- **No Host Tooling**: Never run host build/test/lint tools (`go test`, `golangci-lint`). Run `Makefile` or `Earthfile` targets only.
+- **Client Check**: Verify version bumps and public API edits against `../earthbuild` (`--BUILDKIT_PROJECT=../buildkit`) without mutating `../earthbuild`.
+- **No Export Dedup**: Never deduplicate/suppress progress logs in `gatewayClient.Export`; fix redundant solves in `earthbuild` (`earthfile2llb/converter.go`).
 
-- Use `earth` for the CLI / build tool (not `earthly`).
-- Use `EarthBuild` for the project name (not `Earthly`).
-- Leave existing `earthly` identifiers alone where they are literal: Earthfile
-  target names (`+earthly-docker`) and published image/repo names. Those change
-  only as part of the rename itself.
+## Multi-Agent Protocol
 
-## Guidelines
+- **ROE**: Obey skill scope (`READ_ONLY`, `WRITE_SCOPED(<paths>)`, `WRITE_WORKSPACE`). Halt with `STATUS: ESCALATE` if upstream breaks `custom-patches.md` contracts or `../earthbuild`.
+- **BLUF-SBAR** (start every subagent reply):
+  ```markdown
+  STATUS: APPROVED | CHANGES_REQUESTED | ESCALATE | AGREED | COUNTER_PROPOSAL
+  BLUF: <1-sentence outcome>
 
-- Any code changes must be kept to a minimum to reduce the potential for merge conflicts with upstream `moby/buildkit`.
-- **Upstream Fixes & Version Bumping:** If upstream `moby/buildkit` has already resolved an issue in a newer version, suggest bumping BuildKit instead of implementing a temporary local fix.
-- **Double Export & Output Duplication:** Do not patch BuildKit to deduplicate or suppress progress logs across concurrent solves or intermediate exports (`gatewayClient.Export`). BuildKit streams vertex output to all attached callers; preventing redundant solve requests belongs in EarthBuild (`earthfile2llb/converter.go`).
+  - Situation: <scope/commands>
+  - Background: <moby vs EarthBuild context>
+  - Assessment: <findings (file:line)>
+  - Recommendation: <next steps>
+  ```
+- **Skills**: Track custom patches in `.agents/skills/buildkit-sync/references/custom-patches.md`. After resolving upstream conflicts, retiring patches, finding new invariants, or identifying repeatable workflows with measurable gains, create/update skills via `buildkit-learn`.
