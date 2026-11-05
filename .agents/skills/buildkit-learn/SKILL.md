@@ -8,7 +8,7 @@ user-invocable: true
 
 ## ROE
 - **Scope**: `WRITE_SCOPED(.agents/skills/, AGENTS.md)`
-- **Allowed**: File read/write in scope, `codebase-memory-mcp`, read-only `git`, `scripts/validate_skills.py`.
+- **Allowed**: File read/write in scope, `codebase-memory-mcp`, read-only `git`, `earth +validate-skills`.
 - **Forbidden**: Editing Go/build/vendor files; creating `CLAUDE.md`; breaking `.claude/skills -> ../.agents/skills` symlink.
 
 ## New Skill Gate
@@ -24,5 +24,5 @@ user-invocable: true
 
 ## Protocol
 1. Create/edit `.agents/skills/<name>/SKILL.md` or `.agents/skills/buildkit-sync/references/custom-patches.md` within budgets.
-2. Run `python3 .agents/skills/buildkit-learn/scripts/validate_skills.py --output /tmp/skill-validation.json`.
+2. Run `earth +validate-skills`.
 3. Return `BLUF-SBAR`.

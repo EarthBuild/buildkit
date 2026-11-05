@@ -35,16 +35,22 @@ BUDGETS = {
 }
 
 
-def parse_simple_yaml(yaml_text: str) -> dict:
+def parse_simple_yaml(yaml_text: str) -> tuple[dict, list[str]]:
+    """Parse flat YAML frontmatter into a dictionary and report malformed lines."""
     data = {}
+    parse_errors: list[str] = []
     current_key = None
-    for raw_line in yaml_text.splitlines():
+    for lineno, raw_line in enumerate(yaml_text.splitlines(), start=1):
         line = raw_line.rstrip()
         if not line or line.lstrip().startswith("#"):
             continue
         if not line.startswith(" ") and ":" in line:
             k, v = line.split(":", 1)
             k, v = k.strip(), v.strip()
+            if not k:
+                parse_errors.append(f"line {lineno}: empty frontmatter key")
+                current_key = None
+                continue
             if v in (">-", ">", "|", "|-", ""):
                 data[k] = ""
                 current_key = k
@@ -53,14 +59,19 @@ def parse_simple_yaml(yaml_text: str) -> dict:
                 current_key = None
         elif current_key is not None and line.startswith(" "):
             data[current_key] = (data[current_key] + " " + line.strip()).strip()
-    return data
+        else:
+            parse_errors.append(f"line {lineno}: malformed frontmatter line '{line.strip()}'")
+            current_key = None
+    return data, parse_errors
 
 
 def count_lines_words(text: str) -> tuple[int, int]:
+    """Return the line count and word count for a markdown text block."""
     return len(text.splitlines()), len(text.split())
 
 
 def check_no_redundant_links(md_path: Path, repo_root: Path, errors: list[str]) -> None:
+    """Append an error for any markdown link found in the given markdown file."""
     text = md_path.read_text(encoding="utf-8")
     rel_src = md_path.relative_to(repo_root)
     for match in MD_LINK_RE.finditer(text):
@@ -73,6 +84,7 @@ def check_no_redundant_links(md_path: Path, repo_root: Path, errors: list[str]) 
 
 
 def check_inline_paths(md_path: Path, repo_root: Path, errors: list[str]) -> None:
+    """Verify that inline code paths referenced in a markdown file exist on disk."""
     text = md_path.read_text(encoding="utf-8")
     rel_src = md_path.relative_to(repo_root)
     for match in INLINE_PATH_RE.finditer(text):
@@ -86,6 +98,7 @@ def check_inline_paths(md_path: Path, repo_root: Path, errors: list[str]) -> Non
 
 
 def validate_repo(repo_root: Path) -> dict:
+    """Validate AGENTS.md, symlinks, and all skill definitions under .agents/skills/."""
     errors: list[str] = []
     warnings: list[str] = []
     checked_skills: list[str] = []
@@ -137,7 +150,9 @@ def validate_repo(repo_root: Path) -> dict:
             if not fm_match:
                 errors.append(f"{rel_skill}: missing YAML frontmatter")
             else:
-                fm = parse_simple_yaml(fm_match.group(1))
+                fm, fm_errors = parse_simple_yaml(fm_match.group(1))
+                for fm_err in fm_errors:
+                    errors.append(f"{rel_skill}: {fm_err}")
                 unsupported = sorted(set(fm.keys()) - ALLOWED_FRONTMATTER_KEYS)
                 if unsupported:
                     errors.append(f"{rel_skill}: unsupported frontmatter keys {unsupported}")
@@ -169,6 +184,7 @@ def validate_repo(repo_root: Path) -> dict:
 
 
 def main() -> int:
+    """Parse CLI arguments, run repository skill validation, and write the JSON report."""
     parser = argparse.ArgumentParser(description="Validate unified skills and symlinks.")
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[4]))
     parser.add_argument("--output", required=True)

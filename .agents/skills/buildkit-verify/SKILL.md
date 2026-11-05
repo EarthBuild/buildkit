@@ -8,12 +8,13 @@ user-invocable: true
 
 ## ROE
 - **Scope**: `WRITE_WORKSPACE` (only for `make vendor`, `make generated-files`, `make archutil`; `../earthbuild` is `READ_ONLY`).
+- **Uncommitted changes**: Before running a `WRITE_WORKSPACE` target, check `git status --short` for changes under paths that target rewrites; if any exist, halt with `STATUS: ESCALATE` listing command and affected paths.
 - **Allowed**: `Makefile` targets, `Earthfile` targets, and `../earthbuild` `Earthfile` targets with `--BUILDKIT_PROJECT=../buildkit`.
 - **Forbidden**: Host tools (`go`, `golangci-lint`, `protoc`); mutating `../earthbuild`; adding `//nolint` without approval.
 
 ## Protocol
 1. Run requested scopes (default: infer from `git status --short`):
-   - **`lint`**: `make lint`, `make validate-shfmt`
+   - **`lint`**: `make lint`, `make validate-shfmt`, `earth +validate-skills`
    - **`codegen`**: `.proto` edited -> `make generated-files` + `make validate-generated-files`; `go.mod` edited -> `make vendor` + `make validate-vendor`; `make validate-archutil`
    - **`test`**: `earth +build`, `make test` (or `TESTPKGS=./<pkg>/... SKIP_INTEGRATION_TESTS=1 make test`)
    - **`client` (`../earthbuild`)**: In `../earthbuild`, run `earth +unit-test --BUILDKIT_PROJECT=../buildkit`, `earth +lint --BUILDKIT_PROJECT=../buildkit`, `earth ./buildkitd+buildkitd --BUILDKIT_PROJECT=../buildkit`
