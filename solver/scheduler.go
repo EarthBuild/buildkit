@@ -2,16 +2,19 @@ package solver
 
 import (
 	"context"
+<<<<<<< main
 	"encoding/csv"
 	"fmt"
+=======
+>>>>>>> v0.15.2
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/moby/buildkit/solver/internal/pipe"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/cond"
 	"github.com/pkg/errors"
+	"github.com/tonistiigi/go-csvvalue"
 )
 
 var debugScheduler = false // TODO: replace with logs in build trace
@@ -75,7 +78,7 @@ func (s *scheduler) Stop() {
 func (s *scheduler) loop() {
 	debugSchedulerStepsParseOnce.Do(func() {
 		if s := os.Getenv("BUILDKIT_SCHEDULER_DEBUG_STEPS"); s != "" {
-			fields, err := csv.NewReader(strings.NewReader(s)).Read()
+			fields, err := csvvalue.Fields(s, nil)
 			if err != nil {
 				return
 			}

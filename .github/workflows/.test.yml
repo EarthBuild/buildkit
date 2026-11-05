@@ -27,13 +27,18 @@ on:
         type: string
 
 env:
+<<<<<<< main
   GO_VERSION: "1.21"
   SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
+=======
+  GO_VERSION: "1.22"
+  SETUP_BUILDX_VERSION: "latest"
+>>>>>>> v0.15.2
   SETUP_BUILDKIT_IMAGE: "moby/buildkit:latest"
 
 jobs:
   prepare:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       pkgs: ${{ steps.set.outputs.pkgs }}
       kinds: ${{ steps.set.outputs.kinds }}
@@ -89,10 +94,15 @@ jobs:
             });
       -
         name: Build
+<<<<<<< main
         uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c  # v6.9.0
+=======
+        uses: docker/bake-action@v5
+>>>>>>> v0.15.2
         with:
           provenance: false
           targets: integration-tests-base
+<<<<<<< main
           # TODO(jhorsts): replace with upstream
           # set: |
           #   *.cache-from=type=gha,scope=${{ inputs.cache_scope }}
@@ -101,6 +111,14 @@ jobs:
   run:
     runs-on: ubuntu-22.04
     continue-on-error: true
+=======
+          set: |
+            *.cache-from=type=gha,scope=${{ inputs.cache_scope }}
+            *.cache-to=type=gha,scope=${{ inputs.cache_scope }},repository=${{ github.repository }},ghtoken=${{ secrets.GITHUB_TOKEN }}
+
+  run:
+    runs-on: ubuntu-24.04
+>>>>>>> v0.15.2
     needs:
       - prepare
     env:
@@ -158,7 +176,11 @@ jobs:
           buildkitd-flags: --debug
       -
         name: Build test image
+<<<<<<< main
         uses: docker/bake-action@3acf805d94d93a86cce4ca44798a76464a75b88c  # v6.9.0
+=======
+        uses: docker/bake-action@v5
+>>>>>>> v0.15.2
         with:
           provenance: false
           targets: integration-tests
@@ -186,7 +208,7 @@ jobs:
         with:
           directory: ./bin/testreports
           flags: ${{ matrix.codecov_flags }}
-          disable_file_fixes: false
+          disable_file_fixes: true
           token: ${{ secrets.CODECOV_TOKEN }}  # used to upload coverage reports: https://github.com/moby/buildkit/pull/4660#issue-2142122533
       -
         name: Generate annotations

@@ -19,8 +19,13 @@ on:
       - 'frontend/dockerfile/docs/**'
 
 env:
+<<<<<<< main
   GO_VERSION: "1.21"
   SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
+=======
+  GO_VERSION: "1.22"
+  SETUP_BUILDX_VERSION: "latest"
+>>>>>>> v0.15.2
   SETUP_BUILDKIT_TAG: "moby/buildkit:latest"
   IMAGE_NAME: "docker/dockerfile-upstream"
   PLATFORMS: "linux/386,linux/amd64,linux/arm/v7,linux/arm64,linux/mips,linux/mipsle,linux/mips64,linux/mips64le,linux/s390x,linux/ppc64le,linux/riscv64"
@@ -40,7 +45,7 @@ jobs:
           skip-integration-tests: 1
 
   prepare:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: github.event_name != 'schedule'
     outputs:
       typ: ${{ steps.prep.outputs.typ }}
@@ -77,7 +82,7 @@ jobs:
           fi
 
   image:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs:
       - test
       - prepare
@@ -123,12 +128,18 @@ jobs:
           ./frontend/dockerfile/cmd/dockerfile-frontend/hack/release "${{ needs.prepare.outputs.typ }}" "${{ matrix.tag }}" "$IMAGE_NAME" "${{ needs.prepare.outputs.push }}"
         env:
           RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+<<<<<<< main
           # TODO(jhorsts): replace with upstream
           # CACHE_FROM: type=gha,scope=${{ env.CACHE_SCOPE }}
           # CACHE_TO: type=gha,scope=${{ env.CACHE_SCOPE }}
+=======
+          CACHE_FROM: type=gha,scope=${{ env.CACHE_SCOPE }}
+          CACHE_TO: type=gha,scope=${{ env.CACHE_SCOPE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+>>>>>>> v0.15.2
 
   release:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/dockerfile')
     needs:
       - prepare
@@ -137,7 +148,7 @@ jobs:
     steps:
       -
         name: GitHub Release
-        uses: softprops/action-gh-release@69320dbe05506a9a39fc8ae11030b214ec2d1f87  # v2.0.5
+        uses: softprops/action-gh-release@a74c6b72af54cfa997e81df42d94703d6313a2d0  # v2.0.6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

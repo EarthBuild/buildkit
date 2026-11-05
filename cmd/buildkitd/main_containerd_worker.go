@@ -5,19 +5,16 @@ package main
 
 import (
 	"context"
+	"maps"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
 	ctd "github.com/containerd/containerd"
 	"github.com/containerd/containerd/defaults"
-	runtimeoptions "github.com/containerd/containerd/pkg/runtimeoptions/v1"
 	"github.com/containerd/containerd/pkg/userns"
-	"github.com/containerd/containerd/plugin"
-	runcoptions "github.com/containerd/containerd/runtime/v2/runc/options"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/network/cniprovider"
@@ -33,9 +30,6 @@ import (
 
 const (
 	defaultContainerdNamespace = "buildkit"
-
-	// runtimeRunhcsV1 is the runtime type for runhcs.
-	runtimeRunhcsV1 = "io.containerd.runhcs.v1"
 )
 
 func init() {
@@ -212,9 +206,8 @@ func applyContainerdFlags(c *cli.Context, cfg *config.Config) error {
 	if cfg.Workers.Containerd.Labels == nil {
 		cfg.Workers.Containerd.Labels = make(map[string]string)
 	}
-	for k, v := range labels {
-		cfg.Workers.Containerd.Labels[k] = v
-	}
+	maps.Copy(cfg.Workers.Containerd.Labels, labels)
+
 	if c.GlobalIsSet("containerd-worker-addr") {
 		cfg.Workers.Containerd.Address = c.GlobalString("containerd-worker-addr")
 	}
@@ -328,7 +321,25 @@ func containerdWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([
 			Options: opts,
 		}
 	}
-	opt, err := containerd.NewWorkerOpt(common.config.Root, cfg.Address, snapshotter, cfg.Namespace, cfg.Rootless, cfg.Labels, dns, nc, common.config.Workers.Containerd.ApparmorProfile, common.config.Workers.Containerd.SELinux, parallelismSem, common.traceSocket, runtime, ctd.WithTimeout(60*time.Second))
+
+	workerOpts := containerd.WorkerOptions{
+		Root:            common.config.Root,
+		Address:         cfg.Address,
+		SnapshotterName: snapshotter,
+		Namespace:       cfg.Namespace,
+		CgroupParent:    cfg.DefaultCgroupParent,
+		Rootless:        cfg.Rootless,
+		Labels:          cfg.Labels,
+		DNS:             dns,
+		NetworkOpt:      nc,
+		ApparmorProfile: common.config.Workers.Containerd.ApparmorProfile,
+		Selinux:         common.config.Workers.Containerd.SELinux,
+		ParallelismSem:  parallelismSem,
+		TraceSocket:     common.traceSocket,
+		Runtime:         runtime,
+	}
+
+	opt, err := containerd.NewWorkerOpt(workerOpts, ctd.WithTimeout(60*time.Second))
 	if err != nil {
 		return nil, err
 	}
@@ -372,16 +383,4 @@ func validContainerdSocket(cfg config.ContainerdConfig) bool {
 		return false
 	}
 	return true
-}
-
-// getRuntimeOptionsType gets empty runtime options by the runtime type name.
-func getRuntimeOptionsType(t string) interface{} {
-	switch t {
-	case plugin.RuntimeRuncV2:
-		return &runcoptions.Options{}
-	case runtimeRunhcsV1:
-		return &runhcsoptions.Options{}
-	default:
-		return &runtimeoptions.Options{}
-	}
 }

@@ -157,6 +157,8 @@ type ContainerdConfig struct {
 
 	MaxParallelism int `toml:"max-parallelism"`
 
+	DefaultCgroupParent string `toml:"defaultCgroupParent"`
+
 	Rootless bool `toml:"rootless"`
 }
 
