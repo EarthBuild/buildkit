@@ -12,6 +12,7 @@ Baseline: `moby/buildkit` **`v0.15.2`**
 | **ADR-004** | Runc container stats monitor & cache GC analytics | `executor/runcexecutor/monitor_stats.go`, `cache/gcanalytics.go`, `cache/manager.go`, `api/services/control/control.proto`, `api/types/worker.proto`, `control/control.go`, `client/workers.go`, `client/shutdown.go` | Keep while `earthbuild` queries worker stats & GC analytics. |
 | **ADR-005** | Anonymous auth token detection, URL credential redaction, weighted sem & Git CLI | `session/auth/auth.proto`, `util/resolver/authorizer.go`, `util/urlutil/redact.go`, `util/semutil/weighted.go`, `worker/containerd/containerd.go` (`WorkerOptions.ParallelismSem`), `util/gitutil/git_cli.go`, `source/git/source.go` | Drop individual helpers when upstream adds native equivalents. |
 | **ADR-006** | Client/frontend hooks used by `earthbuild`: preset dockerui build context (`SetBuildContext`) & nil-safe `FrontendAttrs` when gateway builds pass cache imports | `frontend/dockerui/config.go`, `client/solve.go` | `SetBuildContext`: keep while `earthbuild` `FROM DOCKERFILE` calls it. `FrontendAttrs` guard: drop when upstream `client/solve.go` handles nil `opt.FrontendAttrs`. |
+| **ADR-007** | Upstream bug fixes not yet in `moby/buildkit`: per-call words buffer in dockerfile shell lexer (`4c935cf9a` regression; `ProcessWords` dropped text before `${var:-default}`) | `frontend/dockerfile/shell/lex.go`, `frontend/dockerfile/shell/wordsTest` | Drop each fix when upstream fixes it; check `git log <base>..origin/master -- <file>` on each bump. |
 
 ## Retired Patches
 
