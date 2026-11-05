@@ -42,29 +42,14 @@ type WorkerOptions struct {
 	NetworkOpt      netproviders.Opt
 	ApparmorProfile string
 	Selinux         bool
-	ParallelismSem  *semaphore.Weighted
+	ParallelismSem  *semutil.Weighted // earthly-specific use semutil.Weighted instead of semaphore
 	TraceSocket     string
 	Runtime         *RuntimeInfo
 }
 
 // NewWorkerOpt creates a WorkerOpt.
-// earthly-specific use semutil.Weighted instead of semaphore
 func NewWorkerOpt(
-<<<<<<< main
-	root string,
-	address, snapshotterName, ns string,
-	rootless bool,
-	labels map[string]string,
-	dns *oci.DNSConfig,
-	nopt netproviders.Opt,
-	apparmorProfile string,
-	selinux bool,
-	parallelismSem *semutil.Weighted,
-	traceSocket string,
-	runtime *RuntimeInfo,
-=======
 	workerOpts WorkerOptions,
->>>>>>> v0.15.2
 	opts ...containerd.ClientOpt,
 ) (base.WorkerOpt, error) {
 	opts = append(opts, containerd.WithDefaultNamespace(workerOpts.Namespace))
@@ -87,16 +72,9 @@ func NewWorkerOpt(
 	)
 }
 
-<<<<<<< main
-// earthly-specific use semutil.Weighted instead of semaphore
-func newContainerd(root string, client *containerd.Client, snapshotterName, ns string, rootless bool, labels map[string]string, dns *oci.DNSConfig, nopt netproviders.Opt, apparmorProfile string, selinux bool, parallelismSem *semutil.Weighted, traceSocket string, runtime *RuntimeInfo) (base.WorkerOpt, error) {
-	if strings.Contains(snapshotterName, "/") {
-		return base.WorkerOpt{}, errors.Errorf("bad snapshotter name: %q", snapshotterName)
-=======
 func newContainerd(client *containerd.Client, workerOpts WorkerOptions) (base.WorkerOpt, error) {
 	if strings.Contains(workerOpts.SnapshotterName, "/") {
 		return base.WorkerOpt{}, errors.Errorf("bad snapshotter name: %q", workerOpts.SnapshotterName)
->>>>>>> v0.15.2
 	}
 	name := "containerd-" + workerOpts.SnapshotterName
 	root := filepath.Join(workerOpts.Root, name)
