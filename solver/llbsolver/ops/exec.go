@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/platforms"
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/executor"
 	resourcestypes "github.com/moby/buildkit/executor/resources/types"
@@ -292,8 +292,11 @@ func (e *ExecOp) getMountDeps() ([]dep, error) {
 		switch m.MountType {
 		case pb.MountType_SECRET, pb.MountType_SSH, pb.MountType_TMPFS:
 			continue
+<<<<<<< main
 		case pb.MountType_SOCKET, pb.MountType_HOST_BIND: // earth-specific: socket and host-bind mounts have no input vertex
 			continue
+=======
+>>>>>>> v0.15.2
 		}
 
 		if m.Input == pb.Empty {
