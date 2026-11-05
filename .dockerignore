@@ -1,3 +1,6 @@
 bin
 .certs
 .tmp
+# See .earthlyignore for why .git is excluded. Kept in sync here so plain
+# docker builds get the same cacheable context.
+.git
