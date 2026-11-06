@@ -286,14 +286,6 @@ func (bc *Client) init() error {
 	return nil
 }
 
-// Earthly specific
-func (bc *Client) SetBuildContext(context *llb.State, contextName string) {
-	bc.bctx = &buildContext{
-		context:          context,
-		contextLocalName: contextName,
-	}
-}
-
 func (bc *Client) buildContext(ctx context.Context) (*buildContext, error) {
 	return bc.g.Do(ctx, "initcontext", func(ctx context.Context) (*buildContext, error) {
 		if bc.bctx != nil {
