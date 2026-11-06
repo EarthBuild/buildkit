@@ -10,6 +10,7 @@ user-invocable: true
 - **Scope**: `WRITE_WORKSPACE` (only for `make vendor`, `make generated-files`, `make archutil`; `../earthbuild` is `READ_ONLY`).
 - **Uncommitted changes**: Before running a `WRITE_WORKSPACE` target, check `git status --short` for changes under paths that target rewrites; if any exist, halt with `STATUS: ESCALATE` listing command and affected paths.
 - **Allowed**: `Makefile` targets, `Earthfile` targets, and `../earthbuild` `Earthfile` targets with `--BUILDKIT_PROJECT=../buildkit`.
+- **Worktree**: `validate-vendor`, `validate-generated-files`, `generated-files` need real `.git` -> run from `git clone`.
 - **Forbidden**: Host tools (`go`, `golangci-lint`, `protoc`); mutating `../earthbuild`; adding `//nolint` without approval.
 
 ## Protocol

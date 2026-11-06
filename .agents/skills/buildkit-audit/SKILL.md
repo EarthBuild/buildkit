@@ -17,5 +17,7 @@ user-invocable: true
 3. Check `github.com/moby/buildkit` imports in `../earthbuild` against upstream signature changes.
 4. Per overlap/ADR:
    - Solved upstream -> flag for retirement.
+   - Unused (no callers in `.` or `../earthbuild`) -> flag for deletion.
+   - Superseded by upstream API -> trace `../earthbuild` call chain into fork code, find upstream equivalent (`git log -S<symbol>`, `git tag --contains <sha>`), and suggest retirement to user: upstream API, `../earthbuild` change needed, behaviour given up.
    - Still required -> rate conflict risk (`LOW` | `MEDIUM` | `HIGH`) and list symbols to preserve.
 5. Return `BLUF-SBAR`.

@@ -240,6 +240,9 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 	}
 
 	frontendAttrs := maps.Clone(opt.FrontendAttrs)
+	if frontendAttrs == nil { // earth-specific: maps.Clone(nil) is nil, and earth sets cache imports without frontend attrs
+		frontendAttrs = map[string]string{}
+	}
 	maps.Copy(frontendAttrs, cacheOpt.frontendAttrs)
 
 	solveCtx, cancelSolve := context.WithCancelCause(ctx)

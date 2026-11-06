@@ -67,7 +67,7 @@ func (c *CacheChains) normalize(ctx context.Context) error {
 	c.items = validated
 
 	for _, it := range c.items {
-		if err := ctx.Err(); err != nil {
+		if err := context.Cause(ctx); err != nil {
 			return err
 		}
 		_, err := normalizeItem(it, st)

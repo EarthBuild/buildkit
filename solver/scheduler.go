@@ -2,12 +2,9 @@ package solver
 
 import (
 	"context"
-<<<<<<< main
-	"encoding/csv"
 	"fmt"
-=======
->>>>>>> v0.15.2
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/moby/buildkit/solver/internal/pipe"

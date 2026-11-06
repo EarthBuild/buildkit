@@ -82,6 +82,7 @@ type Client struct {
 	client      client.Client
 	ignoreCache []string
 	g           flightcontrol.CachedGroup[*buildContext]
+	bctx        *buildContext // earth-specific: preset by SetBuildContext
 	bopts       client.BuildOpts
 
 	dockerignore     []byte
@@ -310,6 +311,9 @@ func (bc *Client) SetBuildContext(context *llb.State, contextName string) {
 }
 
 func (bc *Client) buildContext(ctx context.Context) (*buildContext, error) {
+	if bc.bctx != nil { // earth-specific: build context preset by SetBuildContext
+		return bc.bctx, nil
+	}
 	return bc.g.Do(ctx, "initcontext", func(ctx context.Context) (*buildContext, error) {
 		return bc.initContext(ctx)
 	})
