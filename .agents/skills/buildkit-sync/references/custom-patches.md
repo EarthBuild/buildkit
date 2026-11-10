@@ -15,3 +15,4 @@ Baseline: `moby/buildkit` **`v0.14.1`**
 ## Retired Patches
 
 - **RET-001 (`earthbuild/fsutil`)**: Dropped in `5fe7531de` (#49, `v0.14.1`) -> superseded by upstream `github.com/tonistiigi/fsutil`.
+- **RET-003 (`dockerui.Client.SetBuildContext`)**: Dropped (`v0.14.1`) -> the CLI (`EarthBuild/earthbuild`) `FROM DOCKERFILE` uses upstream `dockerfile2llb.ConvertOpt.MainContext` (since `v0.13.0`); the CLI must stop calling `SetBuildContext` before it re-pins.
