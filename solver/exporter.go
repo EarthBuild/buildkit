@@ -172,7 +172,7 @@ func (e *exporter) ExportTo(ctx context.Context, t CacheExporterTarget, opt Cach
 		for _, dep := range deps {
 			recs, err := dep.CacheKey.Exporter.ExportTo(ctx, t, opt)
 			if err != nil {
-				if ctxErr := ctx.Err(); ctxErr != nil {
+				if ctxErr := context.Cause(ctx); ctxErr != nil {
 					return nil, ctxErr
 				}
 				return nil, nil
@@ -187,7 +187,7 @@ func (e *exporter) ExportTo(ctx context.Context, t CacheExporterTarget, opt Cach
 		for _, de := range e.edge.secondaryExporters {
 			recs, err := de.cacheKey.CacheKey.Exporter.ExportTo(ctx, t, opt)
 			if err != nil {
-				if ctxErr := ctx.Err(); ctxErr != nil {
+				if ctxErr := context.Cause(ctx); ctxErr != nil {
 					return nil, ctxErr
 				}
 				return nil, nil

@@ -154,7 +154,7 @@ func (s *normalizeState) checkLoops(ctx context.Context, d digest.Digest, visite
 	if _, ok := done[d]; ok {
 		return nil
 	}
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		return err
 	}
 	it, ok := s.byKey[d]
