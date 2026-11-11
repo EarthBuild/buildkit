@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,13 +239,11 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 		})
 	}
 
-	frontendAttrs := map[string]string{}
-	for k, v := range opt.FrontendAttrs {
-		frontendAttrs[k] = v
+	frontendAttrs := maps.Clone(opt.FrontendAttrs)
+	if frontendAttrs == nil { // earth-specific: maps.Clone(nil) is nil, and earth sets cache imports without frontend attrs
+		frontendAttrs = map[string]string{}
 	}
-	for k, v := range cacheOpt.frontendAttrs {
-		frontendAttrs[k] = v
-	}
+	maps.Copy(frontendAttrs, cacheOpt.frontendAttrs)
 
 	solveCtx, cancelSolve := context.WithCancelCause(ctx)
 	var res *SolveResponse

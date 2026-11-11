@@ -16,11 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containerd/containerd/pkg/seed" //nolint:staticcheck // SA1019 deprecated
 	"github.com/containerd/containerd/pkg/userns"
-	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/sys"
+	"github.com/containerd/platforms"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/gofrs/flock"
@@ -83,8 +82,6 @@ func init() {
 	apicaps.ExportedProduct = "buildkit"
 	stack.SetVersionInfo(version.Version, version.Revision)
 
-	//nolint:staticcheck // SA1019 deprecated
-	seed.WithTimeAndRand()
 	if reexec.Init() {
 		os.Exit(0)
 	}

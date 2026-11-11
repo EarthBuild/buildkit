@@ -28,3 +28,8 @@ hello"\there" | hello\there
 hello'\\there' | hello\\there
 hello'\there' | hello\there
 hello'$there' | hello$there
+# nested ${var:-default} expansion must keep the text before it
+80${missing:-80} | 8080
+pre-${missing:-dflt}-post | pre-dflt-post
+a${hi}b${missing:-c}d | ahibcd
+x ${missing:-y}z | x,yz

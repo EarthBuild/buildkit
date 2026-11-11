@@ -27,13 +27,13 @@ on:
         type: string
 
 env:
-  GO_VERSION: "1.21"
+  GO_VERSION: "1.22"
   SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
   SETUP_BUILDKIT_IMAGE: "moby/buildkit:latest"
 
 jobs:
   prepare:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       pkgs: ${{ steps.set.outputs.pkgs }}
       kinds: ${{ steps.set.outputs.kinds }}
@@ -99,7 +99,7 @@ jobs:
           #   *.cache-to=type=gha,scope=${{ inputs.cache_scope }}
 
   run:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     continue-on-error: true
     needs:
       - prepare
@@ -186,7 +186,7 @@ jobs:
         with:
           directory: ./bin/testreports
           flags: ${{ matrix.codecov_flags }}
-          disable_file_fixes: false
+          disable_file_fixes: true
           token: ${{ secrets.CODECOV_TOKEN }}  # used to upload coverage reports: https://github.com/moby/buildkit/pull/4660#issue-2142122533
       -
         name: Generate annotations

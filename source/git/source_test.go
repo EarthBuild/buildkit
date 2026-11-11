@@ -217,6 +217,72 @@ func testFetchBySHA(t *testing.T, keepGitDir bool) {
 	require.Equal(t, "subcontents\n", string(dt))
 }
 
+func TestFetchUnreferencedTagSha(t *testing.T) {
+	testFetchUnreferencedTagSha(t, false)
+}
+
+func TestFetchUnreferencedTagShaKeepGitDir(t *testing.T) {
+	testFetchUnreferencedTagSha(t, true)
+}
+
+// testFetchUnreferencedTagSha tests fetching a SHA that points to a tag that is not reachable from any branch.
+func testFetchUnreferencedTagSha(t *testing.T, keepGitDir bool) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Depends on unimplemented containerd bind-mount support on Windows")
+	}
+
+	t.Parallel()
+	ctx := namespaces.WithNamespace(context.Background(), "buildkit-test")
+	ctx = logProgressStreams(ctx, t)
+
+	gs := setupGitSource(t, t.TempDir())
+
+	repo := setupGitRepo(t)
+
+	cmd := exec.Command("git", "rev-parse", "v1.2.3-special")
+	cmd.Dir = repo.mainPath
+
+	out, err := cmd.Output()
+	require.NoError(t, err)
+
+	sha := strings.TrimSpace(string(out))
+	require.Equal(t, 40, len(sha))
+
+	id := &GitIdentifier{Remote: repo.mainURL, Ref: sha, KeepGitDir: keepGitDir}
+
+	g, err := gs.Resolve(ctx, id, nil, nil)
+	require.NoError(t, err)
+
+	key1, pin1, _, done, err := g.CacheKey(ctx, nil, 0)
+	require.NoError(t, err)
+	require.True(t, done)
+
+	expLen := 40
+	if keepGitDir {
+		expLen += 4
+	}
+
+	require.Equal(t, expLen, len(key1))
+	require.Equal(t, 40, len(pin1))
+
+	ref1, err := g.Snapshot(ctx, nil)
+	require.NoError(t, err)
+	defer ref1.Release(context.TODO())
+
+	mount, err := ref1.Mount(ctx, true, nil)
+	require.NoError(t, err)
+
+	lm := snapshot.LocalMounter(mount)
+	dir, err := lm.Mount()
+	require.NoError(t, err)
+	defer lm.Unmount()
+
+	dt, err := os.ReadFile(filepath.Join(dir, "bar"))
+	require.NoError(t, err)
+
+	require.Equal(t, "foo\n", string(dt))
+}
+
 func TestFetchByTag(t *testing.T) {
 	testFetchByTag(t, "lightweight-tag", "third", false, true, false)
 }
@@ -307,9 +373,20 @@ func testFetchByTag(t *testing.T, tag, expectedCommitSubject string, isAnnotated
 	require.NoError(t, err)
 	defer lm.Unmount()
 
+	st, err := os.Lstat(filepath.Join(dir, "subdir"))
+	require.NoError(t, err)
+
+	require.True(t, st.IsDir())
+	require.Equal(t, strconv.FormatInt(0755, 8), strconv.FormatInt(int64(st.Mode()&os.ModePerm), 8))
+
 	dt, err := os.ReadFile(filepath.Join(dir, "def"))
 	require.NoError(t, err)
 	require.Equal(t, "bar\n", string(dt))
+
+	st, err = os.Lstat(filepath.Join(dir, "def"))
+	require.NoError(t, err)
+
+	require.Equal(t, strconv.FormatInt(0644, 8), strconv.FormatInt(int64(st.Mode()&os.ModePerm), 8))
 
 	dt, err = os.ReadFile(filepath.Join(dir, "foo13"))
 	if hasFoo13File {
@@ -610,6 +687,13 @@ func setupGitRepo(t *testing.T) gitRepoFixture {
 		"git add subfile",
 		"git commit -m initial",
 	)
+	// * (refs/heads/feature) withsub
+	// * feature
+	// * (HEAD -> refs/heads/master, tag: refs/tags/lightweight-tag) third
+	// | * (tag: refs/tags/v1.2.3-special) tagonly-leaf
+	// |/
+	// * (tag: refs/tags/v1.2.3) second
+	// * (tag: refs/tags/a/v1.2.3) initial
 	runShell(t, fixture.mainPath,
 		"git -c init.defaultBranch=master init",
 		"git config --local user.email test",
@@ -619,9 +703,17 @@ func setupGitRepo(t *testing.T) gitRepoFixture {
 		"git commit -m initial",
 		"git tag --no-sign a/v1.2.3",
 		"echo bar > def",
-		"git add def",
+		"mkdir subdir",
+		"echo subcontents > subdir/subfile",
+		"git add def subdir",
 		"git commit -m second",
 		"git tag -a -m \"this is an annotated tag\" v1.2.3",
+		"echo foo > bar",
+		"git add bar",
+		"git commit -m tagonly-leaf",
+		"git tag --no-sign v1.2.3-special",
+		// switch master back to v1.2.3
+		"git checkout -B master v1.2.3",
 		"echo sbb > foo13",
 		"git add foo13",
 		"git commit -m third",
@@ -635,6 +727,7 @@ func setupGitRepo(t *testing.T) gitRepoFixture {
 		"git add -A",
 		"git commit -m withsub",
 		"git checkout master",
+		// "git log --oneline --graph --decorate=full --all",
 	)
 	return fixture
 }

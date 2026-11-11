@@ -19,7 +19,7 @@ on:
       - 'frontend/dockerfile/docs/**'
 
 env:
-  GO_VERSION: "1.21"
+  GO_VERSION: "1.22"
   SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
   SETUP_BUILDKIT_TAG: "moby/buildkit:latest"
   IMAGE_NAME: "docker/dockerfile-upstream"
@@ -40,7 +40,7 @@ jobs:
           skip-integration-tests: 1
 
   prepare:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: github.event_name != 'schedule'
     outputs:
       typ: ${{ steps.prep.outputs.typ }}
@@ -77,7 +77,7 @@ jobs:
           fi
 
   image:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs:
       - test
       - prepare
@@ -128,7 +128,7 @@ jobs:
           # CACHE_TO: type=gha,scope=${{ env.CACHE_SCOPE }}
 
   release:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/dockerfile')
     needs:
       - prepare
@@ -137,7 +137,7 @@ jobs:
     steps:
       -
         name: GitHub Release
-        uses: softprops/action-gh-release@69320dbe05506a9a39fc8ae11030b214ec2d1f87  # v2.0.5
+        uses: softprops/action-gh-release@a74c6b72af54cfa997e81df42d94703d6313a2d0  # v2.0.6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
