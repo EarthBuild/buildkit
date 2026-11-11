@@ -16,11 +16,6 @@ import (
 	"sync"
 	"time"
 
-<<<<<<< main
-	"github.com/containerd/containerd/pkg/seed" //nolint:staticcheck // SA1019 deprecated
-=======
-	"github.com/containerd/containerd/defaults"
->>>>>>> v0.15.2
 	"github.com/containerd/containerd/pkg/userns"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/sys"

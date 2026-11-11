@@ -14,9 +14,9 @@ import (
 
 	archiveexporter "github.com/containerd/containerd/images/archive"
 	"github.com/containerd/containerd/leases"
-	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes/docker"
 	remoteserrors "github.com/containerd/containerd/remotes/errors"
+	"github.com/containerd/platforms"
 	"github.com/docker/distribution/reference"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/moby/buildkit/cache"

@@ -102,13 +102,12 @@ func (s *Lex) process(word string, env EnvGetter, capture bool) (ProcessWordResu
 
 type shellWord struct {
 	*Lex
-	wordsBuffer strings.Builder
-	scanner     scanner.Scanner
-	envs        EnvGetter
-	rawEscapes  bool
-	capture     bool // capture matches and nonmatches
-	matches     map[string]struct{}
-	nonmatches  map[string]struct{}
+	scanner    scanner.Scanner
+	envs       EnvGetter
+	rawEscapes bool
+	capture    bool // capture matches and nonmatches
+	matches    map[string]struct{}
+	nonmatches map[string]struct{}
 }
 
 func (sw *shellWord) process(source string) (string, []string, error) {
@@ -170,9 +169,12 @@ func (sw *shellWord) processStopOn(stopChar rune, rawEscapes bool) (string, []st
 	// result buffer can't be currently shared for shellWord as it is called internally
 	// by processDollar
 	var result strings.Builder
-	sw.wordsBuffer.Reset()
+	// earth-specific: the words buffer can't be shared either; processDollar
+	// re-enters processStopOn for ${var:-default}, and a shared buffer drops the
+	// text before the expansion (e.g. ProcessWords("80${unset:-80}") -> ["80"]).
+	var wordsBuffer strings.Builder
 	var words wordsStruct
-	words.buf = &sw.wordsBuffer
+	words.buf = &wordsBuffer
 
 	// no need to initialize all the time
 	var charFuncMapping = map[rune]func() (string, error){

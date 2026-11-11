@@ -455,7 +455,6 @@ github.com/docker/cli/cli/config/configfile
 github.com/docker/cli/cli/config/credentials
 github.com/docker/cli/cli/config/types
 github.com/docker/cli/cli/connhelper/commandconn
-<<<<<<< main
 # github.com/docker/distribution v2.8.2+incompatible
 ## explicit
 github.com/docker/distribution
@@ -495,10 +494,7 @@ github.com/docker/distribution/registry/storage/driver/factory
 github.com/docker/distribution/registry/storage/driver/middleware
 github.com/docker/distribution/uuid
 github.com/docker/distribution/version
-# github.com/docker/docker v26.1.4+incompatible
-=======
 # github.com/docker/docker v27.0.3+incompatible
->>>>>>> v0.15.2
 ## explicit
 github.com/docker/docker/api
 github.com/docker/docker/api/types
@@ -560,15 +556,11 @@ github.com/felixge/fgprof
 # github.com/felixge/httpsnoop v1.0.4
 ## explicit; go 1.13
 github.com/felixge/httpsnoop
-<<<<<<< main
 # github.com/garyburd/redigo v1.6.4
 ## explicit; go 1.17
 github.com/garyburd/redigo/internal
 github.com/garyburd/redigo/redis
-# github.com/go-logr/logr v1.3.0
-=======
 # github.com/go-logr/logr v1.4.1
->>>>>>> v0.15.2
 ## explicit; go 1.18
 github.com/go-logr/logr
 github.com/go-logr/logr/funcr
