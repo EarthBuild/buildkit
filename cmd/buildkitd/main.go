@@ -795,6 +795,7 @@ func serverCredentials(cfg config.TLSConfig) (*tls.Config, error) {
 	}
 	tlsConf := &tls.Config{
 		Certificates: []tls.Certificate{certificate},
+		NextProtos:   []string{"h2"},
 	}
 	if caFile != "" {
 		certPool := x509.NewCertPool()
