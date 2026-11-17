@@ -1,6 +1,6 @@
 # EarthBuild Custom Patches (MADR-Lite)
 
-Baseline: `moby/buildkit` **`v0.15.2`**
+Baseline: `moby/buildkit` **`v0.16.0`**
 
 ## Active Patches
 
@@ -8,7 +8,7 @@ Baseline: `moby/buildkit` **`v0.15.2`**
 | :--- | :--- | :--- | :--- |
 | **ADR-001** | Embedded registry proxy & `earthlyoutputs` exporter (PR #24 half-close fix) | `exporter/earthlyoutputs/export.go`, `exporter/earthlyoutputs/registry/eodriver/eodriver.go`, `api/services/registry/registry.proto`, `api/services/registry/server.go`, `api/services/registry/copy.go`, `client/registry.go` | Keep while `earthbuild` uses `earthlyoutputs` & `/earthly.registry.v1.Registry`. |
 | **ADR-002** | Session providers (`localhost`, `pullping`, `socketforward`) & gRPC timeout interceptor | `session/localhost/localhost.go`, `session/pullping/pullping.go`, `session/socketforward/socket.go`, `session/configurabletimeout.go`, `session/grpc.go`, `session/manager.go`, `cmd/buildkitd/timeout_interceptor.go` | Keep while `earthbuild` uses `LOCALLY`, `pullping`, and `socketforward`. |
-| **ADR-003** | Solver caps, exec timeouts/`SOCKET`/`HOST_BIND` mounts & graph error tracker (`helpMe`/`dgstTrackerInst`) | `solver/pb/ops.proto`, `solver/pb/caps.go`, `solver/llbsolver/ops/exec.go`, `solver/llbsolver/mounts/mount.go`, `solver/llbsolver/bridge.go`, `solver/inconsistent_graph_state_error_tracker.go`, `solver/scheduler.go`, `solver/progress.go` | Audit `solver/scheduler.go` (`helpMe`/`dgstTrackerInst`) & `solver/llbsolver/ops/exec.go` (`SOCKET`/`HOST_BIND`) on each bump; edge merge (`v0.14.1`) & `SECRET`/`SSH`/`TMPFS` (`v0.15.2`) upstreamed. |
+| **ADR-003** | Solver caps, exec timeouts/`SOCKET`/`HOST_BIND` mounts & graph error tracker (`helpMe`/`dgstTrackerInst`) | `solver/pb/ops.proto`, `solver/pb/caps.go`, `solver/llbsolver/ops/exec.go`, `solver/llbsolver/mounts/mount.go`, `solver/llbsolver/bridge.go`, `solver/inconsistent_graph_state_error_tracker.go`, `solver/scheduler.go`, `solver/progress.go` | Audit `solver/scheduler.go` (`helpMe`/`dgstTrackerInst`) & `solver/llbsolver/ops/exec.go` (`SOCKET`/`HOST_BIND`) on each bump; edge merge (`v0.14.1`) & `SECRET`/`SSH`/`TMPFS` (`v0.15.2`, `v0.16.0` `3c87ba1bd`) upstreamed; `SOCKET` mounts keep `Input` 0 (upstream sets `pb.Empty` on secret/ssh since `v0.16.0`), so daemon skip stays. |
 | **ADR-004** | Runc container stats monitor & cache GC analytics | `executor/runcexecutor/monitor_stats.go`, `cache/gcanalytics.go`, `cache/manager.go`, `api/services/control/control.proto`, `api/types/worker.proto`, `control/control.go`, `client/workers.go`, `client/shutdown.go` | Keep while `earthbuild` queries worker stats & GC analytics. |
 | **ADR-005** | Anonymous auth token detection, URL credential redaction, weighted sem & Git CLI | `session/auth/auth.proto`, `util/resolver/authorizer.go`, `util/urlutil/redact.go`, `util/semutil/weighted.go`, `worker/containerd/containerd.go` (`WorkerOptions.ParallelismSem`), `util/gitutil/git_cli.go`, `source/git/source.go` | Drop individual helpers when upstream adds native equivalents. |
 | **ADR-006** | Client hook used by `earthbuild`: nil-safe `FrontendAttrs` when gateway builds pass cache imports | `client/solve.go` | Drop when upstream `client/solve.go` handles nil `opt.FrontendAttrs`. |
@@ -24,4 +24,7 @@ Baseline: `moby/buildkit` **`v0.15.2`**
 
 - **Workflows**: Conflict -> keep fork full-SHA pins + `TODO(jhorsts)` deviations; take upstream action version bumps, re-pinned to full SHA (`# vX.Y.Z`). Fork pin a major behind upstream = bump lost in resolution.
 - **Unused/superseded code**: No callers in `.` or `../earthbuild`, or superseded by upstream API -> delete instead of carrying forward. Deletion needs `../earthbuild` change -> keep in sync; retire via separate decoupled PRs (`buildkit-audit` suggests these).
+- **Dockerfile `buildkit-version`**: Keep `RELEASE_VERSION` + `version.Package=github.com/EarthBuild/buildkit`; drop upstream's hard `exit 1` without git dir (`earth` builds from git refs/worktrees, `.git` outside context).
+- **`snapshot/diffapply_linux.go`**: Keep `uint64(stat.Dev)` & `Rdev: 0`; linux/mips64 `Stat_t.Dev`/`Rdev` are `uint32`, upstream form fails to compile there.
+- **Fork-delta check**: `git diff --no-ext-diff <base> <fork>` vs `git diff --no-ext-diff <target> <layer2>` (excl. `vendor/`, `*.pb.go`, `go.sum`); every difference intentional.
 - **Markers**: New fork-only code -> `// earth-specific: <why>`; leave legacy `earthly-specific` markers.
