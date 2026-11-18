@@ -44,27 +44,17 @@ func GetLogger(ctx context.Context) (l *logrus.Entry) {
 		l = L
 	}
 
-<<<<<<< earthbuild/main
 	// earthly-specific
 	l = l.WithFields(logrus.Fields{
 		"version":  version.Version,
 		"revision": version.Revision,
 	})
 
-	if logWithTraceID {
-		if spanContext := trace.SpanFromContext(ctx).SpanContext(); spanContext.IsValid() {
-			return l.WithFields(logrus.Fields{
-				"traceID": spanContext.TraceID(),
-				"spanID":  spanContext.SpanID(),
-			})
-		}
-=======
 	if spanContext := trace.SpanFromContext(ctx).SpanContext(); spanContext.IsValid() {
 		return l.WithFields(logrus.Fields{
 			"traceID": spanContext.TraceID(),
 			"spanID":  spanContext.SpanID(),
 		})
->>>>>>> v0.16.0
 	}
 
 	return l
