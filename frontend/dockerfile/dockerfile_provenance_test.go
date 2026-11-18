@@ -43,7 +43,6 @@ import (
 )
 
 func testProvenanceAttestation(t *testing.T, sb integration.Sandbox) {
-	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureDirectPush, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -59,10 +58,18 @@ func testProvenanceAttestation(t *testing.T, sb integration.Sandbox) {
 
 	f := getFrontend(t, sb)
 
-	dockerfile := []byte(`
+	dockerfile := []byte(integration.UnixOrWindows(
+		`
 FROM busybox:latest
 RUN echo "ok" > /foo
-`)
+`,
+		`
+FROM nanoserver
+USER ContainerAdministrator
+RUN echo ok> /foo
+`,
+	))
+
 	dir := integration.Tmpdir(
 		t,
 		fstest.CreateFile("Dockerfile", dockerfile, 0600),
@@ -115,12 +122,14 @@ RUN echo "ok" > /foo
 
 			img := imgs.Find(platforms.Format(platforms.Normalize(platforms.DefaultSpec())))
 			require.NotNil(t, img)
-			require.Equal(t, []byte("ok\n"), img.Layers[1]["foo"].Data)
+			outFile := integration.UnixOrWindows("foo", "Files/foo")
+			expectedFileData := integration.UnixOrWindows([]byte("ok\n"), []byte("ok\r\n"))
+			require.Equal(t, expectedFileData, img.Layers[1][outFile].Data)
 
 			att := imgs.Find("unknown/unknown")
 			require.NotNil(t, att)
-			require.Equal(t, att.Desc.Annotations["vnd.docker.reference.digest"], string(img.Desc.Digest))
-			require.Equal(t, att.Desc.Annotations["vnd.docker.reference.type"], "attestation-manifest")
+			require.Equal(t, string(img.Desc.Digest), att.Desc.Annotations["vnd.docker.reference.digest"])
+			require.Equal(t, "attestation-manifest", att.Desc.Annotations["vnd.docker.reference.type"])
 			var attest intoto.Statement
 			require.NoError(t, json.Unmarshal(att.LayersRaw[0], &attest))
 			require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
@@ -179,7 +188,9 @@ RUN echo "ok" > /foo
 				require.Equal(t, "https://xxxxx:xxxxx@example.invalid/foo.html", args["context:foo"])
 			}
 
-			expectedBase := "pkg:docker/busybox@latest?platform=" + url.PathEscape(platforms.Format(platforms.Normalize(platforms.DefaultSpec())))
+			expectedBaseImage := integration.UnixOrWindows("busybox", "nanoserver")
+			escapedPlatform := url.PathEscape(platforms.Format(platforms.Normalize(platforms.DefaultSpec())))
+			expectedBase := fmt.Sprintf("pkg:docker/%s@latest?platform=%s", expectedBaseImage, escapedPlatform)
 			if isGateway {
 				require.Equal(t, 2, len(pred.Materials), "%+v", pred.Materials)
 				require.Contains(t, pred.Materials[0].URI, "docker/buildkit_test")
@@ -316,8 +327,8 @@ COPY myapp.Dockerfile /
 
 	att := imgs.Find("unknown/unknown")
 	require.NotNil(t, att)
-	require.Equal(t, att.Desc.Annotations["vnd.docker.reference.digest"], string(img.Desc.Digest))
-	require.Equal(t, att.Desc.Annotations["vnd.docker.reference.type"], "attestation-manifest")
+	require.Equal(t, string(img.Desc.Digest), att.Desc.Annotations["vnd.docker.reference.digest"])
+	require.Equal(t, "attestation-manifest", att.Desc.Annotations["vnd.docker.reference.type"])
 	var attest intoto.Statement
 	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &attest))
 	require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
@@ -453,7 +464,7 @@ RUN echo "ok-$TARGETARCH" > /foo
 
 		att := imgs.FindAttestation(p)
 		require.NotNil(t, att)
-		require.Equal(t, att.Desc.Annotations["vnd.docker.reference.type"], "attestation-manifest")
+		require.Equal(t, "attestation-manifest", att.Desc.Annotations["vnd.docker.reference.type"])
 		var attest intoto.Statement
 		require.NoError(t, json.Unmarshal(att.LayersRaw[0], &attest))
 		require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
@@ -635,7 +646,7 @@ func testClientFrontendProvenance(t *testing.T, sb integration.Sandbox) {
 
 	att := imgs.FindAttestation("linux/arm64")
 	require.NotNil(t, att)
-	require.Equal(t, att.Desc.Annotations["vnd.docker.reference.type"], "attestation-manifest")
+	require.Equal(t, "attestation-manifest", att.Desc.Annotations["vnd.docker.reference.type"])
 	var attest intoto.Statement
 	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &attest))
 	require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
@@ -668,7 +679,7 @@ func testClientFrontendProvenance(t *testing.T, sb integration.Sandbox) {
 
 	att = imgs.FindAttestation("linux/amd64")
 	require.NotNil(t, att)
-	require.Equal(t, att.Desc.Annotations["vnd.docker.reference.type"], "attestation-manifest")
+	require.Equal(t, "attestation-manifest", att.Desc.Annotations["vnd.docker.reference.type"])
 	attest = intoto.Statement{}
 	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &attest))
 	require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
@@ -693,7 +704,6 @@ func testClientFrontendProvenance(t *testing.T, sb integration.Sandbox) {
 }
 
 func testClientLLBProvenance(t *testing.T, sb integration.Sandbox) {
-	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureDirectPush, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -736,7 +746,7 @@ func testClientLLBProvenance(t *testing.T, sb integration.Sandbox) {
 			return nil, err
 		}
 
-		st = llb.Image("alpine").File(llb.Mkfile("/foo", 0600, dt))
+		st = llb.Image(integration.UnixOrWindows("alpine", "nanoserver")).File(llb.Mkfile("/foo", 0600, dt))
 		def, err = st.Marshal(ctx)
 		if err != nil {
 			return nil, err
@@ -776,12 +786,13 @@ func testClientLLBProvenance(t *testing.T, sb integration.Sandbox) {
 	nativePlatform := platforms.Format(platforms.Normalize(platforms.DefaultSpec()))
 
 	img := imgs.Find(nativePlatform)
+	fileName := integration.UnixOrWindows("foo", "Files/foo")
 	require.NotNil(t, img)
-	require.Contains(t, string(img.Layers[1]["foo"].Data), "The Moby Project")
+	require.Contains(t, string(img.Layers[1][fileName].Data), "The Moby Project")
 
 	att := imgs.FindAttestation(nativePlatform)
 	require.NotNil(t, att)
-	require.Equal(t, att.Desc.Annotations["vnd.docker.reference.type"], "attestation-manifest")
+	require.Equal(t, "attestation-manifest", att.Desc.Annotations["vnd.docker.reference.type"])
 	var attest intoto.Statement
 	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &attest))
 	require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
@@ -803,7 +814,7 @@ func testClientLLBProvenance(t *testing.T, sb integration.Sandbox) {
 	require.Equal(t, 0, len(pred.Invocation.Parameters.Locals))
 
 	require.Equal(t, 2, len(pred.Materials), "%+v", pred.Materials)
-	require.Contains(t, pred.Materials[0].URI, "docker/alpine")
+	require.Contains(t, pred.Materials[0].URI, integration.UnixOrWindows("docker/alpine", "docker/nanoserver"))
 	require.Contains(t, pred.Materials[1].URI, "README.md")
 }
 
@@ -1020,7 +1031,6 @@ EOF
 }
 
 func testNilProvenance(t *testing.T, sb integration.Sandbox) {
-	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -1030,10 +1040,16 @@ func testNilProvenance(t *testing.T, sb integration.Sandbox) {
 
 	f := getFrontend(t, sb)
 
-	dockerfile := []byte(`
+	dockerfile := []byte(integration.UnixOrWindows(
+		`
 FROM scratch
 ENV FOO=bar
-`)
+`,
+		`
+FROM scratch
+ENV FOO=bar
+`,
+	))
 	dir := integration.Tmpdir(
 		t,
 		fstest.CreateFile("Dockerfile", dockerfile, 0600),
@@ -1058,7 +1074,6 @@ ENV FOO=bar
 
 // https://github.com/moby/buildkit/issues/3562
 func testDuplicatePlatformProvenance(t *testing.T, sb integration.Sandbox) {
-	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureProvenance)
 	ctx := sb.Context()
 
@@ -1068,12 +1083,17 @@ func testDuplicatePlatformProvenance(t *testing.T, sb integration.Sandbox) {
 
 	f := getFrontend(t, sb)
 
-	dockerfile := []byte(`FROM alpine`)
+	dockerfile := []byte(
+		`
+FROM alpine as base-linux
+FROM nanoserver as base-windows
+FROM base-$TARGETOS
+`,
+	)
 	dir := integration.Tmpdir(
 		t,
 		fstest.CreateFile("Dockerfile", dockerfile, 0600),
 	)
-
 	_, err = f.Solve(sb.Context(), c, client.SolveOpt{
 		FrontendAttrs: map[string]string{
 			"attest:provenance": "mode=max",
@@ -1089,13 +1109,19 @@ func testDuplicatePlatformProvenance(t *testing.T, sb integration.Sandbox) {
 
 // https://github.com/moby/buildkit/issues/3928
 func testDockerIgnoreMissingProvenance(t *testing.T, sb integration.Sandbox) {
-	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureProvenance)
 	c, err := client.New(sb.Context(), sb.Address())
 	require.NoError(t, err)
 	defer c.Close()
 
-	dockerfile := []byte(`FROM alpine`)
+	dockerfile := []byte(integration.UnixOrWindows(
+		`
+FROM alpine
+`,
+		`
+FROM nanoserver
+`,
+	))
 	dirDockerfile := integration.Tmpdir(
 		t,
 		fstest.CreateFile("Dockerfile", dockerfile, 0600),
@@ -1250,20 +1276,22 @@ ADD bar bar`)
 }
 
 func testFrontendDeduplicateSources(t *testing.T, sb integration.Sandbox) {
-	integration.SkipOnPlatform(t, "windows")
 	ctx := sb.Context()
 
 	c, err := client.New(ctx, sb.Address())
 	require.NoError(t, err)
 	defer c.Close()
 
-	dockerfile := []byte(`
-FROM scratch as base
+	dockerfile := []byte(fmt.Sprintf(
+		`
+FROM %s as base
 COPY foo foo2
 
 FROM linked
 COPY bar bar2
-`)
+`,
+		integration.UnixOrWindows("scratch", "nanoserver")),
+	)
 
 	dir := integration.Tmpdir(
 		t,
@@ -1386,7 +1414,7 @@ COPY bar bar2
 		}
 	}
 
-	require.NotEqual(t, len(provDt), 0)
+	require.NotEqual(t, 0, len(provDt))
 
 	var pred provenancetypes.ProvenancePredicate
 	require.NoError(t, json.Unmarshal(provDt, &pred))

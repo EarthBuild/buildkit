@@ -38,7 +38,6 @@ type Attachable interface {
 type Session struct {
 	mu          sync.Mutex // synchronizes conn run and close
 	id          string
-	name        string
 	sharedKey   string
 	ctx         context.Context
 	cancelCtx   func(error)
@@ -49,7 +48,7 @@ type Session struct {
 }
 
 // NewSession returns a new long running session
-func NewSession(ctx context.Context, name, sharedKey string) (*Session, error) {
+func NewSession(ctx context.Context, sharedKey string) (*Session, error) {
 	id := identity.NewID()
 
 	maxMsgSize := 67108864 // 64MB
@@ -72,7 +71,6 @@ func NewSession(ctx context.Context, name, sharedKey string) (*Session, error) {
 
 	s := &Session{
 		id:         id,
-		name:       name,
 		sharedKey:  sharedKey,
 		grpcServer: grpc.NewServer(serverOpts...),
 	}
@@ -108,7 +106,6 @@ func (s *Session) Run(ctx context.Context, dialer Dialer) error {
 
 	meta := make(map[string][]string)
 	meta[headerSessionID] = []string{s.id}
-	meta[headerSessionName] = []string{s.name}
 	meta[headerSessionSharedKey] = []string{s.sharedKey}
 
 	for name, svc := range s.grpcServer.GetServiceInfo() {

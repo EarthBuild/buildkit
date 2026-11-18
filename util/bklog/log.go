@@ -21,14 +21,6 @@ var (
 	L = logrus.NewEntry(logrus.StandardLogger())
 )
 
-var (
-	logWithTraceID = false
-)
-
-func EnableLogWithTraceID(b bool) {
-	logWithTraceID = b
-}
-
 type (
 	loggerKey struct{}
 )
@@ -52,6 +44,7 @@ func GetLogger(ctx context.Context) (l *logrus.Entry) {
 		l = L
 	}
 
+<<<<<<< earthbuild/main
 	// earthly-specific
 	l = l.WithFields(logrus.Fields{
 		"version":  version.Version,
@@ -65,6 +58,13 @@ func GetLogger(ctx context.Context) (l *logrus.Entry) {
 				"spanID":  spanContext.SpanID(),
 			})
 		}
+=======
+	if spanContext := trace.SpanFromContext(ctx).SpanContext(); spanContext.IsValid() {
+		return l.WithFields(logrus.Fields{
+			"traceID": spanContext.TraceID(),
+			"spanID":  spanContext.SpanID(),
+		})
+>>>>>>> v0.16.0
 	}
 
 	return l

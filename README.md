@@ -30,14 +30,12 @@ Introductory blog post https://blog.mobyproject.org/introducing-buildkit-17e056c
 
 Join `#buildkit` channel on [Docker Community Slack](https://dockr.ly/comm-slack)
 
-> **Note**
->
+> [!NOTE]
 > If you are visiting this repo for the usage of BuildKit-only Dockerfile features
 > like `RUN --mount=type=(bind|cache|tmpfs|secret|ssh)`, please refer to the
 > [Dockerfile reference](https://docs.docker.com/engine/reference/builder/).
 
-> **Note**
->
+> [!NOTE]
 > `docker build` [uses Buildx and BuildKit by default](https://docs.docker.com/build/architecture/) since Docker Engine 23.0.
 > You don't need to read this document unless you want to use the full-featured
 > standalone version of BuildKit.
@@ -113,6 +111,7 @@ BuildKit is used by the following projects:
 -   [Depot](https://depot.dev)
 -   [Namespace](https://namespace.so)
 -   [Unikraft](https://unikraft.org)
+-   [DevZero](https://devzero.io)
 
 ## Quick start
 
@@ -578,6 +577,8 @@ Other options are:
 * `name=<manifest>`: specify name of the manifest to use (default `buildkit`)
   * Multiple manifest names can be specified at the same time, separated by `;`. The standard use case is to use the git sha1 as name, and the branch name as duplicate, and load both with 2 `import-cache` commands.
 * `ignore-error=<false|true>`: specify if error is ignored in case cache export fails (default: `false`)
+* `touch_refresh=24h`: Instead of being uploaded again when not changed, blobs files will be "touched" on s3 every `touch_refresh`, default is 24h. Due to this, an expiration policy can be set on the S3 bucket to cleanup useless files automatically. Manifests files are systematically rewritten, there is no need to touch them.
+* `upload_parallelism=4`: This parameter changes the number of layers uploaded to s3 in parallel. Each individual layer is uploaded with 5 threads, using the Upload manager provided by the AWS SDK.
 
 `--import-cache` options:
 * `type=s3`
@@ -614,8 +615,7 @@ There are 2 options supported for Azure Blob Storage authentication:
 * Any system using environment variables supported by the [Azure SDK for Go](https://docs.microsoft.com/en-us/azure/developer/go/azure-sdk-authentication). The configuration must be available for the buildkit daemon, not for the client.
 * Secret Access Key, using the `secret_access_key` attribute to specify the primary or secondary account key for your Azure Blob Storage account. [Azure Blob Storage account keys](https://docs.microsoft.com/en-us/azure/storage/common/storage-account-keys-manage)
 
-> **Note**
->
+> [!NOTE]
 > Account name can also be specified with `account_name` attribute (or `$BUILDKIT_AZURE_STORAGE_ACCOUNT_NAME`)
 > if it is not part of the account URL host.
 

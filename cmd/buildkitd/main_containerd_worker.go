@@ -14,7 +14,6 @@ import (
 
 	ctd "github.com/containerd/containerd"
 	"github.com/containerd/containerd/defaults"
-	"github.com/containerd/containerd/pkg/userns"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/network/cniprovider"
@@ -23,6 +22,7 @@ import (
 	"github.com/moby/buildkit/worker"
 	"github.com/moby/buildkit/worker/base"
 	"github.com/moby/buildkit/worker/containerd"
+	"github.com/moby/sys/userns"
 	"github.com/pelletier/go-toml"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -43,7 +43,7 @@ func init() {
 	}
 
 	if defaultConf.Workers.Containerd.Address == "" {
-		defaultConf.Workers.Containerd.Address = defaultContainerdAddress
+		defaultConf.Workers.Containerd.Address = defaults.DefaultAddress
 	}
 
 	if defaultConf.Workers.Containerd.Namespace == "" {
@@ -178,7 +178,7 @@ func init() {
 
 func applyContainerdFlags(c *cli.Context, cfg *config.Config) error {
 	if cfg.Workers.Containerd.Address == "" {
-		cfg.Workers.Containerd.Address = defaultContainerdAddress
+		cfg.Workers.Containerd.Address = defaults.DefaultAddress
 	}
 
 	if c.GlobalIsSet("containerd-worker") {

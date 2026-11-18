@@ -380,6 +380,9 @@ func (sw *shellWord) processDollar() (string, error) {
 		fallthrough
 	case '+', '-', '?', '#', '%':
 		rawEscapes := ch == '#' || ch == '%'
+		if nullIsUnset && rawEscapes {
+			return "", errors.Errorf("unsupported modifier (%s) in substitution", chs)
+		}
 		word, _, err := sw.processStopOn('}', rawEscapes)
 		if err != nil {
 			if sw.scanner.Peek() == scanner.EOF {
