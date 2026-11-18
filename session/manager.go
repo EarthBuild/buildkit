@@ -18,7 +18,6 @@ type Caller interface {
 	Context() context.Context
 	Supports(method string) bool
 	Conn() *grpc.ClientConn
-	Name() string
 	SharedKey() string
 }
 
@@ -231,7 +230,6 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 
 	h := http.Header(opts)
 	id := h.Get(headerSessionID)
-	name := h.Get(headerSessionName)
 	sharedKey := h.Get(headerSessionSharedKey)
 
 	ctx, cc, err := grpcClientConn(ctx, conn, sm.healthCfg)
@@ -243,7 +241,6 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 	c := &client{
 		Session: Session{
 			id:        id,
-			name:      name,
 			sharedKey: sharedKey,
 			ctx:       ctx,
 			cancelCtx: cancel,
@@ -325,10 +322,6 @@ func (sm *Manager) Get(ctx context.Context, id string, noWait bool) (Caller, err
 
 func (c *client) Context() context.Context {
 	return c.context()
-}
-
-func (c *client) Name() string {
-	return c.name
 }
 
 func (c *client) SharedKey() string {

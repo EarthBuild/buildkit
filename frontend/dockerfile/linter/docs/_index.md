@@ -20,6 +20,9 @@ the rules. To run a check, use the `--check` flag:
 $ docker build --check .
 ```
 
+To learn more about how to use build checks, see
+[Checking your build configuration](https://docs.docker.com/build/checks/).
+
 <table>
   <thead>
     <tr>
@@ -30,7 +33,7 @@ $ docker build --check .
   <tbody>
     {{- range .Rules }}
     <tr>
-      <td><a href="./{{ .PageName }}/">{{ .Name }}</a></td>
+      <td><a href="./{{ .PageName }}/">{{ .Name }}{{- if .Experimental }} (experimental){{- end}}</a></td>
       <td>{{ .Description }}</td>
     </tr>
     {{- end }}

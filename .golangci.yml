@@ -23,13 +23,16 @@ linters:
     - nolintlint
     - revive
     - staticcheck
-    # - testifylint
+    - testifylint
     - typecheck
     - unused
     - whitespace
   disable-all: true
 
 linters-settings:
+  staticcheck:
+    checks:
+      - "all"
   gocritic:
     disabled-checks:
       - "ifElseChain"
@@ -52,12 +55,14 @@ linters-settings:
             desc: The containerd errdefs package was migrated to a separate module. Use github.com/containerd/errdefs instead.
           - pkg: "github.com/containerd/containerd/log"
             desc: The containerd log package was migrated to a separate module. Use github.com/containerd/log instead.
+          - pkg: "github.com/containerd/containerd/pkg/userns"
+            desc: Use github.com/moby/sys/userns instead.
           - pkg: "github.com/containerd/containerd/platforms"
             desc: The containerd platforms package was migrated to a separate module. Use github.com/containerd/platforms instead.
           - pkg: "github.com/containerd/nydus-snapshotter/pkg/errdefs"
             desc: You probably meant to use github.com/containerd/errdefs
           - pkg: "github.com/opencontainers/runc/libcontainer/userns"
-            desc: Use github.com/moby/sys/user/userns instead.
+            desc: Use github.com/moby/sys/userns instead.
           - pkg: "io/ioutil"
             desc: The io/ioutil package has been deprecated.
   forbidigo:
@@ -96,6 +101,7 @@ linters-settings:
       - "empty"
       - "bool-compare"
       - "len"
+      - "negative-positive"
 
 issues:
   exclude-files:

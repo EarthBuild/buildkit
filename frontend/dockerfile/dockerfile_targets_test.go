@@ -125,7 +125,6 @@ FROM second AS binary
 }
 
 func testTargetsDescribeDefinition(t *testing.T, sb integration.Sandbox) {
-	integration.SkipOnPlatform(t, "windows")
 	workers.CheckFeatureCompat(t, sb, workers.FeatureFrontendTargets)
 	f := getFrontend(t, sb)
 	if _, ok := f.(*clientFrontend); !ok {
@@ -136,10 +135,16 @@ func testTargetsDescribeDefinition(t *testing.T, sb integration.Sandbox) {
 	require.NoError(t, err)
 	defer c.Close()
 
-	dockerfile := []byte(`
+	dockerfile := []byte(integration.UnixOrWindows(
+		`
 FROM scratch
 COPY Dockerfile Dockerfile
-`)
+`,
+		`
+FROM nanoserver
+COPY Dockerfile Dockerfile
+`,
+	))
 
 	dir := integration.Tmpdir(
 		t,
@@ -162,7 +167,7 @@ COPY Dockerfile Dockerfile
 			}
 			hasTargets = true
 			require.Equal(t, subrequests.RequestType("rpc"), req.Type)
-			require.NotEqual(t, req.Version, "")
+			require.NotEqual(t, "", req.Version)
 		}
 		require.True(t, hasTargets)
 
