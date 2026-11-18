@@ -16,11 +16,6 @@ import (
 	"sync"
 	"time"
 
-<<<<<<< earthbuild/main
-	"github.com/containerd/containerd/pkg/userns"
-=======
-	"github.com/containerd/containerd/defaults"
->>>>>>> v0.16.0
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/sys"
 	"github.com/containerd/platforms"
