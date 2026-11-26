@@ -36,6 +36,7 @@ import (
 	"github.com/moby/buildkit/solver/llbsolver/proc"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/db"
 	"github.com/moby/buildkit/util/imageutil"
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/throttle"
@@ -44,7 +45,6 @@ import (
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
-	"go.etcd.io/bbolt"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	tracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"golang.org/x/sync/errgroup"
@@ -63,7 +63,7 @@ type Opt struct {
 	ResolveCacheImporterFuncs map[string]remotecache.ResolveCacheImporterFunc
 	Entitlements              []string
 	TraceCollector            sdktrace.SpanExporter
-	HistoryDB                 *bbolt.DB
+	HistoryDB                 db.DB
 	CacheStore                *bboltcachestorage.Store
 	LeaseManager              *leaseutil.Manager
 	ContentStore              *containerdsnapshot.Store

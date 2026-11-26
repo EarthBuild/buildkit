@@ -15,7 +15,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.15.15
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.48.1
 	github.com/containerd/console v1.0.4
-	github.com/containerd/containerd v1.7.19
+	github.com/containerd/containerd v1.7.21
 	github.com/containerd/containerd/api v1.7.19
 	github.com/containerd/continuity v0.4.3
 	github.com/containerd/errdefs v0.1.0
@@ -23,16 +23,16 @@ require (
 	github.com/containerd/go-cni v1.1.10
 	github.com/containerd/go-runc v1.1.0
 	github.com/containerd/log v0.1.0
-	github.com/containerd/nydus-snapshotter v0.13.7
+	github.com/containerd/nydus-snapshotter v0.14.0
 	github.com/containerd/platforms v0.2.1
 	github.com/containerd/stargz-snapshotter v0.15.1
 	github.com/containerd/stargz-snapshotter/estargz v0.15.1
-	github.com/containerd/typeurl/v2 v2.1.1
+	github.com/containerd/typeurl/v2 v2.2.0
 	github.com/containernetworking/plugins v1.4.0
 	github.com/coreos/go-systemd/v22 v22.5.0
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v27.0.3+incompatible
-	github.com/docker/docker v27.0.3+incompatible
+	github.com/docker/cli v27.2.1+incompatible
+	github.com/docker/docker v27.2.1+incompatible
 	github.com/docker/go-connections v0.5.0
 	github.com/docker/go-units v0.5.0
 	github.com/gofrs/flock v0.12.1
@@ -52,8 +52,14 @@ require (
 	github.com/moby/locker v1.0.1
 	github.com/moby/patternmatcher v0.6.0
 	github.com/moby/sys/mountinfo v0.7.2
+<<<<<<< earthbuild/main
 	github.com/moby/sys/signal v0.7.0
 	github.com/moby/sys/user v0.1.0
+=======
+	github.com/moby/sys/signal v0.7.1
+	github.com/moby/sys/user v0.3.0
+	github.com/moby/sys/userns v0.1.0
+>>>>>>> v0.16.0
 	github.com/morikuni/aec v1.0.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.0
@@ -83,8 +89,8 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.46.1
 	go.opentelemetry.io/otel v1.21.0
 	go.opentelemetry.io/otel/exporters/jaeger v1.17.0
-	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v0.42.0
-	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v0.42.0
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v0.44.0
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v0.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.21.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.21.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.21.0
@@ -99,8 +105,8 @@ require (
 	golang.org/x/sync v0.7.0
 	golang.org/x/sys v0.22.0
 	golang.org/x/time v0.3.0
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20231016165738-49dd2c1f3d0b
-	google.golang.org/grpc v1.59.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240123012728-ef4313101c80
+	google.golang.org/grpc v1.62.0
 	google.golang.org/protobuf v1.33.0
 	kernel.org/pub/linux/libs/security/libcap/cap v1.2.70
 )
@@ -166,7 +172,7 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/moby/sys/sequential v0.5.0 // indirect
 	github.com/moby/term v0.5.0 // indirect
-	github.com/pkg/browser v0.0.0-20210115035449-ce105d075bb4 // indirect
+	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.44.0 // indirect
@@ -176,12 +182,16 @@ require (
 	github.com/vbatts/tar-split v0.11.5 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	go.opentelemetry.io/otel/exporters/otlp/otlpmetric v0.42.0 // indirect
 	go.opentelemetry.io/otel/metric v1.21.0 // indirect
 	golang.org/x/text v0.15.0 // indirect
+<<<<<<< earthbuild/main
 	google.golang.org/genproto v0.0.0-20231016165738-49dd2c1f3d0b // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20231016165738-49dd2c1f3d0b // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+=======
+	google.golang.org/genproto v0.0.0-20240123012728-ef4313101c80 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240123012728-ef4313101c80 // indirect
+>>>>>>> v0.16.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.70 // indirect
 )

@@ -22,6 +22,7 @@ env:
   GO_VERSION: "1.22"
   SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
   SETUP_BUILDKIT_TAG: "moby/buildkit:latest"
+  SCOUT_VERSION: "1.13.0"
   IMAGE_NAME: "docker/dockerfile-upstream"
   PLATFORMS: "linux/386,linux/amd64,linux/arm/v7,linux/arm64,linux/mips,linux/mipsle,linux/mips64,linux/mips64le,linux/s390x,linux/ppc64le,linux/riscv64"
 
@@ -122,10 +123,59 @@ jobs:
         run: |
           ./frontend/dockerfile/cmd/dockerfile-frontend/hack/release "${{ needs.prepare.outputs.typ }}" "${{ matrix.tag }}" "$IMAGE_NAME" "${{ needs.prepare.outputs.push }}"
         env:
+<<<<<<< earthbuild/main
           RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
           # TODO(jhorsts): replace with upstream
           # CACHE_FROM: type=gha,scope=${{ env.CACHE_SCOPE }}
           # CACHE_TO: type=gha,scope=${{ env.CACHE_SCOPE }}
+=======
+          RELEASE: ${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
+          CACHE_FROM: type=gha,scope=${{ env.CACHE_SCOPE }}
+          CACHE_TO: type=gha,scope=${{ env.CACHE_SCOPE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+>>>>>>> v0.16.0
+
+  scout:
+    runs-on: ubuntu-24.04
+    if: ${{ github.ref == 'refs/heads/master' && github.repository == 'moby/buildkit' }}
+    permissions:
+      # required to write sarif report
+      security-events: write
+    needs:
+      - image
+    strategy:
+      fail-fast: false
+      matrix:
+        tag:
+          - master
+          - master-labs
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+      -
+        name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      -
+        name: Scout
+        id: scout
+        uses: crazy-max/.github/.github/actions/docker-scout@ccae1c98f1237b5c19e4ef77ace44fa68b3bc7e4
+        with:
+          version: ${{ env.SCOUT_VERSION }}
+          format: sarif
+          image: registry://${{ env.IMAGE_NAME }}:${{ matrix.tag }}
+      -
+        name: Result output
+        run: |
+          jq . ${{ steps.scout.outputs.result-file }}
+      -
+        name: Upload SARIF report
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.scout.outputs.result-file }}
 
   release:
     runs-on: ubuntu-24.04
@@ -137,7 +187,7 @@ jobs:
     steps:
       -
         name: GitHub Release
-        uses: softprops/action-gh-release@a74c6b72af54cfa997e81df42d94703d6313a2d0  # v2.0.6
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191  # v2.0.8
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

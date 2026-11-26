@@ -126,7 +126,7 @@ target "integration-tests" {
 }
 
 group "validate" {
-  targets = ["lint", "validate-vendor", "validate-doctoc", "validate-generated-files", "validate-archutil", "validate-shfmt", "validate-docs", "validate-docs-dockerfile"]
+  targets = ["lint", "validate-vendor", "validate-doctoc", "validate-dockerfile", "validate-generated-files", "validate-archutil", "validate-shfmt", "validate-docs", "validate-docs-dockerfile"]
 }
 
 target "lint" {
@@ -218,6 +218,28 @@ target "validate-docs-dockerfile" {
   output = ["type=cacheonly"]
 }
 
+target "validate-dockerfile" {
+  matrix = {
+    dockerfile = [
+      "Dockerfile",
+      "./hack/dockerfiles/archutil.Dockerfile",
+      "./hack/dockerfiles/authors.Dockerfile",
+      "./hack/dockerfiles/docs-dockerfile.Dockerfile",
+      "./hack/dockerfiles/docs.Dockerfile",
+      "./hack/dockerfiles/doctoc.Dockerfile",
+      "./hack/dockerfiles/generated-files.Dockerfile",
+      "./hack/dockerfiles/govulncheck.Dockerfile",
+      "./hack/dockerfiles/lint.Dockerfile",
+      "./hack/dockerfiles/shfmt.Dockerfile",
+      "./hack/dockerfiles/vendor.Dockerfile",
+      "./frontend/dockerfile/cmd/dockerfile-frontend/Dockerfile",
+    ]
+  }
+  name = "validate-dockerfile-${md5(dockerfile)}"
+  dockerfile = dockerfile
+  call = "check"
+}
+
 target "vendor" {
   inherits = ["_common"]
   dockerfile = "./hack/dockerfiles/vendor.Dockerfile"
@@ -280,4 +302,19 @@ target "mod-outdated" {
   target = "outdated"
   no-cache-filter = ["outdated"]
   output = ["type=cacheonly"]
+}
+
+variable "GOVULNCHECK_FORMAT" {
+  default = null
+}
+
+target "govulncheck" {
+  inherits = ["_common"]
+  dockerfile = "./hack/dockerfiles/govulncheck.Dockerfile"
+  target = "output"
+  args = {
+    FORMAT = GOVULNCHECK_FORMAT
+  }
+  no-cache-filter = ["run"]
+  output = ["${DESTDIR}"]
 }
