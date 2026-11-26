@@ -27,8 +27,16 @@ on:
         type: string
 
 env:
+<<<<<<< origin/chore-buildkit-merge-v0.17.3
   GO_VERSION: "1.22"
   SETUP_BUILDX_VERSION: "v0.14.1"  # TODO(jhorsts): replace with upstream
+||||||| v0.17.3
+  GO_VERSION: "1.22"
+  SETUP_BUILDX_VERSION: "latest"
+=======
+  GO_VERSION: "1.23"
+  SETUP_BUILDX_VERSION: "latest"
+>>>>>>> v0.18.2
   SETUP_BUILDKIT_IMAGE: "moby/buildkit:latest"
 
 jobs:
@@ -115,6 +123,7 @@ jobs:
           - containerd
           - containerd-rootless
           - containerd-1.6
+          - containerd-1.7
           - containerd-snapshotter-stargz
           - oci
           - oci-rootless
@@ -182,7 +191,13 @@ jobs:
       -
         name: Send to Codecov
         if: always()
+<<<<<<< origin/chore-buildkit-merge-v0.17.3
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238  # v4.6.0
+||||||| v0.17.3
+        uses: codecov/codecov-action@v4
+=======
+        uses: codecov/codecov-action@v5
+>>>>>>> v0.18.2
         with:
           directory: ./bin/testreports
           flags: ${{ matrix.codecov_flags }}

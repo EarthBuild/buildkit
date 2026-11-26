@@ -192,11 +192,6 @@ following lines are all treated identically:
 #	  dIrEcTiVe=value
 ```
 
-The following parser directives are supported:
-
-- `syntax`
-- `escape`
-
 ### syntax
 
 <a name="external-implementation-features"><!-- included for deep-links to old section --></a>
@@ -347,7 +342,7 @@ despite warnings. To make the build fail on warnings, set `#check=error=true`.
 
 > [!NOTE]
 > When using the `check` directive, with `error=true` option, it is recommended
-> to pin the [Dockerfile syntax]((#syntax)) to a specific version. Otherwise, your build may
+> to pin the [Dockerfile syntax](#syntax) to a specific version. Otherwise, your build may
 > start to fail when new checks are added in the future versions.
 
 To combine both the `skip` and `error` options, use a semi-colon to separate
@@ -943,7 +938,6 @@ The command is run in the host's network environment (similar to
 > which needs to be enabled when starting the buildkitd daemon with
 > `--allow-insecure-entitlement network.host` flag or in [buildkitd config](https://github.com/moby/buildkit/blob/master/docs/buildkitd.toml.md),
 > and for a build request with [`--allow network.host` flag](https://docs.docker.com/engine/reference/commandline/buildx_build/#allow).
-{ .warning }
 
 ### RUN --security
 
@@ -964,7 +958,6 @@ This is equivalent to running `docker run --privileged`.
 > enabled when starting the buildkitd daemon with
 > `--allow-insecure-entitlement security.insecure` flag or in [buildkitd config](https://github.com/moby/buildkit/blob/master/docs/buildkitd.toml.md),
 > and for a build request with [`--allow security.insecure` flag](https://docs.docker.com/engine/reference/commandline/buildx_build/#allow).
-{ .warning }
 
 Default sandbox mode can be activated via `--security=sandbox`, but that is no-op.
 
@@ -2223,7 +2216,8 @@ Keep the following things in mind about volumes in the Dockerfile.
   - a drive other than `C:`
 
 - **Changing the volume from within the Dockerfile**: If any build steps change the
-  data within the volume after it has been declared, those changes will be discarded.
+  data within the volume after it has been declared, those changes will be discarded
+  when using the legacy builder. When using Buildkit, the changes will instead be kept.
 
 - **JSON formatting**: The list is parsed as a JSON array.
   You must enclose words with double quotes (`"`) rather than single quotes (`'`).
@@ -2261,7 +2255,6 @@ runtime, runs the relevant `ENTRYPOINT` and `CMD` commands.
 >
 > On Windows, the user must be created first if it's not a built-in account.
 > This can be done with the `net user` command called as part of a Dockerfile.
-{ .warning }
 
 ```dockerfile
 FROM microsoft/windowsservercore
@@ -2332,7 +2325,6 @@ flag.
 >
 > Refer to the [`RUN --mount=type=secret`](#run---mounttypesecret) section to
 > learn about secure ways to use secrets when building images.
-{ .warning }
 
 A Dockerfile may include one or more `ARG` instructions. For example,
 the following is a valid Dockerfile:
