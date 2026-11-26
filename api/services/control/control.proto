@@ -203,8 +203,8 @@ message SessionHistoryRequest {}
 message SessionHistoryResponse {
 	message History {
 		string sessionID = 1;
-		google.protobuf.Timestamp start = 2 [(gogoproto.stdtime) = true ];
-		google.protobuf.Timestamp end = 3 [(gogoproto.stdtime) = true ];
+		google.protobuf.Timestamp start = 2;
+		google.protobuf.Timestamp end = 3;
 	}
 	repeated History history = 1;
 }
