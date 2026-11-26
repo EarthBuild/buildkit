@@ -35,7 +35,7 @@ func (b *build) ToInput(ctx context.Context, c *llb.Constraints) (*pb.Input, err
 	if err != nil {
 		return nil, err
 	}
-	return &pb.Input{Digest: dgst, Index: pb.OutputIndex(0)}, nil
+	return &pb.Input{Digest: string(dgst), Index: 0}, nil
 }
 
 func (b *build) Vertex(context.Context, *llb.Constraints) llb.Vertex {
@@ -47,13 +47,15 @@ func (b *build) Validate(context.Context, *llb.Constraints) error {
 }
 
 func (b *build) Marshal(ctx context.Context, c *llb.Constraints) (digest.Digest, []byte, *pb.OpMetadata, []*llb.SourceLocation, error) {
-	if b.Cached(c) {
-		return b.Load()
+	if dgst, dt, md, srcs, err := b.Load(c); err == nil {
+		return dgst, dt, md, srcs, nil
 	}
+
 	pbo := &pb.BuildOp{
-		Builder: pb.LLBBuilder,
+		Builder: int64(pb.LLBBuilder),
 		Inputs: map[string]*pb.BuildInput{
-			pb.LLBDefinitionInput: {Input: pb.InputIndex(0)}},
+			pb.LLBDefinitionInput: {Input: 0},
+		},
 	}
 
 	pbo.Attrs = map[string]string{}
@@ -83,8 +85,7 @@ func (b *build) Marshal(ctx context.Context, c *llb.Constraints) (digest.Digest,
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
-	b.Store(dt, md, b.constraints.SourceLocations, c)
-	return b.Load()
+	return b.Store(dt, md, b.constraints.SourceLocations, c)
 }
 
 func (b *build) Output() llb.Output {

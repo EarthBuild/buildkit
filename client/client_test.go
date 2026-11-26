@@ -101,6 +101,7 @@ var allTests = []func(t *testing.T, sb integration.Sandbox){
 	testFileOpCopyAlwaysReplaceExistingDestPaths,
 	testFileOpRmWildcard,
 	testFileOpCopyUIDCache,
+	testFileOpCopyChmodText,
 	testCallDiskUsage,
 	testBuildMultiMount,
 	testBuildHTTPSource,
@@ -220,6 +221,7 @@ var allTests = []func(t *testing.T, sb integration.Sandbox){
 	testOCIIndexMediatype,
 	testLayerLimitOnMounts,
 	testFrontendVerifyPlatforms,
+	testRunValidExitCodes,
 }
 
 func TestIntegration(t *testing.T) {
@@ -1702,6 +1704,48 @@ func testFileOpCopyRm(t *testing.T, sb integration.Sandbox) {
 	dt, err = os.ReadFile(filepath.Join(destDir, "file2"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("file2"), dt)
+}
+
+func testFileOpCopyChmodText(t *testing.T, sb integration.Sandbox) {
+	requiresLinux(t)
+	c, err := New(sb.Context(), sb.Address())
+	require.NoError(t, err)
+	defer c.Close()
+
+	tcases := []struct {
+		src  string
+		dest string
+		mode string
+	}{
+		{"file", "f1", "go-w"},
+		{"file", "f2", "o-rwx,g+x"},
+		{"file", "f3", "u=rwx,g=,o="},
+		{"file", "f4", "u+rw,g+r,o-x,o+w"},
+		{"dir", "d1", "a+X"},
+		{"dir", "d2", "g+rw,o+rw"},
+	}
+
+	st := llb.Image("alpine").
+		Run(llb.Shlex(`sh -c "mkdir /input && touch /input/file && mkdir /input/dir && chmod 0400 /input/dir && mkdir /expected"`))
+
+	for _, tc := range tcases {
+		st = st.Run(llb.Shlex(`sh -c "cp -a /input/` + tc.src + ` /expected/` + tc.dest + ` && chmod ` + tc.mode + ` /expected/` + tc.dest + `"`))
+	}
+	cp := llb.Scratch()
+
+	for _, tc := range tcases {
+		cp = cp.File(llb.Copy(st.Root(), "/input/"+tc.src, "/"+tc.dest, llb.ChmodOpt{ModeStr: tc.mode}))
+	}
+
+	for _, tc := range tcases {
+		st = st.Run(llb.Shlex(`sh -c '[ "$(stat -c '%A' /expected/`+tc.dest+`)" == "$(stat -c '%A' /actual/`+tc.dest+`)" ]'`), llb.AddMount("/actual", cp, llb.Readonly))
+	}
+
+	def, err := st.Marshal(sb.Context())
+	require.NoError(t, err)
+
+	_, err = c.Solve(sb.Context(), def, SolveOpt{}, nil)
+	require.NoError(t, err)
 }
 
 // moby/buildkit#3291
@@ -6932,9 +6976,9 @@ func testSourceMap(t *testing.T, sb integration.Sandbox) {
 
 	st := llb.Scratch().Run(
 		llb.Shlex("not-exist"),
-		sm1.Location([]*pb.Range{{Start: pb.Position{Line: 7}}}),
-		sm2.Location([]*pb.Range{{Start: pb.Position{Line: 8}}}),
-		sm1.Location([]*pb.Range{{Start: pb.Position{Line: 9}}}),
+		sm1.Location([]*pb.Range{{Start: &pb.Position{Line: 7}}}),
+		sm2.Location([]*pb.Range{{Start: &pb.Position{Line: 8}}}),
+		sm1.Location([]*pb.Range{{Start: &pb.Position{Line: 9}}}),
 	)
 
 	def, err := st.Marshal(sb.Context())
@@ -6987,7 +7031,7 @@ func testSourceMapFromRef(t *testing.T, sb integration.Sandbox) {
 	frontend := func(ctx context.Context, c gateway.Client) (*gateway.Result, error) {
 		st := llb.Scratch().File(
 			llb.Mkdir("foo/bar", 0600), // fails because /foo doesn't exist
-			sm.Location([]*pb.Range{{Start: pb.Position{Line: 3, Character: 1}}}),
+			sm.Location([]*pb.Range{{Start: &pb.Position{Line: 3, Character: 1}}}),
 		)
 
 		def, err := st.Marshal(sb.Context())
@@ -8614,24 +8658,24 @@ func testExportAttestations(t *testing.T, sb integration.Sandbox) {
 				return nil, err
 			}
 			res.AddAttestation(pk, gateway.Attestation{
-				Kind: gatewaypb.AttestationKindInToto,
+				Kind: gatewaypb.AttestationKind_InToto,
 				Ref:  refAttest,
 				Path: "/attestation.json",
 				InToto: result.InTotoAttestation{
 					PredicateType: "https://example.com/attestations/v1.0",
 					Subjects: []result.InTotoSubject{{
-						Kind: gatewaypb.InTotoSubjectKindSelf,
+						Kind: gatewaypb.InTotoSubjectKind_Self,
 					}},
 				},
 			})
 			res.AddAttestation(pk, gateway.Attestation{
-				Kind: gatewaypb.AttestationKindInToto,
+				Kind: gatewaypb.AttestationKind_InToto,
 				Ref:  refAttest,
 				Path: "/attestation2.json",
 				InToto: result.InTotoAttestation{
 					PredicateType: "https://example.com/attestations2/v1.0",
 					Subjects: []result.InTotoSubject{{
-						Kind:   gatewaypb.InTotoSubjectKindRaw,
+						Kind:   gatewaypb.InTotoSubjectKind_Raw,
 						Name:   "/attestation.json",
 						Digest: []digest.Digest{successDigest},
 					}},
@@ -8941,7 +8985,7 @@ func testAttestationDefaultSubject(t *testing.T, sb integration.Sandbox) {
 				return nil, err
 			}
 			res.AddAttestation(pk, gateway.Attestation{
-				Kind: gatewaypb.AttestationKindInToto,
+				Kind: gatewaypb.AttestationKind_InToto,
 				Ref:  refAttest,
 				Path: "/attestation.json",
 				InToto: result.InTotoAttestation{
@@ -9096,7 +9140,7 @@ func testAttestationBundle(t *testing.T, sb integration.Sandbox) {
 				return nil, err
 			}
 			res.AddAttestation(pk, gateway.Attestation{
-				Kind: gatewaypb.AttestationKindBundle,
+				Kind: gatewaypb.AttestationKind_Bundle,
 				Ref:  refAttest,
 				Path: "/bundle",
 			})
@@ -9212,7 +9256,13 @@ cat <<EOF > $BUILDKIT_SCAN_DESTINATION/spdx.json
 {
   "_type": "https://in-toto.io/Statement/v0.1",
   "predicateType": "https://spdx.dev/Document",
-  "predicate": {"name": "fallback"}
+  "predicate": {
+	"name": "fallback",
+	"extraParams": {
+	  "ARG1": "$BUILDKIT_SCAN_ARG1",
+	  "ARG2": "$BUILDKIT_SCAN_ARG2"
+	}
+  }
 }
 EOF
 `
@@ -9302,7 +9352,7 @@ EOF
 				}
 
 				res.AddAttestation(pk, gateway.Attestation{
-					Kind: gatewaypb.AttestationKindInToto,
+					Kind: gatewaypb.AttestationKind_InToto,
 					Ref:  refAttest,
 					Path: "/result.spdx",
 					InToto: result.InTotoAttestation{
@@ -9435,6 +9485,74 @@ EOF
 	require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
 	require.Equal(t, intoto.PredicateSPDX, attest.PredicateType)
 	require.Subset(t, attest.Predicate, map[string]interface{}{"name": "frontend"})
+
+	// test configuring the scanner (simple)
+	target = registry + "/buildkit/testsbom4:latest"
+	_, err = c.Build(sb.Context(), SolveOpt{
+		FrontendAttrs: map[string]string{
+			"attest:sbom": "generator=" + scannerTarget + ",ARG1=foo,ARG2=bar",
+		},
+		Exports: []ExportEntry{
+			{
+				Type: ExporterImage,
+				Attrs: map[string]string{
+					"name": target,
+					"push": "true",
+				},
+			},
+		},
+	}, "", makeTargetFrontend(false), nil)
+	require.NoError(t, err)
+
+	desc, provider, err = contentutil.ProviderFromRef(target)
+	require.NoError(t, err)
+
+	imgs, err = testutil.ReadImages(sb.Context(), provider, desc)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(imgs.Images))
+
+	att = imgs.Find("unknown/unknown")
+	attest = intoto.Statement{}
+	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &attest))
+	require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
+	require.Equal(t, intoto.PredicateSPDX, attest.PredicateType)
+	require.Subset(t, attest.Predicate, map[string]interface{}{
+		"extraParams": map[string]interface{}{"ARG1": "foo", "ARG2": "bar"},
+	})
+
+	// test configuring the scanner (complex)
+	target = registry + "/buildkit/testsbom4:latest"
+	_, err = c.Build(sb.Context(), SolveOpt{
+		FrontendAttrs: map[string]string{
+			"attest:sbom": "\"generator=" + scannerTarget + "\",\"ARG1=foo\",\"ARG2=hello,world\"",
+		},
+		Exports: []ExportEntry{
+			{
+				Type: ExporterImage,
+				Attrs: map[string]string{
+					"name": target,
+					"push": "true",
+				},
+			},
+		},
+	}, "", makeTargetFrontend(false), nil)
+	require.NoError(t, err)
+
+	desc, provider, err = contentutil.ProviderFromRef(target)
+	require.NoError(t, err)
+
+	imgs, err = testutil.ReadImages(sb.Context(), provider, desc)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(imgs.Images))
+
+	att = imgs.Find("unknown/unknown")
+	attest = intoto.Statement{}
+	require.NoError(t, json.Unmarshal(att.LayersRaw[0], &attest))
+	require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
+	require.Equal(t, intoto.PredicateSPDX, attest.PredicateType)
+	require.Subset(t, attest.Predicate, map[string]interface{}{
+		"extraParams": map[string]interface{}{"ARG1": "foo", "ARG2": "hello,world"},
+	})
 }
 
 func testSBOMScanSingleRef(t *testing.T, sb integration.Sandbox) {
@@ -9700,7 +9818,7 @@ func testSBOMSupplements(t *testing.T, sb integration.Sandbox) {
 		}
 
 		res.AddAttestation(pk, gateway.Attestation{
-			Kind: gatewaypb.AttestationKindInToto,
+			Kind: gatewaypb.AttestationKind_InToto,
 			Ref:  refAttest,
 			Path: "/result.spdx",
 			InToto: result.InTotoAttestation{
@@ -10587,4 +10705,48 @@ func testClientCustomGRPCOpts(t *testing.T, sb integration.Sandbox) {
 	require.NoError(t, err)
 
 	require.Contains(t, interceptedMethods, "/moby.buildkit.v1.Control/Solve")
+}
+
+func testRunValidExitCodes(t *testing.T, sb integration.Sandbox) {
+	requiresLinux(t)
+	c, err := New(sb.Context(), sb.Address())
+	require.NoError(t, err)
+	defer c.Close()
+
+	// no exit codes specified, equivalent to [0]
+	out := llb.Image("busybox:latest")
+	out = out.Run(llb.Shlex(`sh -c "exit 0"`)).Root()
+	out = out.Run(llb.Shlex(`sh -c "exit 1"`)).Root()
+	def, err := out.Marshal(sb.Context())
+	require.NoError(t, err)
+	_, err = c.Solve(sb.Context(), def, SolveOpt{}, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "exit code: 1")
+
+	// empty exit codes, equivalent to [0]
+	out = llb.Image("busybox:latest")
+	out = out.Run(llb.Shlex(`sh -c "exit 0"`), llb.ValidExitCodes()).Root()
+	def, err = out.Marshal(sb.Context())
+	require.NoError(t, err)
+	_, err = c.Solve(sb.Context(), def, SolveOpt{}, nil)
+	require.NoError(t, err)
+
+	// if we expect non-zero, those non-zero codes should succeed
+	out = llb.Image("busybox:latest")
+	out = out.Run(llb.Shlex(`sh -c "exit 1"`), llb.ValidExitCodes(1)).Root()
+	out = out.Run(llb.Shlex(`sh -c "exit 2"`), llb.ValidExitCodes(2, 3)).Root()
+	out = out.Run(llb.Shlex(`sh -c "exit 3"`), llb.ValidExitCodes(2, 3)).Root()
+	def, err = out.Marshal(sb.Context())
+	require.NoError(t, err)
+	_, err = c.Solve(sb.Context(), def, SolveOpt{}, nil)
+	require.NoError(t, err)
+
+	// if we expect non-zero, returning zero should fail
+	out = llb.Image("busybox:latest")
+	out = out.Run(llb.Shlex(`sh -c "exit 0"`), llb.ValidExitCodes(1)).Root()
+	def, err = out.Marshal(sb.Context())
+	require.NoError(t, err)
+	_, err = c.Solve(sb.Context(), def, SolveOpt{}, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "exit code: 0")
 }

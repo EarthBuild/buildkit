@@ -126,15 +126,11 @@ func read(r io.Reader, clicontext *cli.Context) (*llb.Definition, error) {
 	if clicontext.Bool("no-cache") {
 		for _, dt := range def.Def {
 			var op pb.Op
-			if err := (&op).Unmarshal(dt); err != nil {
+			if err := op.UnmarshalVT(dt); err != nil {
 				return nil, errors.Wrap(err, "failed to parse llb proto op")
 			}
 			dgst := digest.FromBytes(dt)
-			opMetadata, ok := def.Metadata[dgst]
-			if !ok {
-				opMetadata = pb.OpMetadata{}
-			}
-			c := llb.Constraints{Metadata: opMetadata}
+			c := llb.Constraints{Metadata: def.Metadata[dgst]}
 			llb.IgnoreCache(&c)
 			def.Metadata[dgst] = c.Metadata
 		}

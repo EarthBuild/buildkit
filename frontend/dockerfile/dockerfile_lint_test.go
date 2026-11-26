@@ -46,7 +46,78 @@ var lintTests = integration.TestFuncs(
 	testInvalidDefaultArgInFrom,
 	testFromPlatformFlagConstDisallowed,
 	testCopyIgnoredFiles,
+	testDefinitionDescription,
 )
+
+func testDefinitionDescription(t *testing.T, sb integration.Sandbox) {
+	dockerfile := []byte(`# check=experimental=InvalidDefinitionDescription
+# foo this is the foo
+ARG foo=bar
+
+# base this is the base image
+FROM scratch AS base
+
+# version this is the version number
+ARG version=latest
+
+# baz this is the baz
+ARG foo=baz bar=qux baz=quux
+#
+ARG bit=bat
+
+# comment for something other than ARG or FROM
+COPY Dockerfile .
+`)
+	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
+
+	dockerfile = []byte(`# check=experimental=InvalidDefinitionDescription
+# bar this is the bar
+ARG foo=bar
+# BasE this is the BasE image
+FROM scratch AS base
+# definitely a bad comment
+ARG version=latest
+# definitely a bad comment
+ARG foo=baz bar=qux baz=quux
+`)
+	checkLinterWarnings(t, sb, &lintTestParams{
+		Dockerfile: dockerfile,
+		Warnings: []expectedLintWarning{
+			{
+				RuleName:    "InvalidDefinitionDescription",
+				Description: "Comment for build stage or argument should follow the format: `# <arg/stage name> <description>`. If this is not intended to be a description comment, add an empty line or comment between the instruction and the comment.",
+				URL:         "https://docs.docker.com/go/dockerfile/rule/invalid-definition-description/",
+				Detail:      "Comment for ARG should follow the format: `# foo <description>`",
+				Level:       1,
+				Line:        3,
+			},
+			{
+				RuleName:    "InvalidDefinitionDescription",
+				Description: "Comment for build stage or argument should follow the format: `# <arg/stage name> <description>`. If this is not intended to be a description comment, add an empty line or comment between the instruction and the comment.",
+				URL:         "https://docs.docker.com/go/dockerfile/rule/invalid-definition-description/",
+				Detail:      "Comment for FROM should follow the format: `# base <description>`",
+				Level:       1,
+				Line:        5,
+			},
+			{
+				RuleName:    "InvalidDefinitionDescription",
+				Description: "Comment for build stage or argument should follow the format: `# <arg/stage name> <description>`. If this is not intended to be a description comment, add an empty line or comment between the instruction and the comment.",
+				URL:         "https://docs.docker.com/go/dockerfile/rule/invalid-definition-description/",
+				Detail:      "Comment for ARG should follow the format: `# version <description>`",
+				Level:       1,
+				Line:        7,
+			},
+			{
+				RuleName:    "InvalidDefinitionDescription",
+				Description: "Comment for build stage or argument should follow the format: `# <arg/stage name> <description>`. If this is not intended to be a description comment, add an empty line or comment between the instruction and the comment.",
+				URL:         "https://docs.docker.com/go/dockerfile/rule/invalid-definition-description/",
+				Detail:      "Comment for ARG should follow the format: `# <arg_key> <description>`",
+				Level:       1,
+				Line:        9,
+			},
+		},
+	})
+}
 
 func testCopyIgnoredFiles(t *testing.T, sb integration.Sandbox) {
 	dockerignore := []byte(`
@@ -152,6 +223,8 @@ ENV password=bar secret=baz
 ARG super_duper_secret_token=foo auth=bar
 ENV apikey=bar sunflower=foo
 ENV git_key=
+ENV PUBLIC_KEY=
+ARG public_token
 `)
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
@@ -191,7 +264,7 @@ ENV git_key=
 			{
 				RuleName:    "SecretsUsedInArgOrEnv",
 				Description: "Sensitive data should not be used in the ARG or ENV commands",
-				Detail:      `Do not use ARG or ENV instructions for sensitive data (ARG "super_duper_secret_token")`,
+				Detail:      `Do not use ARG or ENV instructions for sensitive data (ARG "auth")`,
 				URL:         "https://docs.docker.com/go/dockerfile/rule/secrets-used-in-arg-or-env/",
 				Level:       1,
 				Line:        6,
@@ -199,7 +272,7 @@ ENV git_key=
 			{
 				RuleName:    "SecretsUsedInArgOrEnv",
 				Description: "Sensitive data should not be used in the ARG or ENV commands",
-				Detail:      `Do not use ARG or ENV instructions for sensitive data (ARG "auth")`,
+				Detail:      `Do not use ARG or ENV instructions for sensitive data (ARG "super_duper_secret_token")`,
 				URL:         "https://docs.docker.com/go/dockerfile/rule/secrets-used-in-arg-or-env/",
 				Level:       1,
 				Line:        6,
@@ -368,9 +441,11 @@ copy Dockerfile .
 func testStageName(t *testing.T, sb integration.Sandbox) {
 	dockerfile := []byte(`
 # warning: stage name should be lowercase
+#
 FROM scratch AS BadStageName
 
 # warning: 'as' should match 'FROM' cmd casing.
+#
 FROM scratch as base2
 
 FROM scratch AS base3
@@ -383,7 +458,7 @@ FROM scratch AS base3
 				Description: "Stage names should be lowercase",
 				URL:         "https://docs.docker.com/go/dockerfile/rule/stage-name-casing/",
 				Detail:      "Stage name 'BadStageName' should be lowercase",
-				Line:        3,
+				Line:        4,
 				Level:       1,
 			},
 			{
@@ -391,7 +466,7 @@ FROM scratch AS base3
 				Description: "The 'as' keyword should match the case of the 'from' keyword",
 				URL:         "https://docs.docker.com/go/dockerfile/rule/from-as-casing/",
 				Detail:      "'as' and 'FROM' keywords' casing do not match",
-				Line:        6,
+				Line:        8,
 				Level:       1,
 			},
 		},
@@ -399,6 +474,7 @@ FROM scratch AS base3
 
 	dockerfile = []byte(`
 # warning: 'AS' should match 'from' cmd casing.
+#
 from scratch AS base
 
 from scratch as base2
@@ -412,7 +488,7 @@ from scratch as base2
 				Description: "The 'as' keyword should match the case of the 'from' keyword",
 				URL:         "https://docs.docker.com/go/dockerfile/rule/from-as-casing/",
 				Detail:      "'AS' and 'from' keywords' casing do not match",
-				Line:        3,
+				Line:        4,
 				Level:       1,
 			},
 		},
@@ -448,6 +524,7 @@ COPY Dockerfile \
 func testConsistentInstructionCasing(t *testing.T, sb integration.Sandbox) {
 	dockerfile := []byte(`
 # warning: 'FROM' should be either lowercased or uppercased
+#
 From scratch as base
 FROM scratch AS base2
 `)
@@ -460,7 +537,7 @@ FROM scratch AS base2
 				URL:         "https://docs.docker.com/go/dockerfile/rule/consistent-instruction-casing/",
 				Detail:      "Command 'From' should match the case of the command majority (uppercase)",
 				Level:       1,
-				Line:        3,
+				Line:        4,
 			},
 		},
 	})
@@ -488,6 +565,7 @@ COPY Dockerfile /bar
 
 	dockerfile = []byte(`
 # warning: 'frOM' should be either lowercased or uppercased
+#
 frOM scratch as base
 from scratch as base2
 `)
@@ -499,7 +577,7 @@ from scratch as base2
 				Description: "All commands within the Dockerfile should use the same casing (either upper or lower)",
 				URL:         "https://docs.docker.com/go/dockerfile/rule/consistent-instruction-casing/",
 				Detail:      "Command 'frOM' should match the case of the command majority (lowercase)",
-				Line:        3,
+				Line:        4,
 				Level:       1,
 			},
 		},
@@ -527,6 +605,7 @@ copy Dockerfile /bar
 
 	dockerfile = []byte(`
 # warning: 'from' should match command majority's casing (uppercase)
+#
 from scratch
 COPY Dockerfile /foo
 COPY Dockerfile /bar
@@ -540,7 +619,7 @@ COPY Dockerfile /baz
 				Description: "All commands within the Dockerfile should use the same casing (either upper or lower)",
 				URL:         "https://docs.docker.com/go/dockerfile/rule/consistent-instruction-casing/",
 				Detail:      "Command 'from' should match the case of the command majority (uppercase)",
-				Line:        3,
+				Line:        4,
 				Level:       1,
 			},
 		},
@@ -548,6 +627,7 @@ COPY Dockerfile /baz
 
 	dockerfile = []byte(`
 # warning: 'FROM' should match command majority's casing (lowercase)
+#
 FROM scratch
 copy Dockerfile /foo
 copy Dockerfile /bar
@@ -561,7 +641,7 @@ copy Dockerfile /baz
 				Description: "All commands within the Dockerfile should use the same casing (either upper or lower)",
 				URL:         "https://docs.docker.com/go/dockerfile/rule/consistent-instruction-casing/",
 				Detail:      "Command 'FROM' should match the case of the command majority (lowercase)",
-				Line:        3,
+				Line:        4,
 				Level:       1,
 			},
 		},
@@ -581,12 +661,16 @@ COPY Dockerfile /bar
 `)
 	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
 
-	dockerfile = []byte(`
-FROM alpine
+	dockerfile = []byte(fmt.Sprintf(
+		`
+FROM %s
 RUN <<'EOT'
-env
+%s
 EOT
-`)
+`,
+		integration.UnixOrWindows("alpine", "nanoserver"),
+		integration.UnixOrWindows("env", "set"),
+	))
 	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
 }
 
@@ -802,6 +886,27 @@ COPY Dockerfile .
 	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
 
 	dockerfile = []byte(`
+ARG DEBUG
+FROM scratch${DEBUG}
+COPY Dockerfile .
+`)
+	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
+
+	dockerfile = []byte(`
+ARG DEBUG
+FROM scra${DEBUG:-tch}
+COPY Dockerfile .
+`)
+	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
+
+	dockerfile = []byte(`
+ARG DEBUG=""
+FROM scratch${DEBUG-@bogus}
+COPY Dockerfile .
+`)
+	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
+
+	dockerfile = []byte(`
 FROM --platform=$BULIDPLATFORM scratch
 COPY Dockerfile .
 `)
@@ -822,12 +927,24 @@ COPY Dockerfile .
 		BuildErrLocation:  2,
 	})
 
-	dockerfile = []byte(`
-ARG MY_OS=linux
+	osName := integration.UnixOrWindows("linux", "windows")
+	baseImg := integration.UnixOrWindows("busybox", "nanoserver")
+	dockerfile = []byte(fmt.Sprintf(
+		`
+ARG MY_OS=%s
 ARG MY_ARCH=amd64
-FROM --platform=linux/${MYARCH} busybox
+FROM --platform=%s/${MYARCH} %s
 COPY Dockerfile .
-	`)
+	`,
+		osName, osName, baseImg))
+
+	osStr := integration.UnixOrWindows("linux", "windows")
+	streamBuildErr := fmt.Sprintf(
+		"failed to solve: failed to parse platform %s/${MYARCH}: \"\" is an invalid component of \"%s/\": platform specifier component must match \"^[A-Za-z0-9_-]+$\": invalid argument (did you mean MY_ARCH?)",
+		osStr, osStr)
+	unmarshalBuildErr := fmt.Sprintf(
+		"failed to parse platform %s/${MYARCH}: \"\" is an invalid component of \"%s/\": platform specifier component must match \"^[A-Za-z0-9_-]+$\": invalid argument (did you mean MY_ARCH?)",
+		osStr, osStr)
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		Warnings: []expectedLintWarning{
@@ -840,16 +957,18 @@ COPY Dockerfile .
 				Line:        4,
 			},
 		},
-		StreamBuildErr:    "failed to solve: failed to parse platform linux/${MYARCH}: \"\" is an invalid component of \"linux/\": platform specifier component must match \"^[A-Za-z0-9_-]+$\": invalid argument (did you mean MY_ARCH?)",
-		UnmarshalBuildErr: "failed to parse platform linux/${MYARCH}: \"\" is an invalid component of \"linux/\": platform specifier component must match \"^[A-Za-z0-9_-]+$\": invalid argument (did you mean MY_ARCH?)",
+		StreamBuildErr:    streamBuildErr,
+		UnmarshalBuildErr: unmarshalBuildErr,
 		BuildErrLocation:  4,
 	})
 
-	dockerfile = []byte(`
+	dockerfile = []byte(fmt.Sprintf(
+		`
 ARG tag=latest
-FROM busybox:${tag}${version} AS b
+FROM %s:${tag}${version} AS b
 COPY Dockerfile .
-`)
+`,
+		baseImg))
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		Warnings: []expectedLintWarning{
@@ -902,27 +1021,34 @@ COPY Dockerfile${foo} .
 `)
 	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
 
-	dockerfile = []byte(`
-FROM alpine AS base
+	baseImg := integration.UnixOrWindows("alpine", "nanoserver")
+	dockerfile = []byte(fmt.Sprintf(
+		`
+FROM %s AS base
 ARG foo=Dockerfile
 
 FROM base
 COPY $foo .
-`)
+`,
+		baseImg))
 	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
 
-	dockerfile = []byte(`
-FROM alpine
+	dockerfile = []byte(fmt.Sprintf(
+		`
+FROM %s
 RUN echo $PATH
-`)
+`,
+		baseImg))
 	checkLinterWarnings(t, sb, &lintTestParams{Dockerfile: dockerfile})
 
-	dockerfile = []byte(`
-FROM alpine
+	dockerfile = []byte(fmt.Sprintf(
+		`
+FROM %s
 COPY $foo .
 ARG foo=bar
 RUN echo $foo
-`)
+`,
+		baseImg))
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		Warnings: []expectedLintWarning{
@@ -937,13 +1063,15 @@ RUN echo $foo
 		},
 	})
 
-	dockerfile = []byte(`
-FROM alpine
+	dockerfile = []byte(fmt.Sprintf(
+		`
+FROM %s
 ARG DIR_BINARIES=binaries/
 ARG DIR_ASSETS=assets/
 ARG DIR_CONFIG=config/
 COPY $DIR_ASSET .
-	`)
+	`,
+		baseImg))
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		Warnings: []expectedLintWarning{
@@ -958,10 +1086,12 @@ COPY $DIR_ASSET .
 		},
 	})
 
-	dockerfile = []byte(`
-FROM alpine
+	dockerfile = []byte(fmt.Sprintf(
+		`
+FROM %s
 ENV PATH=$PAHT:/tmp/bin
-		`)
+		`,
+		baseImg))
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		Warnings: []expectedLintWarning{
@@ -1150,10 +1280,13 @@ FROM --platform=${TARGETPLATFORM} scratch
 }
 
 func testInvalidDefaultArgInFrom(t *testing.T, sb integration.Sandbox) {
-	dockerfile := []byte(`
+	baseImg := integration.UnixOrWindows("busybox", "nanoserver")
+	dockerfile := []byte(fmt.Sprintf(
+		`
 ARG VERSION
-FROM busybox:$VERSION
-`)
+FROM %s:$VERSION
+`,
+		baseImg))
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		FrontendAttrs: map[string]string{
@@ -1164,9 +1297,12 @@ FROM busybox:$VERSION
 				RuleName:    "InvalidDefaultArgInFrom",
 				Description: "Default value for global ARG results in an empty or invalid base image name",
 				URL:         "https://docs.docker.com/go/dockerfile/rule/invalid-default-arg-in-from/",
-				Detail:      "Default value for ARG busybox:$VERSION results in empty or invalid base image name",
-				Line:        3,
-				Level:       1,
+				Detail: fmt.Sprintf(
+					"Default value for ARG %s:$VERSION results in empty or invalid base image name",
+					integration.UnixOrWindows("busybox", "nanoserver"),
+				),
+				Line:  3,
+				Level: 1,
 			},
 		},
 	})
@@ -1178,7 +1314,7 @@ FROM $IMAGE
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		FrontendAttrs: map[string]string{
-			"build-arg:IMAGE": "busybox:latest",
+			"build-arg:IMAGE": integration.UnixOrWindows("busybox:latest", "nanoserver:latest"),
 		},
 		Warnings: []expectedLintWarning{
 			{
@@ -1192,31 +1328,42 @@ FROM $IMAGE
 		},
 	})
 
-	dockerfile = []byte(`
+	dockerfile = []byte(integration.UnixOrWindows(
+		`
 ARG SFX="box:"
 FROM busy${SFX}
-`)
+`,
+		`
+ARG SFX="server:"
+FROM nano${SFX}
+`,
+	))
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		FrontendAttrs: map[string]string{
-			"build-arg:SFX": "box:latest",
+			"build-arg:SFX": integration.UnixOrWindows("box:latest", "server:latest"),
 		},
 		Warnings: []expectedLintWarning{
 			{
 				RuleName:    "InvalidDefaultArgInFrom",
 				Description: "Default value for global ARG results in an empty or invalid base image name",
 				URL:         "https://docs.docker.com/go/dockerfile/rule/invalid-default-arg-in-from/",
-				Detail:      "Default value for ARG busy${SFX} results in empty or invalid base image name",
-				Line:        3,
-				Level:       1,
+				Detail: fmt.Sprintf(
+					"Default value for ARG %s${SFX} results in empty or invalid base image name",
+					integration.UnixOrWindows("busy", "nano"),
+				),
+				Line:  3,
+				Level: 1,
 			},
 		},
 	})
 
-	dockerfile = []byte(`
+	dockerfile = []byte(fmt.Sprintf(
+		`
 ARG VERSION="latest"
-FROM busybox:${VERSION}
-`)
+FROM %s:${VERSION}
+`,
+		baseImg))
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		FrontendAttrs: map[string]string{
@@ -1224,25 +1371,37 @@ FROM busybox:${VERSION}
 		},
 	})
 
-	dockerfile = []byte(`
+	dockerfile = []byte(integration.UnixOrWindows(
+		`
 ARG BUSYBOX_VARIANT=""
 FROM busybox:stable${BUSYBOX_VARIANT}
-`)
+`,
+		`
+ARG BUSYBOX_VARIANT=""
+FROM nanoserver:plus${BUSYBOX_VARIANT}
+`,
+	))
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		FrontendAttrs: map[string]string{
-			"build-arg:BUSYBOX_VARIANT": "-musl",
+			"build-arg:BUSYBOX_VARIANT": integration.UnixOrWindows("-musl", "-busybox"),
 		},
 	})
 
-	dockerfile = []byte(`
-ARG BUSYBOX_VARIANT
-FROM busybox:stable${BUSYBOX_VARIANT}
-`)
+	dockerfile = []byte(integration.UnixOrWindows(
+		`
+	ARG BUSYBOX_VARIANT
+	FROM busybox:stable${BUSYBOX_VARIANT}
+	`,
+		`
+	ARG BUSYBOX_VARIANT
+	FROM nanoserver:plus${BUSYBOX_VARIANT}
+	`,
+	))
 	checkLinterWarnings(t, sb, &lintTestParams{
 		Dockerfile: dockerfile,
 		FrontendAttrs: map[string]string{
-			"build-arg:BUSYBOX_VARIANT": "-musl",
+			"build-arg:BUSYBOX_VARIANT": integration.UnixOrWindows("-musl", "-busybox"),
 		},
 	})
 }
@@ -1324,12 +1483,21 @@ func checkUnmarshal(t *testing.T, sb integration.Sandbox, lintTest *lintTestPara
 			require.Less(t, lintResults.Error.Location.SourceIndex, int32(len(lintResults.Sources)))
 		}
 
+		if len(warnings) != len(lintResults.Warnings) {
+			for _, w := range lintResults.Warnings {
+				t.Logf("Warning Received: %s\n", w.Detail)
+			}
+		}
+
 		require.Equal(t, len(warnings), len(lintResults.Warnings))
 
 		sort.Slice(lintResults.Warnings, func(i, j int) bool {
 			// sort by line number in ascending order
 			firstRange := lintResults.Warnings[i].Location.Ranges[0]
 			secondRange := lintResults.Warnings[j].Location.Ranges[0]
+			if firstRange.Start.Line == secondRange.Start.Line {
+				return lintResults.Warnings[i].Detail < lintResults.Warnings[j].Detail
+			}
 			return firstRange.Start.Line < secondRange.Start.Line
 		})
 		// Compare expectedLintWarning with actual lint results
@@ -1376,10 +1544,14 @@ func checkProgressStream(t *testing.T, sb integration.Sandbox, lintTest *lintTes
 
 	f := getFrontend(t, sb)
 
+	platformStr := integration.UnixOrWindows(
+		"linux/amd64,linux/arm64",
+		"windows/amd64",
+	)
 	attrs := lintTest.FrontendAttrs
 	if attrs == nil {
 		attrs = map[string]string{
-			"platform": "linux/amd64,linux/arm64",
+			"platform": platformStr,
 		}
 	}
 
@@ -1391,6 +1563,9 @@ func checkProgressStream(t *testing.T, sb integration.Sandbox, lintTest *lintTes
 		},
 	}, status)
 	if lintTest.StreamBuildErr == "" && lintTest.StreamBuildErrRegexp == nil {
+		if err != nil {
+			t.Logf("expected no error, received: %v", err)
+		}
 		require.NoError(t, err)
 	} else {
 		if lintTest.StreamBuildErr != "" {
@@ -1406,6 +1581,18 @@ func checkProgressStream(t *testing.T, sb integration.Sandbox, lintTest *lintTes
 		t.Fatalf("timed out waiting for statusDone")
 	}
 
+	if len(lintTest.Warnings) != len(warnings) {
+		t.Logf("expected %d warnings, received:", len(lintTest.Warnings))
+		t.Logf("\texpected:")
+		for i, w := range lintTest.Warnings {
+			t.Logf("\t\t%d: %s", i, w.Detail)
+		}
+
+		t.Logf("\treceived:")
+		for i, w := range warnings {
+			t.Logf("\t%d: %s", i, w.Short)
+		}
+	}
 	require.Equal(t, len(lintTest.Warnings), len(warnings))
 	sort.Slice(warnings, func(i, j int) bool {
 		w1 := warnings[i]
@@ -1414,6 +1601,9 @@ func checkProgressStream(t *testing.T, sb integration.Sandbox, lintTest *lintTes
 			return true
 		} else if len(w2.Range) == 0 {
 			return false
+		}
+		if w1.Range[0].Start.Line == w2.Range[0].Start.Line {
+			return string(w1.Short) < string(w2.Short)
 		}
 		return w1.Range[0].Start.Line < w2.Range[0].Start.Line
 	})
@@ -1425,10 +1615,11 @@ func checkProgressStream(t *testing.T, sb integration.Sandbox, lintTest *lintTes
 func checkLinterWarnings(t *testing.T, sb integration.Sandbox, lintTest *lintTestParams) {
 	t.Helper()
 	sort.Slice(lintTest.Warnings, func(i, j int) bool {
+		if lintTest.Warnings[i].Line == lintTest.Warnings[j].Line {
+			return lintTest.Warnings[i].Detail < lintTest.Warnings[j].Detail
+		}
 		return lintTest.Warnings[i].Line < lintTest.Warnings[j].Line
 	})
-
-	integration.SkipOnPlatform(t, "windows")
 
 	if lintTest.TmpDir == nil {
 		testfiles := []fstest.Applier{

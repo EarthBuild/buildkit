@@ -36,7 +36,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var validHex = regexp.MustCompile(`^[a-f0-9]{40}$`)
 var defaultBranch = regexp.MustCompile(`refs/heads/(\S+)`)
 
 type Opt struct {
@@ -207,10 +206,13 @@ type gitSourceHandler struct {
 	authArgs []string
 }
 
-func (gs *gitSourceHandler) shaToCacheKey(sha string) string {
+func (gs *gitSourceHandler) shaToCacheKey(sha, ref string) string {
 	key := sha
 	if gs.src.KeepGitDir {
 		key += ".git"
+		if ref != "" {
+			key += "#" + ref
+		}
 	}
 	if gs.src.Subdir != "" {
 		key += ":" + gs.src.Subdir
@@ -355,8 +357,8 @@ func (gs *gitSourceHandler) CacheKey(ctx context.Context, g session.Group, index
 	gs.locker.Lock(remote)
 	defer gs.locker.Unlock(remote)
 
-	if ref := gs.src.Ref; ref != "" && isCommitSHA(ref) {
-		cacheKey := gs.shaToCacheKey(ref)
+	if ref := gs.src.Ref; ref != "" && gitutil.IsCommitSHA(ref) {
+		cacheKey := gs.shaToCacheKey(ref, "")
 		gs.cacheKey = cacheKey
 		return cacheKey, ref, nil, true, nil
 	}
@@ -392,6 +394,7 @@ func (gs *gitSourceHandler) CacheKey(ctx context.Context, g session.Group, index
 		annotatedTagRef = tagRef + "^{}"
 	)
 	var sha, headSha, tagSha string
+	var usedRef string
 	for _, line := range lines {
 		lineSha, lineRef, _ := strings.Cut(line, "\t")
 		switch lineRef {
@@ -401,24 +404,27 @@ func (gs *gitSourceHandler) CacheKey(ctx context.Context, g session.Group, index
 			tagSha = lineSha
 		case partialRef:
 			sha = lineSha
+			usedRef = lineRef
 		}
 	}
 
 	// git-checkout prefers branches in case of ambiguity
 	if sha == "" {
 		sha = headSha
+		usedRef = headRef
 	}
 	if sha == "" {
 		sha = tagSha
+		usedRef = tagRef
 	}
 	if sha == "" {
 		return "", "", nil, false, errors.Errorf("repository does not contain ref %s, output: %q", ref, string(buf))
 	}
-	if !isCommitSHA(sha) {
+	if !gitutil.IsCommitSHA(sha) {
 		return "", "", nil, false, errors.Errorf("invalid commit sha %q", sha)
 	}
 
-	cacheKey := gs.shaToCacheKey(sha)
+	cacheKey := gs.shaToCacheKey(sha, usedRef)
 	gs.cacheKey = cacheKey
 	return cacheKey, sha, nil, true, nil
 }
@@ -470,7 +476,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 	}
 
 	doFetch := true
-	if isCommitSHA(ref) {
+	if gitutil.IsCommitSHA(ref) {
 		// skip fetch if commit already exists
 		if _, err := git.Run(ctx, "cat-file", "-e", ref+"^{commit}"); err == nil {
 			doFetch = false
@@ -482,7 +488,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		os.RemoveAll(filepath.Join(gitDir, "shallow.lock"))
 
 		args := []string{"fetch"}
-		if !isCommitSHA(ref) { // TODO: find a branch from ls-remote?
+		if !gitutil.IsCommitSHA(ref) { // TODO: find a branch from ls-remote?
 			args = append(args, "--depth=1", "--no-tags")
 		} else {
 			args = append(args, "--tags")
@@ -491,11 +497,13 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 			}
 		}
 		args = append(args, "origin")
-		if !isCommitSHA(ref) {
-			args = append(args, "--force", ref+":tags/"+ref)
+		if gitutil.IsCommitSHA(ref) {
+			args = append(args, ref)
+		} else {
 			// local refs are needed so they would be advertised on next fetches. Force is used
 			// in case the ref is a branch and it now points to a different commit sha
 			// TODO: is there a better way to do this?
+			args = append(args, "--force", ref+":tags/"+ref)
 		}
 		if _, err := git.Run(ctx, args...); err != nil {
 			return nil, errors.Wrapf(err, "failed to fetch remote %s", urlutil.RedactCredentials(gs.src.Remote))
@@ -564,7 +572,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		pullref := ref
 		if isAnnotatedTag {
 			pullref += ":refs/tags/" + pullref
-		} else if isCommitSHA(ref) {
+		} else if gitutil.IsCommitSHA(ref) {
 			pullref = "refs/buildkit/" + identity.NewID()
 			_, err = git.Run(ctx, "update-ref", pullref, ref)
 			if err != nil {
@@ -736,10 +744,6 @@ func (gs *gitSourceHandler) gitCli(ctx context.Context, g session.Group, opts ..
 		gitutil.WithSSHCommand(sshCommand),
 	}, opts...)
 	return gitCLI(opts...), cleanup, err
-}
-
-func isCommitSHA(str string) bool {
-	return validHex.MatchString(str)
 }
 
 func tokenScope(remote string) string {

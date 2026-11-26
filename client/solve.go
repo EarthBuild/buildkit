@@ -298,8 +298,8 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			Frontend:                opt.Frontend,
 			FrontendAttrs:           frontendAttrs,
 			FrontendInputs:          frontendInputs,
-			Cache:                   cacheOpt.options,
-			Entitlements:            opt.AllowedEntitlements,
+			Cache:                   &cacheOpt.options,
+			Entitlements:            entitlementsToPB(opt.AllowedEntitlements),
 			Internal:                opt.Internal,
 			SourcePolicy:            opt.SourcePolicy,
 		})
@@ -417,7 +417,7 @@ func prepareSyncedFiles(def *llb.Definition, localMounts map[string]fsutil.FS) (
 	} else {
 		for _, dt := range def.Def {
 			var op pb.Op
-			if err := (&op).Unmarshal(dt); err != nil {
+			if err := op.UnmarshalVT(dt); err != nil {
 				return nil, errors.Wrap(err, "failed to parse llb proto op")
 			}
 			if src := op.GetSource(); src != nil {
@@ -580,4 +580,12 @@ func prepareMounts(opt *SolveOpt) (map[string]fsutil.FS, error) {
 		mounts[k] = mount
 	}
 	return mounts, nil
+}
+
+func entitlementsToPB(entitlements []entitlements.Entitlement) []string {
+	clone := make([]string, len(entitlements))
+	for i, e := range entitlements {
+		clone[i] = string(e)
+	}
+	return clone
 }

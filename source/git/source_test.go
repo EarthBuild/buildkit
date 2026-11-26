@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cgi"
@@ -69,9 +70,10 @@ func testRepeatedFetch(t *testing.T, keepGitDir bool) {
 	expLen := 40
 	if keepGitDir {
 		expLen += 4
+		require.GreaterOrEqual(t, len(key1), expLen)
+	} else {
+		require.Equal(t, expLen, len(key1))
 	}
-
-	require.Equal(t, expLen, len(key1))
 	require.Equal(t, 40, len(pin1))
 
 	ref1, err := g.Snapshot(ctx, nil)
@@ -189,9 +191,10 @@ func testFetchBySHA(t *testing.T, keepGitDir bool) {
 	expLen := 40
 	if keepGitDir {
 		expLen += 4
+		require.GreaterOrEqual(t, len(key1), expLen)
+	} else {
+		require.Equal(t, expLen, len(key1))
 	}
-
-	require.Equal(t, expLen, len(key1))
 	require.Equal(t, 40, len(pin1))
 
 	ref1, err := g.Snapshot(ctx, nil)
@@ -218,15 +221,31 @@ func testFetchBySHA(t *testing.T, keepGitDir bool) {
 }
 
 func TestFetchUnreferencedTagSha(t *testing.T) {
-	testFetchUnreferencedTagSha(t, false)
+	testFetchUnreferencedRefSha(t, "v1.2.3-special", false)
 }
 
 func TestFetchUnreferencedTagShaKeepGitDir(t *testing.T) {
-	testFetchUnreferencedTagSha(t, true)
+	testFetchUnreferencedRefSha(t, "v1.2.3-special", true)
 }
 
-// testFetchUnreferencedTagSha tests fetching a SHA that points to a tag that is not reachable from any branch.
-func testFetchUnreferencedTagSha(t *testing.T, keepGitDir bool) {
+func TestFetchUnreferencedRefSha(t *testing.T) {
+	testFetchUnreferencedRefSha(t, "refs/special", false)
+}
+
+func TestFetchUnreferencedRefShaKeepGitDir(t *testing.T) {
+	testFetchUnreferencedRefSha(t, "refs/special", true)
+}
+
+func TestFetchUnadvertisedRefSha(t *testing.T) {
+	testFetchUnreferencedRefSha(t, "refs/special~", false)
+}
+
+func TestFetchUnadvertisedRefShaKeepGitDir(t *testing.T) {
+	testFetchUnreferencedRefSha(t, "refs/special~", true)
+}
+
+// testFetchUnreferencedRefSha tests fetching a SHA that points to a ref that is not reachable from any branch.
+func testFetchUnreferencedRefSha(t *testing.T, ref string, keepGitDir bool) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Depends on unimplemented containerd bind-mount support on Windows")
 	}
@@ -239,7 +258,7 @@ func testFetchUnreferencedTagSha(t *testing.T, keepGitDir bool) {
 
 	repo := setupGitRepo(t)
 
-	cmd := exec.Command("git", "rev-parse", "v1.2.3-special")
+	cmd := exec.Command("git", "rev-parse", ref)
 	cmd.Dir = repo.mainPath
 
 	out, err := cmd.Output()
@@ -260,9 +279,10 @@ func testFetchUnreferencedTagSha(t *testing.T, keepGitDir bool) {
 	expLen := 40
 	if keepGitDir {
 		expLen += 4
+		require.GreaterOrEqual(t, len(key1), expLen)
+	} else {
+		require.Equal(t, expLen, len(key1))
 	}
-
-	require.Equal(t, expLen, len(key1))
 	require.Equal(t, 40, len(pin1))
 
 	ref1, err := g.Snapshot(ctx, nil)
@@ -356,9 +376,10 @@ func testFetchByTag(t *testing.T, tag, expectedCommitSubject string, isAnnotated
 	expLen := 40
 	if keepGitDir {
 		expLen += 4
+		require.GreaterOrEqual(t, len(key1), expLen)
+	} else {
+		require.Equal(t, expLen, len(key1))
 	}
-
-	require.Equal(t, expLen, len(key1))
 	require.Equal(t, 40, len(pin1))
 
 	ref1, err := g.Snapshot(ctx, nil)
@@ -431,6 +452,105 @@ func testFetchByTag(t *testing.T, tag, expectedCommitSubject string, isAnnotated
 	}
 }
 
+func TestMultipleTagAccessKeepGitDir(t *testing.T) {
+	testMultipleTagAccess(t, true)
+}
+
+func TestMultipleTagAccess(t *testing.T) {
+	testMultipleTagAccess(t, false)
+}
+
+func testMultipleTagAccess(t *testing.T, keepGitDir bool) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Depends on unimplemented containerd bind-mount support on Windows")
+	}
+
+	t.Parallel()
+	ctx := namespaces.WithNamespace(context.Background(), "buildkit-test")
+	ctx = logProgressStreams(ctx, t)
+
+	gs := setupGitSource(t, t.TempDir())
+
+	repo := setupGitRepo(t)
+
+	id := &GitIdentifier{Remote: repo.mainURL, KeepGitDir: keepGitDir, Ref: "a/v1.2.3"}
+
+	g, err := gs.Resolve(ctx, id, nil, nil)
+	require.NoError(t, err)
+
+	expLen := 40
+	if keepGitDir {
+		expLen += 4
+	}
+
+	key1, pin1, _, _, err := g.CacheKey(ctx, nil, 0)
+	require.NoError(t, err)
+	if keepGitDir {
+		require.GreaterOrEqual(t, len(key1), expLen)
+	} else {
+		require.Equal(t, expLen, len(key1))
+	}
+	require.Equal(t, 40, len(pin1))
+
+	ref1, err := g.Snapshot(ctx, nil)
+	require.NoError(t, err)
+	defer ref1.Release(context.TODO())
+
+	id2 := &GitIdentifier{Remote: repo.mainURL, KeepGitDir: keepGitDir, Ref: "a/v1.2.3-same"}
+	g2, err := gs.Resolve(ctx, id2, nil, nil)
+	require.NoError(t, err)
+
+	key2, pin2, _, _, err := g2.CacheKey(ctx, nil, 0)
+	require.NoError(t, err)
+	if keepGitDir {
+		require.GreaterOrEqual(t, len(key1), expLen)
+	} else {
+		require.Equal(t, expLen, len(key1))
+	}
+	require.Equal(t, 40, len(pin2))
+
+	require.Equal(t, pin1, pin2)
+	if !keepGitDir {
+		require.Equal(t, key1, key2)
+		return
+	}
+	// key should be different because of the ref
+	require.NotEqual(t, key1, key2)
+
+	ref2, err := g2.Snapshot(ctx, nil)
+	require.NoError(t, err)
+	defer ref1.Release(context.TODO())
+
+	mount1, err := ref2.Mount(ctx, true, nil)
+	require.NoError(t, err)
+
+	lm1 := snapshot.LocalMounter(mount1)
+	dir1, err := lm1.Mount()
+	require.NoError(t, err)
+	defer lm1.Unmount()
+
+	workDir := t.TempDir()
+
+	runShell(t, dir1, fmt.Sprintf(`git rev-parse a/v1.2.3 > %s/ref1`, workDir))
+
+	dt1, err := os.ReadFile(filepath.Join(workDir, "ref1"))
+	require.NoError(t, err)
+
+	mount2, err := ref2.Mount(ctx, true, nil)
+	require.NoError(t, err)
+
+	lm2 := snapshot.LocalMounter(mount2)
+	dir2, err := lm2.Mount()
+	require.NoError(t, err)
+	defer lm2.Unmount()
+
+	runShell(t, dir2, fmt.Sprintf(`git rev-parse a/v1.2.3-same > %s/ref2`, workDir))
+
+	dt2, err := os.ReadFile(filepath.Join(workDir, "ref2"))
+	require.NoError(t, err)
+	require.Equal(t, string(dt1), string(dt2))
+}
+
 func TestMultipleRepos(t *testing.T) {
 	testMultipleRepos(t, false)
 }
@@ -480,12 +600,20 @@ func testMultipleRepos(t *testing.T, keepGitDir bool) {
 
 	key1, pin1, _, _, err := g.CacheKey(ctx, nil, 0)
 	require.NoError(t, err)
-	require.Equal(t, expLen, len(key1))
+	if keepGitDir {
+		require.GreaterOrEqual(t, len(key1), expLen)
+	} else {
+		require.Equal(t, expLen, len(key1))
+	}
 	require.Equal(t, 40, len(pin1))
 
 	key2, pin2, _, _, err := g2.CacheKey(ctx, nil, 0)
 	require.NoError(t, err)
-	require.Equal(t, expLen, len(key2))
+	if keepGitDir {
+		require.GreaterOrEqual(t, len(key2), expLen)
+	} else {
+		require.Equal(t, expLen, len(key2))
+	}
 	require.Equal(t, 40, len(pin2))
 
 	require.NotEqual(t, key1, key2)
@@ -592,9 +720,10 @@ func testSubdir(t *testing.T, keepGitDir bool) {
 	expLen := 44
 	if keepGitDir {
 		expLen += 4
+		require.GreaterOrEqual(t, len(key1), expLen)
+	} else {
+		require.Equal(t, expLen, len(key1))
 	}
-
-	require.Equal(t, expLen, len(key1))
 	require.Equal(t, 40, len(pin1))
 
 	ref1, err := g.Snapshot(ctx, nil)
@@ -649,6 +778,7 @@ func setupGitSource(t *testing.T, tmpdir string) source.Source {
 		Applier:        applier,
 		Differ:         differ,
 		GarbageCollect: mdb.GarbageCollect,
+		Root:           tmpdir,
 		MountPoolRoot:  filepath.Join(tmpdir, "cachemounts"),
 	})
 	require.NoError(t, err)
@@ -690,43 +820,63 @@ func setupGitRepo(t *testing.T) gitRepoFixture {
 	// * (refs/heads/feature) withsub
 	// * feature
 	// * (HEAD -> refs/heads/master, tag: refs/tags/lightweight-tag) third
+	// | * ref only
+	// | * commit only
 	// | * (tag: refs/tags/v1.2.3-special) tagonly-leaf
 	// |/
 	// * (tag: refs/tags/v1.2.3) second
-	// * (tag: refs/tags/a/v1.2.3) initial
+	// * (tag: refs/tags/a/v1.2.3, refs/tags/a/v1.2.3-same) initial
 	runShell(t, fixture.mainPath,
 		"git -c init.defaultBranch=master init",
 		"git config --local user.email test",
 		"git config --local user.name test",
+
 		"echo foo > abc",
 		"git add abc",
 		"git commit -m initial",
 		"git tag --no-sign a/v1.2.3",
+		"git tag --no-sign a/v1.2.3-same",
 		"echo bar > def",
 		"mkdir subdir",
 		"echo subcontents > subdir/subfile",
 		"git add def subdir",
 		"git commit -m second",
 		"git tag -a -m \"this is an annotated tag\" v1.2.3",
+
 		"echo foo > bar",
 		"git add bar",
 		"git commit -m tagonly-leaf",
 		"git tag --no-sign v1.2.3-special",
+
+		"echo foo2 > bar2",
+		"git add bar2",
+		"git commit -m \"commit only\"",
+		"echo foo3 > bar3",
+		"git add bar3",
+		"git commit -m \"ref only\"",
+		"git update-ref refs/special $(git rev-parse HEAD)",
+
 		// switch master back to v1.2.3
 		"git checkout -B master v1.2.3",
+
 		"echo sbb > foo13",
 		"git add foo13",
 		"git commit -m third",
 		"git tag --no-sign lightweight-tag",
+
 		"git checkout -B feature",
+
 		"echo baz > ghi",
 		"git add ghi",
 		"git commit -m feature",
 		"git update-ref refs/test $(git rev-parse HEAD)",
+
 		"git submodule add "+fixture.subURL+" sub",
 		"git add -A",
 		"git commit -m withsub",
+
 		"git checkout master",
+
 		// "git log --oneline --graph --decorate=full --all",
 	)
 	return fixture
@@ -784,6 +934,7 @@ func runShell(t *testing.T, dir string, cmds ...string) {
 			cmd = exec.Command("sh", "-c", args)
 		}
 		cmd.Dir = dir
+		// cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		require.NoErrorf(t, cmd.Run(), "error running %v", args)
 	}

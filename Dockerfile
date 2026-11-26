@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile-upstream:master
 
-ARG RUNC_VERSION=v1.1.14
-ARG CONTAINERD_VERSION=v1.7.21
-# containerd v1.6 for integration tests
-ARG CONTAINERD_ALT_VERSION_16=v1.6.33
+ARG RUNC_VERSION=v1.1.15
+ARG CONTAINERD_VERSION=v1.7.23
+# CONTAINERD_ALT_VERSION_16 defines fallback containerd version for integration tests
+ARG CONTAINERD_ALT_VERSION_16=v1.6.36
 ARG REGISTRY_VERSION=v2.8.3
-ARG ROOTLESSKIT_VERSION=v2.0.2
+ARG ROOTLESSKIT_VERSION=v2.3.1
 ARG CNI_VERSION=v1.5.1
 ARG STARGZ_SNAPSHOTTER_VERSION=v0.15.1
 ARG NERDCTL_VERSION=v1.6.2
@@ -18,7 +18,7 @@ ARG DELVE_VERSION=v1.22.1
 
 ARG GO_VERSION=1.22
 ARG ALPINE_VERSION=3.20
-ARG XX_VERSION=1.4.0
+ARG XX_VERSION=1.5.0
 ARG BUILDKIT_DEBUG
 
 # silo for s3 integration tests
@@ -27,22 +27,22 @@ FROM pgsty/silo:${SILO_VERSION} AS silo
 # xx is a helper for cross-compilation
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:${XX_VERSION} AS xx
 
-# go base image
+# golatest is alias for Go base image
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS golatest
 
-# gobuild is base stage for compiling go/cgo
+# gobuild-base is base stage for compiling go/cgo
 FROM golatest AS gobuild-base
 RUN apk add --no-cache file bash clang lld musl-dev pkgconfig git make
 COPY --link --from=xx / /
 
-# delve for debug variant
+# dlv builds delve for debug variant images
 FROM gobuild-base AS dlv
 ARG DELVE_VERSION
 RUN --mount=target=/root/.cache,type=cache \
   --mount=target=/go/pkg/mod,type=cache \
   GOBIN=/usr/bin go install github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}
 
-# build runc binary
+# runc builds runc binary
 FROM gobuild-base AS runc
 WORKDIR $GOPATH/src/github.com/opencontainers/runc
 ARG RUNC_VERSION
@@ -63,7 +63,7 @@ FROM gobuild-base AS buildkit-base
 WORKDIR /src
 ENV GOFLAGS=-mod=vendor
 
-# scan the version/revision info
+# buildkit-version builds stage with version/revision info
 FROM buildkit-base AS buildkit-version
 # TODO: PKG should be inferred from go modules
 ARG RELEASE_VERSION=v0.0.0+earthlyunknown
@@ -76,7 +76,7 @@ RUN --mount=target=. <<'EOT'
   echo -n "${RELEASE_VERSION}" | tee /tmp/.version;
 EOT
 
-# build buildctl binary
+# buildctl builds test cli binary
 FROM buildkit-base AS buildctl
 ENV CGO_ENABLED=0
 ARG TARGETPLATFORM
@@ -90,7 +90,7 @@ RUN --mount=target=. --mount=target=/root/.cache,type=cache \
   if [ "$(xx-info os)" = "linux" ]; then /usr/bin/buildctl --version; fi
 EOT
 
-# build buildkitd binary
+# buildkitd builds daemon binary
 FROM buildkit-base AS buildkitd
 # BUILDKITD_TAGS defines additional Go build tags for compiling buildkitd
 ARG BUILDKITD_TAGS
@@ -132,7 +132,7 @@ RUN --mount=target=. --mount=target=/root/.cache,type=cache \
   fi
 EOT
 
-# build dnsname CNI plugin for testing
+# dnsname builds dnsname CNI plugin for testing
 FROM gobuild-base AS dnsname
 WORKDIR /go/src/github.com/containers/dnsname
 ARG DNSNAME_VERSION
@@ -183,7 +183,7 @@ COPY --link --from=buildkitd /usr/bin/buildkitd /
 COPY --link --from=buildctl /usr/bin/buildctl /
 
 FROM binaries-$TARGETOS AS binaries
-# enable scanning for this stage
+# BUILDKIT_SBOM_SCAN_STAGE enables SBOM scanning for this stage
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 
 FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS releaser
@@ -228,7 +228,7 @@ RUN --mount=target=/root/.cache,type=cache <<EOT
   fi
 EOT
 
-# containerd v1.6 for integration tests
+# containerd-alt-16 builds containerd v1.6 for integration tests
 FROM gobuild-base AS containerd-alt-16
 WORKDIR /go/src/github.com/containerd/containerd
 ARG CONTAINERD_ALT_VERSION_16
@@ -433,7 +433,7 @@ ENV BUILDKIT_RUN_NETWORK_INTEGRATION_TESTS=1 BUILDKIT_CNI_INIT_LOCK_PATH=/run/bu
 FROM integration-tests AS dev-env
 VOLUME /var/lib/buildkit
 
-# Rootless mode.
+# rootless builds a rootless variant of buildkitd image
 FROM alpine:${ALPINE_VERSION} AS rootless
 RUN apk add --no-cache fuse3 fuse-overlayfs git openssh pigz shadow-uidmap xz
 RUN adduser -D -u 1000 user \

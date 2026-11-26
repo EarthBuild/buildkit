@@ -153,6 +153,7 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 
 	opt = base.WorkerOpt{
 		ID:               id,
+		Root:             root,
 		Labels:           xlabels,
 		MetadataStore:    md,
 		NetworkProviders: np,
