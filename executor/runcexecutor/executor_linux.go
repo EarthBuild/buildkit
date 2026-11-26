@@ -5,13 +5,10 @@ import (
 	"context"
 	"io"
 	"os"
-<<<<<<< earthbuild/main
-	"runtime"
-=======
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
->>>>>>> v0.16.0
 	"syscall"
 
 	"github.com/containerd/console"
