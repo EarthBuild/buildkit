@@ -534,7 +534,6 @@ func (m *tmpfsMount) IdentityMapping() *idtools.IdentityMapping {
 	return m.idmap
 }
 
-<<<<<<< origin/main
 // earthly-specific hostbind functions
 func newHostBind(source string, idmap *idtools.IdentityMapping) cache.Mountable {
 	return &hostBind{source: source, idmap: idmap}
@@ -573,17 +572,10 @@ func (m *hostBindMount) IdentityMapping() *idtools.IdentityMapping {
 	return m.idmap
 }
 
-var cacheRefsLocker = locker.New()
-var sharedCacheRefs = &cacheRefs{}
-||||||| v0.16.0
-var cacheRefsLocker = locker.New()
-var sharedCacheRefs = &cacheRefs{}
-=======
 var (
 	cacheRefsLocker = locker.New()
 	sharedCacheRefs = &cacheRefs{}
 )
->>>>>>> v0.17.3
 
 type cacheRefs struct {
 	mu     sync.Mutex

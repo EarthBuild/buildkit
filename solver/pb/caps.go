@@ -97,13 +97,9 @@ const (
 
 	CapSourcePolicy apicaps.CapID = "source.policy"
 
-<<<<<<< origin/main
 	CapEarthlyRegistryProxy apicaps.CapID = "earthly.regproxy" // earthly-specific
-||||||| v0.16.0
-=======
 	// GC/Prune controls allow MinFreeSpace and MaxUsedSpace to be set
 	CapGCFreeSpaceFilter apicaps.CapID = "gc.freespacefilter"
->>>>>>> v0.17.3
 )
 
 func init() {
@@ -527,12 +523,8 @@ func init() {
 	})
 
 	Caps.Init(apicaps.Cap{
-<<<<<<< origin/main
 		ID:      CapEarthlyRegistryProxy,
-||||||| v0.16.0
-=======
 		ID:      CapGCFreeSpaceFilter,
->>>>>>> v0.17.3
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
 	})

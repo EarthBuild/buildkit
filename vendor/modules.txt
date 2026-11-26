@@ -466,52 +466,7 @@ github.com/docker/cli/cli/config/configfile
 github.com/docker/cli/cli/config/credentials
 github.com/docker/cli/cli/config/types
 github.com/docker/cli/cli/connhelper/commandconn
-<<<<<<< origin/main
-# github.com/docker/distribution v2.8.2+incompatible
-## explicit
-github.com/docker/distribution
-github.com/docker/distribution/configuration
-github.com/docker/distribution/context
-github.com/docker/distribution/digestset
-github.com/docker/distribution/health
-github.com/docker/distribution/health/checks
-github.com/docker/distribution/manifest
-github.com/docker/distribution/manifest/manifestlist
-github.com/docker/distribution/manifest/ocischema
-github.com/docker/distribution/manifest/schema1
-github.com/docker/distribution/manifest/schema2
-github.com/docker/distribution/metrics
-github.com/docker/distribution/notifications
-github.com/docker/distribution/reference
-github.com/docker/distribution/registry/api/errcode
-github.com/docker/distribution/registry/api/v2
-github.com/docker/distribution/registry/auth
-github.com/docker/distribution/registry/client
-github.com/docker/distribution/registry/client/auth
-github.com/docker/distribution/registry/client/auth/challenge
-github.com/docker/distribution/registry/client/transport
-github.com/docker/distribution/registry/handlers
-github.com/docker/distribution/registry/listener
-github.com/docker/distribution/registry/middleware/registry
-github.com/docker/distribution/registry/middleware/repository
-github.com/docker/distribution/registry/proxy
-github.com/docker/distribution/registry/proxy/scheduler
-github.com/docker/distribution/registry/storage
-github.com/docker/distribution/registry/storage/cache
-github.com/docker/distribution/registry/storage/cache/memory
-github.com/docker/distribution/registry/storage/cache/redis
-github.com/docker/distribution/registry/storage/driver
-github.com/docker/distribution/registry/storage/driver/base
-github.com/docker/distribution/registry/storage/driver/factory
-github.com/docker/distribution/registry/storage/driver/middleware
-github.com/docker/distribution/uuid
-github.com/docker/distribution/version
-# github.com/docker/docker v27.2.1+incompatible
-||||||| v0.16.0
-# github.com/docker/docker v27.2.1+incompatible
-=======
 # github.com/docker/docker v27.3.1+incompatible
->>>>>>> v0.17.3
 ## explicit
 github.com/docker/docker/api
 github.com/docker/docker/api/types
@@ -701,16 +656,8 @@ github.com/moby/locker
 ## explicit; go 1.19
 github.com/moby/patternmatcher
 github.com/moby/patternmatcher/ignorefile
-<<<<<<< origin/main
-# github.com/moby/sys/mount v0.3.5
-## explicit; go 1.18
-||||||| v0.16.0
-# github.com/moby/sys/mount v0.3.3
-## explicit; go 1.16
-=======
 # github.com/moby/sys/mount v0.3.4
 ## explicit; go 1.17
->>>>>>> v0.17.3
 github.com/moby/sys/mount
 # github.com/moby/sys/mountinfo v0.7.2
 ## explicit; go 1.17

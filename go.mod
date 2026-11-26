@@ -168,15 +168,8 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-<<<<<<< origin/main
-	github.com/moby/sys/sequential v0.5.0 // indirect
-||||||| v0.16.0
-	github.com/moby/sys/mount v0.3.3 // indirect
-	github.com/moby/sys/sequential v0.5.0 // indirect
-=======
 	github.com/moby/sys/mount v0.3.4 // indirect
 	github.com/moby/sys/sequential v0.6.0 // indirect
->>>>>>> v0.17.3
 	github.com/moby/term v0.5.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -192,14 +185,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.21.0 // indirect
 	golang.org/x/text v0.18.0 // indirect
 	google.golang.org/genproto v0.0.0-20240123012728-ef4313101c80 // indirect
-<<<<<<< origin/main
-	google.golang.org/genproto/googleapis/api v0.0.0-20240123012728-ef4313101c80 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
-||||||| v0.16.0
-	google.golang.org/genproto/googleapis/api v0.0.0-20240123012728-ef4313101c80 // indirect
-=======
 	google.golang.org/genproto/googleapis/api v0.0.0-20240604185151-ef581f913117 // indirect
->>>>>>> v0.17.3
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.70 // indirect
 )

@@ -174,14 +174,8 @@ jobs:
         uses: crazy-max/ghaction-dump-context@4d9eeaf15dd59aa4346919ea84a84ccf514b4db8  # v3.1.0
 
   test-freebsd-amd64:
-<<<<<<< origin/main
     if: false  # TODO(jhorsts): Skip freebsd. Fails. Not supported by EarthBuild. Revisit after upstream merge?
-    runs-on: macos-13
-||||||| v0.16.0
-    runs-on: macos-13
-=======
     runs-on: ubuntu-22.04
->>>>>>> v0.17.3
     needs:
       - build
     env:
@@ -237,15 +231,3 @@ jobs:
         if: always()
         run: |
           vagrant ssh -- "sudo cat /vagrant/.tmp/logs/containerd"
-<<<<<<< origin/main
-      -
-        name: Dump context
-        if: failure()
-        uses: crazy-max/ghaction-dump-context@4d9eeaf15dd59aa4346919ea84a84ccf514b4db8  # v3.1.0
-||||||| v0.16.0
-      -
-        name: Dump context
-        if: failure()
-        uses: crazy-max/ghaction-dump-context@v2
-=======
->>>>>>> v0.17.3
