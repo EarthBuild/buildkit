@@ -8,6 +8,7 @@ import (
 
 	"github.com/moby/buildkit/errdefs"
 	"github.com/moby/buildkit/solver/internal/pipe"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/cond"
 	"github.com/pkg/errors"
 )

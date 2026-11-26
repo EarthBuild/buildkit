@@ -429,7 +429,7 @@ func CopyToCaller(ctx context.Context, fs fsutil.FS, id int, c session.Caller, p
 
 // CopyToCallerWithMeta is earthly specific
 func CopyToCallerWithMeta(ctx context.Context, md map[string]string, fs fsutil.FS, c session.Caller, progress func(int, bool)) error {
-	method := session.MethodURL(_FileSend_serviceDesc.ServiceName, "diffcopy")
+	method := session.MethodURL(FileSend_ServiceDesc.ServiceName, "diffcopy")
 	if !c.Supports(method) {
 		return errors.Errorf("method %s not supported by the client", method)
 	}

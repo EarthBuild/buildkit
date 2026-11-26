@@ -524,6 +524,11 @@ func init() {
 
 	Caps.Init(apicaps.Cap{
 		ID:      CapEarthlyRegistryProxy,
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
 		ID:      CapGCFreeSpaceFilter,
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
