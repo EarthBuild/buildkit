@@ -49,7 +49,9 @@ import (
 	"github.com/moby/buildkit/util/archutil"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/db/boltutil"
+	"github.com/moby/buildkit/util/disk"
 	"github.com/moby/buildkit/util/grpcerrors"
+	_ "github.com/moby/buildkit/util/grpcutil/encoding/proto"
 	"github.com/moby/buildkit/util/profiler"
 	"github.com/moby/buildkit/util/resolver"
 	"github.com/moby/buildkit/util/stack"
@@ -598,8 +600,10 @@ func setDefaultConfig(cfg *config.Config) {
 	}
 }
 
-var isRootlessConfigOnce sync.Once
-var isRootlessConfigValue bool
+var (
+	isRootlessConfigOnce  sync.Once
+	isRootlessConfigValue bool
+)
 
 // isRootlessConfig is true if we should be using the rootless config
 // defaults instead of the normal defaults.
@@ -792,6 +796,7 @@ func serverCredentials(cfg config.TLSConfig) (*tls.Config, error) {
 	}
 	tlsConf := &tls.Config{
 		Certificates: []tls.Certificate{certificate},
+		NextProtos:   []string{"h2"},
 	}
 	if caFile != "" {
 		certPool := x509.NewCertPool()
@@ -979,16 +984,23 @@ func getGCPolicy(cfg config.GCConfig, root string) []client.PruneInfo {
 	if cfg.GC != nil && !*cfg.GC {
 		return nil
 	}
+	dstat, _ := disk.GetDiskStat(root)
 	if len(cfg.GCPolicy) == 0 {
-		cfg.GCPolicy = config.DefaultGCPolicy(cfg.GCKeepStorage)
+		cfg.GCPolicy = config.DefaultGCPolicy(cfg, dstat)
 	}
 	out := make([]client.PruneInfo, 0, len(cfg.GCPolicy))
 	for _, rule := range cfg.GCPolicy {
+		//nolint:staticcheck
+		if rule.ReservedSpace == (config.DiskSpace{}) && rule.KeepBytes != (config.DiskSpace{}) {
+			rule.ReservedSpace = rule.KeepBytes
+		}
 		out = append(out, client.PruneInfo{
-			Filter:       rule.Filters,
-			All:          rule.All,
-			KeepBytes:    rule.KeepBytes.AsBytes(root),
-			KeepDuration: rule.KeepDuration.Duration,
+			Filter:        rule.Filters,
+			All:           rule.All,
+			KeepDuration:  rule.KeepDuration.Duration,
+			ReservedSpace: rule.ReservedSpace.AsBytes(dstat),
+			MaxUsedSpace:  rule.MaxUsedSpace.AsBytes(dstat),
+			MinFreeSpace:  rule.MinFreeSpace.AsBytes(dstat),
 		})
 	}
 	return out

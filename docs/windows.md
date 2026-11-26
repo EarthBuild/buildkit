@@ -45,7 +45,8 @@ You will be asked to restart your machine, do so, and then continue with the res
 1. Start the `containerd` service, if not yet started.
 1. Download and extract:
     ```powershell
-    $version = "v0.13.0-rc2" # specify the release version, v0.13+
+    $url = "https://api.github.com/repos/moby/buildkit/releases/latest"
+    $version = (Invoke-RestMethod -Uri $url -UseBasicParsing).tag_name
     $arch = "amd64" # arm64 binary available too
     curl.exe -LO https://github.com/moby/buildkit/releases/download/$version/buildkit-$version.windows-$arch.tar.gz
     # there could be another `.\bin` directory from containerd instructions
@@ -154,6 +155,10 @@ Now that everything is setup, let's build a [simple _hello world_ image](https:/
     This message shows that your installation appears to be working correctly.
     "@
     ```
+
+    > **NOTE:** Writing to a file directly under `C:\` needs extra permissions that are `ContainerAdministrator`.
+    > The `ContainerUser` is default user for `nanoserver` image. See more details at [#4731](https://github.com/moby/buildkit/issues/4731).
+
 1. Build and push to your registry (or set to `push=false`). For Docker Hub, make sure you've done `docker login`. See more details on registry configuration [here](../README.md#imageregistry)
 
     ```powershell

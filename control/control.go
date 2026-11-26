@@ -3,7 +3,12 @@ package control
 import (
 	"context"
 	"fmt"
+<<<<<<< origin/main
 	"math"
+||||||| v0.16.0
+=======
+	"runtime/trace"
+>>>>>>> v0.17.3
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -37,6 +42,7 @@ import (
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/db"
+	"github.com/moby/buildkit/util/entitlements"
 	"github.com/moby/buildkit/util/imageutil"
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/throttle"
@@ -52,6 +58,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type Opt struct {
@@ -80,7 +87,7 @@ type Controller struct { // TODO: ControlService
 	gatewayForwarder *controlgateway.GatewayForwarder
 	throttledGC      func()
 	gcmu             sync.Mutex
-	*tracev1.UnimplementedTraceServiceServer
+	tracev1.UnimplementedTraceServiceServer
 }
 
 func NewController(opt Opt) (*Controller, error) {
@@ -169,14 +176,19 @@ func (c *Controller) DiskUsage(ctx context.Context, r *controlapi.DiskUsageReque
 				ID:          r.ID,
 				Mutable:     r.Mutable,
 				InUse:       r.InUse,
-				Size_:       r.Size,
+				Size:        r.Size,
 				Parents:     r.Parents,
 				UsageCount:  int64(r.UsageCount),
 				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
-				LastUsedAt:  r.LastUsedAt,
-				RecordType:  string(r.RecordType),
-				Shared:      r.Shared,
+				CreatedAt:   timestamppb.New(r.CreatedAt),
+				LastUsedAt: func() *timestamppb.Timestamp {
+					if r.LastUsedAt != nil {
+						return timestamppb.New(*r.LastUsedAt)
+					}
+					return nil
+				}(),
+				RecordType: string(r.RecordType),
+				Shared:     r.Shared,
 			})
 		}
 	}
@@ -213,10 +225,12 @@ func (c *Controller) Prune(req *controlapi.PruneRequest, stream controlapi.Contr
 		func(w worker.Worker) {
 			eg.Go(func() error {
 				return w.Prune(ctx, ch, client.PruneInfo{
-					Filter:       req.Filter,
-					All:          req.All,
-					KeepDuration: time.Duration(req.KeepDuration),
-					KeepBytes:    req.KeepBytes,
+					Filter:        req.Filter,
+					All:           req.All,
+					KeepDuration:  time.Duration(req.KeepDuration),
+					ReservedSpace: req.ReservedSpace,
+					MaxUsedSpace:  req.MaxUsedSpace,
+					MinFreeSpace:  req.MinFreeSpace,
 				})
 			})
 		}(w)
@@ -242,14 +256,19 @@ func (c *Controller) Prune(req *controlapi.PruneRequest, stream controlapi.Contr
 				ID:          r.ID,
 				Mutable:     r.Mutable,
 				InUse:       r.InUse,
-				Size_:       r.Size,
+				Size:        r.Size,
 				Parents:     r.Parents,
 				UsageCount:  int64(r.UsageCount),
 				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
-				LastUsedAt:  r.LastUsedAt,
-				RecordType:  string(r.RecordType),
-				Shared:      r.Shared,
+				CreatedAt:   timestamppb.New(r.CreatedAt),
+				LastUsedAt: func() *timestamppb.Timestamp {
+					if r.LastUsedAt != nil {
+						return timestamppb.New(*r.LastUsedAt)
+					}
+					return nil
+				}(),
+				RecordType: string(r.RecordType),
+				Shared:     r.Shared,
 			}); err != nil {
 				return err
 			}
@@ -344,6 +363,8 @@ func translateLegacySolveRequest(req *controlapi.SolveRequest) {
 }
 
 func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*controlapi.SolveResponse, error) {
+	defer trace.StartRegion(ctx, "Solve").End()
+	trace.Logf(ctx, "Request", "solve request: %v", req.Ref)
 	atomic.AddInt64(&c.buildCount, 1)
 	defer atomic.AddInt64(&c.buildCount, -1)
 
@@ -444,15 +465,22 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 	var procs []llbsolver.Processor
 
 	if attrs, ok := attests["sbom"]; ok {
-		src := attrs["generator"]
-		if src == "" {
-			return nil, errors.Errorf("sbom generator cannot be empty")
+		var ref reference.Named
+		params := make(map[string]string)
+		for k, v := range attrs {
+			if k == "generator" {
+				if v == "" {
+					return nil, errors.Errorf("sbom generator cannot be empty")
+				}
+				ref, err = reference.ParseNormalizedNamed(v)
+				if err != nil {
+					return nil, errors.Wrapf(err, "failed to parse sbom generator %s", v)
+				}
+				ref = reference.TagNameOnly(ref)
+			} else {
+				params[k] = v
+			}
 		}
-		ref, err := reference.ParseNormalizedNamed(src)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse sbom generator %s", src)
-		}
-		ref = reference.TagNameOnly(ref)
 
 		useCache := true
 		if v, ok := req.FrontendAttrs["no-cache"]; ok && v == "" {
@@ -464,7 +492,7 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 			resolveMode = v
 		}
 
-		procs = append(procs, proc.SBOMProcessor(ref.String(), useCache, resolveMode))
+		procs = append(procs, proc.SBOMProcessor(ref.String(), useCache, resolveMode, params))
 	}
 
 	if attrs, ok := attests["provenance"]; ok {
@@ -480,7 +508,7 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 	}, llbsolver.ExporterRequest{
 		Exporters:      expis,
 		CacheExporters: cacheExporters,
-	}, req.Entitlements, procs, req.Internal, req.SourcePolicy)
+	}, entitlementsFromPB(req.Entitlements), procs, req.Internal, req.SourcePolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -699,10 +727,12 @@ func toPBGCPolicy(in []client.PruneInfo) []*apitypes.GCPolicy {
 	policy := make([]*apitypes.GCPolicy, 0, len(in))
 	for _, p := range in {
 		policy = append(policy, &apitypes.GCPolicy{
-			All:          p.All,
-			KeepBytes:    p.KeepBytes,
-			KeepDuration: int64(p.KeepDuration),
-			Filters:      p.Filter,
+			All:           p.All,
+			Filters:       p.Filter,
+			KeepDuration:  int64(p.KeepDuration),
+			ReservedSpace: p.ReservedSpace,
+			MaxUsedSpace:  p.MaxUsedSpace,
+			MinFreeSpace:  p.MinFreeSpace,
 		})
 	}
 	return policy
@@ -720,7 +750,7 @@ func findDuplicateCacheOptions(cacheOpts []*controlapi.CacheOptionsEntry) ([]*co
 	seen := map[string]*controlapi.CacheOptionsEntry{}
 	duplicate := map[string]struct{}{}
 	for _, opt := range cacheOpts {
-		k, err := cacheOptKey(*opt)
+		k, err := cacheOptKey(opt)
 		if err != nil {
 			return nil, err
 		}
@@ -737,11 +767,11 @@ func findDuplicateCacheOptions(cacheOpts []*controlapi.CacheOptionsEntry) ([]*co
 	return duplicates, nil
 }
 
-func cacheOptKey(opt controlapi.CacheOptionsEntry) (string, error) {
+func cacheOptKey(opt *controlapi.CacheOptionsEntry) (string, error) {
 	if opt.Type == "registry" && opt.Attrs["ref"] != "" {
 		return opt.Attrs["ref"], nil
 	}
-	var rawOpt = struct {
+	rawOpt := struct {
 		Type  string
 		Attrs map[string]string
 	}{
@@ -779,4 +809,12 @@ const timestampKey = "buildkit-current-timestamp"
 
 func sendTimestampHeader(srv grpc.ServerStream) error {
 	return srv.SendHeader(metadata.Pairs(timestampKey, time.Now().Format(time.RFC3339Nano)))
+}
+
+func entitlementsFromPB(elems []string) []entitlements.Entitlement {
+	clone := make([]entitlements.Entitlement, len(elems))
+	for i, e := range elems {
+		clone[i] = entitlements.Entitlement(e)
+	}
+	return clone
 }

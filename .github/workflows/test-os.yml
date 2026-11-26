@@ -174,12 +174,17 @@ jobs:
         uses: crazy-max/ghaction-dump-context@4d9eeaf15dd59aa4346919ea84a84ccf514b4db8  # v3.1.0
 
   test-freebsd-amd64:
+<<<<<<< origin/main
     if: false  # TODO(jhorsts): Skip freebsd. Fails. Not supported by EarthBuild. Revisit after upstream merge?
     runs-on: macos-13
+||||||| v0.16.0
+    runs-on: macos-13
+=======
+    runs-on: ubuntu-22.04
+>>>>>>> v0.17.3
     needs:
       - build
     env:
-      VAGRANT_VAGRANTFILE: hack/Vagrantfile.freebsd13
       GOOS: freebsd
     steps:
       -
@@ -196,25 +201,23 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.vagrant.d/boxes
-          key: ${{ runner.os }}-vagrant-${{ hashFiles('hack/Vagrantfile.freebsd13') }}
+          key: ${{ runner.os }}-vagrant-${{ hashFiles('hack/Vagrantfile.freebsd') }}
           restore-keys: |
             ${{ runner.os }}-vagrant-
       -
-        name: Install vagrant and VirtualBox
+        name: Install vagrant
         run: |
           set -x
-          brew tap hashicorp/tap
-          brew install hashicorp/tap/hashicorp-vagrant
-          brew install --cask virtualbox
-      -
-        name: Check versions
-        run: |
-          set -x
+          sudo apt-get update
+          sudo apt-get install -y libvirt-daemon libvirt-daemon-system vagrant vagrant-libvirt ruby-libvirt
+          sudo systemctl enable --now libvirtd
+          sudo chmod a+rw /var/run/libvirt/libvirt-sock
+          vagrant plugin install vagrant-libvirt
           vagrant --version
-          VBoxManage -v
       -
         name: Set up vagrant
         run: |
+          ln -sf hack/Vagrantfile.freebsd Vagrantfile
           vagrant up --no-tty
       -
         name: Smoke test
@@ -234,7 +237,15 @@ jobs:
         if: always()
         run: |
           vagrant ssh -- "sudo cat /vagrant/.tmp/logs/containerd"
+<<<<<<< origin/main
       -
         name: Dump context
         if: failure()
         uses: crazy-max/ghaction-dump-context@4d9eeaf15dd59aa4346919ea84a84ccf514b4db8  # v3.1.0
+||||||| v0.16.0
+      -
+        name: Dump context
+        if: failure()
+        uses: crazy-max/ghaction-dump-context@v2
+=======
+>>>>>>> v0.17.3

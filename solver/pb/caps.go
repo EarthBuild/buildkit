@@ -64,12 +64,14 @@ const (
 	CapExecMountContentCache             apicaps.CapID = "exec.mount.cache.content"
 	CapExecCgroupsMounted                apicaps.CapID = "exec.cgroup"
 	CapExecSecretEnv                     apicaps.CapID = "exec.secretenv"
+	CapExecValidExitCode                 apicaps.CapID = "exec.validexitcode"
 
 	CapFileBase                               apicaps.CapID = "file.base"
 	CapFileRmWildcard                         apicaps.CapID = "file.rm.wildcard"
 	CapFileCopyIncludeExcludePatterns         apicaps.CapID = "file.copy.includeexcludepatterns"
 	CapFileRmNoFollowSymlink                  apicaps.CapID = "file.rm.nofollowsymlink"
 	CapFileCopyAlwaysReplaceExistingDestPaths apicaps.CapID = "file.copy.alwaysreplaceexistingdestpaths"
+	CapFileCopyModeStringFormat               apicaps.CapID = "file.copy.modestring"
 
 	CapConstraints apicaps.CapID = "constraints"
 	CapPlatform    apicaps.CapID = "platform"
@@ -95,7 +97,13 @@ const (
 
 	CapSourcePolicy apicaps.CapID = "source.policy"
 
+<<<<<<< origin/main
 	CapEarthlyRegistryProxy apicaps.CapID = "earthly.regproxy" // earthly-specific
+||||||| v0.16.0
+=======
+	// GC/Prune controls allow MinFreeSpace and MaxUsedSpace to be set
+	CapGCFreeSpaceFilter apicaps.CapID = "gc.freespacefilter"
+>>>>>>> v0.17.3
 )
 
 func init() {
@@ -388,6 +396,12 @@ func init() {
 	})
 
 	Caps.Init(apicaps.Cap{
+		ID:      CapExecValidExitCode,
+		Enabled: true,
+		Status:  apicaps.CapStatusExperimental,
+	})
+
+	Caps.Init(apicaps.Cap{
 		ID:      CapFileBase,
 		Enabled: true,
 		Status:  apicaps.CapStatusPrerelease,
@@ -513,7 +527,12 @@ func init() {
 	})
 
 	Caps.Init(apicaps.Cap{
+<<<<<<< origin/main
 		ID:      CapEarthlyRegistryProxy,
+||||||| v0.16.0
+=======
+		ID:      CapGCFreeSpaceFilter,
+>>>>>>> v0.17.3
 		Enabled: true,
 		Status:  apicaps.CapStatusExperimental,
 	})
