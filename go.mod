@@ -150,42 +150,20 @@ require (
 	github.com/docker/libtrust v0.0.0-20160708172513-aabc10ec26b7 // indirect
 	github.com/felixge/fgprof v0.9.3 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-<<<<<<< origin/chore-buildkit-merge-v0.17.3
-	github.com/garyburd/redigo v1.6.4 // indirect
-	github.com/go-logr/logr v1.4.1 // indirect
-||||||| v0.17.3
-	github.com/go-logr/logr v1.4.1 // indirect
-=======
 	github.com/go-logr/logr v1.4.2 // indirect
->>>>>>> v0.18.2
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/pprof v0.0.0-20240424215950-a892ee059fd6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-<<<<<<< origin/chore-buildkit-merge-v0.17.3
-	github.com/gorilla/handlers v1.5.2 // indirect
-	github.com/gorilla/mux v1.8.0 // indirect
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
-||||||| v0.17.3
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
-=======
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0 // indirect
->>>>>>> v0.18.2
 	github.com/hanwen/go-fuse/v2 v2.4.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
-<<<<<<< origin/chore-buildkit-merge-v0.17.3
-	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-||||||| v0.17.3
-	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/moby/sys/mount v0.3.4 // indirect
-=======
-	github.com/moby/sys/mount v0.3.4 // indirect
->>>>>>> v0.18.2
 	github.com/moby/sys/sequential v0.6.0 // indirect
 	github.com/moby/term v0.5.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
@@ -203,14 +181,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.28.0 // indirect
 	golang.org/x/text v0.18.0 // indirect
 	google.golang.org/genproto v0.0.0-20240123012728-ef4313101c80 // indirect
-<<<<<<< origin/chore-buildkit-merge-v0.17.3
-	google.golang.org/genproto/googleapis/api v0.0.0-20240604185151-ef581f913117 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
-||||||| v0.17.3
-	google.golang.org/genproto/googleapis/api v0.0.0-20240604185151-ef581f913117 // indirect
-=======
 	google.golang.org/genproto/googleapis/api v0.0.0-20240701130421-f6361c86f094 // indirect
->>>>>>> v0.18.2
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.70 // indirect
 )

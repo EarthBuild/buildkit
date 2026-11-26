@@ -348,14 +348,8 @@ func main() {
 			return err
 		}
 
-<<<<<<< origin/chore-buildkit-merge-v0.17.3
 		shutdownCh := make(chan struct{})
-		controller, err := newController(c, &cfg, shutdownCh)
-||||||| v0.17.3
-		controller, err := newController(c, &cfg)
-=======
-		controller, err := newController(ctx, c, &cfg)
->>>>>>> v0.18.2
+		controller, err := newController(ctx, c, &cfg, shutdownCh)
 		if err != nil {
 			return err
 		}
@@ -820,21 +814,13 @@ func serverCredentials(cfg config.TLSConfig) (*tls.Config, error) {
 	return tlsConf, nil
 }
 
-<<<<<<< origin/chore-buildkit-merge-v0.17.3
-func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{}) (*control.Controller, error) {
+func newController(ctx context.Context, c *cli.Context, cfg *config.Config, shutdownCh chan struct{}) (*control.Controller, error) {
 	sessionManager, err := session.NewManager(&session.ManagerOpt{
 		HealthFrequency:       cfg.Health.Frequency,
 		HealthAllowedFailures: cfg.Health.AllowedFailures,
 		HealthTimeout:         cfg.Health.Timeout,
 		ShutdownCh:            shutdownCh,
 	})
-||||||| v0.17.3
-func newController(c *cli.Context, cfg *config.Config) (*control.Controller, error) {
-	sessionManager, err := session.NewManager()
-=======
-func newController(ctx context.Context, c *cli.Context, cfg *config.Config) (*control.Controller, error) {
-	sessionManager, err := session.NewManager()
->>>>>>> v0.18.2
 	if err != nil {
 		return nil, err
 	}
