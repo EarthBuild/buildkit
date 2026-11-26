@@ -22,30 +22,6 @@ const (
 )
 
 type WorkerRecord struct {
-<<<<<<< origin/main
-	ID              string            `protobuf:"bytes,1,opt,name=ID,proto3" json:"ID,omitempty"`
-	Labels          map[string]string `protobuf:"bytes,2,rep,name=Labels,proto3" json:"Labels,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
-	Platforms       []pb.Platform     `protobuf:"bytes,3,rep,name=platforms,proto3" json:"platforms"`
-	GCPolicy        []*GCPolicy       `protobuf:"bytes,4,rep,name=GCPolicy,proto3" json:"GCPolicy,omitempty"`
-	BuildkitVersion *BuildkitVersion  `protobuf:"bytes,5,opt,name=BuildkitVersion,proto3" json:"BuildkitVersion,omitempty"`
-	// Earthly-specific.
-	ParallelismCurrent   int64        `protobuf:"varint,101,opt,name=parallelismCurrent,proto3" json:"parallelismCurrent,omitempty"`
-	ParallelismMax       int64        `protobuf:"varint,102,opt,name=parallelismMax,proto3" json:"parallelismMax,omitempty"`
-	ParallelismWaiting   int64        `protobuf:"varint,103,opt,name=parallelismWaiting,proto3" json:"parallelismWaiting,omitempty"`
-	GCAnalytics          *GCAnalytics `protobuf:"bytes,104,opt,name=GCAnalytics,proto3" json:"GCAnalytics,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}     `json:"-"`
-	XXX_unrecognized     []byte       `json:"-"`
-	XXX_sizecache        int32        `json:"-"`
-||||||| v0.16.0
-	ID                   string            `protobuf:"bytes,1,opt,name=ID,proto3" json:"ID,omitempty"`
-	Labels               map[string]string `protobuf:"bytes,2,rep,name=Labels,proto3" json:"Labels,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
-	Platforms            []pb.Platform     `protobuf:"bytes,3,rep,name=platforms,proto3" json:"platforms"`
-	GCPolicy             []*GCPolicy       `protobuf:"bytes,4,rep,name=GCPolicy,proto3" json:"GCPolicy,omitempty"`
-	BuildkitVersion      *BuildkitVersion  `protobuf:"bytes,5,opt,name=BuildkitVersion,proto3" json:"BuildkitVersion,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
-=======
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -55,7 +31,11 @@ type WorkerRecord struct {
 	Platforms       []*pb.Platform    `protobuf:"bytes,3,rep,name=platforms,proto3" json:"platforms,omitempty"`
 	GCPolicy        []*GCPolicy       `protobuf:"bytes,4,rep,name=GCPolicy,proto3" json:"GCPolicy,omitempty"`
 	BuildkitVersion *BuildkitVersion  `protobuf:"bytes,5,opt,name=BuildkitVersion,proto3" json:"BuildkitVersion,omitempty"`
->>>>>>> v0.17.3
+	// Earthly-specific.
+	ParallelismCurrent int64        `protobuf:"varint,101,opt,name=parallelismCurrent,proto3" json:"parallelismCurrent,omitempty"`
+	ParallelismMax     int64        `protobuf:"varint,102,opt,name=parallelismMax,proto3" json:"parallelismMax,omitempty"`
+	ParallelismWaiting int64        `protobuf:"varint,103,opt,name=parallelismWaiting,proto3" json:"parallelismWaiting,omitempty"`
+	GCAnalytics        *GCAnalytics `protobuf:"bytes,104,opt,name=GCAnalytics,proto3" json:"GCAnalytics,omitempty"`
 }
 
 func (x *WorkerRecord) Reset() {
@@ -123,35 +103,39 @@ func (x *WorkerRecord) GetBuildkitVersion() *BuildkitVersion {
 	return nil
 }
 
-func (m *WorkerRecord) GetParallelismCurrent() int64 {
-	if m != nil {
-		return m.ParallelismCurrent
+func (x *WorkerRecord) GetParallelismCurrent() int64 {
+	if x != nil {
+		return x.ParallelismCurrent
 	}
 	return 0
 }
 
-func (m *WorkerRecord) GetParallelismMax() int64 {
-	if m != nil {
-		return m.ParallelismMax
+func (x *WorkerRecord) GetParallelismMax() int64 {
+	if x != nil {
+		return x.ParallelismMax
 	}
 	return 0
 }
 
-func (m *WorkerRecord) GetParallelismWaiting() int64 {
-	if m != nil {
-		return m.ParallelismWaiting
+func (x *WorkerRecord) GetParallelismWaiting() int64 {
+	if x != nil {
+		return x.ParallelismWaiting
 	}
 	return 0
 }
 
-func (m *WorkerRecord) GetGCAnalytics() *GCAnalytics {
-	if m != nil {
-		return m.GCAnalytics
+func (x *WorkerRecord) GetGCAnalytics() *GCAnalytics {
+	if x != nil {
+		return x.GCAnalytics
 	}
 	return nil
 }
 
 type GCAnalytics struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
 	// Summary of last numRuns.
 	NumRuns           int64 `protobuf:"varint,1,opt,name=numRuns,proto3" json:"numRuns,omitempty"`
 	NumFailures       int64 `protobuf:"varint,2,opt,name=numFailures,proto3" json:"numFailures,omitempty"`
@@ -169,187 +153,181 @@ type GCAnalytics struct {
 	CurrentNumRecordsBefore  int64 `protobuf:"varint,12,opt,name=currentNumRecordsBefore,proto3" json:"currentNumRecordsBefore,omitempty"`
 	CurrentSizeBefore        int64 `protobuf:"varint,13,opt,name=currentSizeBefore,proto3" json:"currentSizeBefore,omitempty"`
 	// Last run.
-	LastStartTimeSecEpoch int64    `protobuf:"varint,14,opt,name=lastStartTimeSecEpoch,proto3" json:"lastStartTimeSecEpoch,omitempty"`
-	LastEndTimeSecEpoch   int64    `protobuf:"varint,15,opt,name=lastEndTimeSecEpoch,proto3" json:"lastEndTimeSecEpoch,omitempty"`
-	LastNumRecordsBefore  int64    `protobuf:"varint,16,opt,name=lastNumRecordsBefore,proto3" json:"lastNumRecordsBefore,omitempty"`
-	LastSizeBefore        int64    `protobuf:"varint,17,opt,name=lastSizeBefore,proto3" json:"lastSizeBefore,omitempty"`
-	LastNumRecordsCleared int64    `protobuf:"varint,18,opt,name=lastNumRecordsCleared,proto3" json:"lastNumRecordsCleared,omitempty"`
-	LastSizeCleared       int64    `protobuf:"varint,19,opt,name=lastSizeCleared,proto3" json:"lastSizeCleared,omitempty"`
-	LastSuccess           bool     `protobuf:"varint,20,opt,name=lastSuccess,proto3" json:"lastSuccess,omitempty"`
-	XXX_NoUnkeyedLiteral  struct{} `json:"-"`
-	XXX_unrecognized      []byte   `json:"-"`
-	XXX_sizecache         int32    `json:"-"`
+	LastStartTimeSecEpoch int64 `protobuf:"varint,14,opt,name=lastStartTimeSecEpoch,proto3" json:"lastStartTimeSecEpoch,omitempty"`
+	LastEndTimeSecEpoch   int64 `protobuf:"varint,15,opt,name=lastEndTimeSecEpoch,proto3" json:"lastEndTimeSecEpoch,omitempty"`
+	LastNumRecordsBefore  int64 `protobuf:"varint,16,opt,name=lastNumRecordsBefore,proto3" json:"lastNumRecordsBefore,omitempty"`
+	LastSizeBefore        int64 `protobuf:"varint,17,opt,name=lastSizeBefore,proto3" json:"lastSizeBefore,omitempty"`
+	LastNumRecordsCleared int64 `protobuf:"varint,18,opt,name=lastNumRecordsCleared,proto3" json:"lastNumRecordsCleared,omitempty"`
+	LastSizeCleared       int64 `protobuf:"varint,19,opt,name=lastSizeCleared,proto3" json:"lastSizeCleared,omitempty"`
+	LastSuccess           bool  `protobuf:"varint,20,opt,name=lastSuccess,proto3" json:"lastSuccess,omitempty"`
 }
 
-func (m *GCAnalytics) Reset()         { *m = GCAnalytics{} }
-func (m *GCAnalytics) String() string { return proto.CompactTextString(m) }
-func (*GCAnalytics) ProtoMessage()    {}
-func (*GCAnalytics) Descriptor() ([]byte, []int) {
-	return fileDescriptor_e4ff6184b07e587a, []int{1}
+func (x *GCAnalytics) Reset() {
+	*x = GCAnalytics{}
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
-func (m *GCAnalytics) XXX_Unmarshal(b []byte) error {
-	return m.Unmarshal(b)
+
+func (x *GCAnalytics) String() string {
+	return protoimpl.X.MessageStringOf(x)
 }
-func (m *GCAnalytics) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	if deterministic {
-		return xxx_messageInfo_GCAnalytics.Marshal(b, m, deterministic)
-	} else {
-		b = b[:cap(b)]
-		n, err := m.MarshalToSizedBuffer(b)
-		if err != nil {
-			return nil, err
+
+func (*GCAnalytics) ProtoMessage() {}
+
+func (x *GCAnalytics) ProtoReflect() protoreflect.Message {
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
 		}
-		return b[:n], nil
+		return ms
 	}
-}
-func (m *GCAnalytics) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GCAnalytics.Merge(m, src)
-}
-func (m *GCAnalytics) XXX_Size() int {
-	return m.Size()
-}
-func (m *GCAnalytics) XXX_DiscardUnknown() {
-	xxx_messageInfo_GCAnalytics.DiscardUnknown(m)
+	return mi.MessageOf(x)
 }
 
-var xxx_messageInfo_GCAnalytics proto.InternalMessageInfo
+// Deprecated: Use GCAnalytics.ProtoReflect.Descriptor instead.
+func (*GCAnalytics) Descriptor() ([]byte, []int) {
+	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{1}
+}
 
-func (m *GCAnalytics) GetNumRuns() int64 {
-	if m != nil {
-		return m.NumRuns
+func (x *GCAnalytics) GetNumRuns() int64 {
+	if x != nil {
+		return x.NumRuns
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetNumFailures() int64 {
-	if m != nil {
-		return m.NumFailures
+func (x *GCAnalytics) GetNumFailures() int64 {
+	if x != nil {
+		return x.NumFailures
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetAvgDurationMs() int64 {
-	if m != nil {
-		return m.AvgDurationMs
+func (x *GCAnalytics) GetAvgDurationMs() int64 {
+	if x != nil {
+		return x.AvgDurationMs
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetAvgRecordsCleared() int64 {
-	if m != nil {
-		return m.AvgRecordsCleared
+func (x *GCAnalytics) GetAvgRecordsCleared() int64 {
+	if x != nil {
+		return x.AvgRecordsCleared
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetAvgSizeCleared() int64 {
-	if m != nil {
-		return m.AvgSizeCleared
+func (x *GCAnalytics) GetAvgSizeCleared() int64 {
+	if x != nil {
+		return x.AvgSizeCleared
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetAvgRecordsBefore() int64 {
-	if m != nil {
-		return m.AvgRecordsBefore
+func (x *GCAnalytics) GetAvgRecordsBefore() int64 {
+	if x != nil {
+		return x.AvgRecordsBefore
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetAvgSizeBefore() int64 {
-	if m != nil {
-		return m.AvgSizeBefore
+func (x *GCAnalytics) GetAvgSizeBefore() int64 {
+	if x != nil {
+		return x.AvgSizeBefore
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetAllTimeRuns() int64 {
-	if m != nil {
-		return m.AllTimeRuns
+func (x *GCAnalytics) GetAllTimeRuns() int64 {
+	if x != nil {
+		return x.AllTimeRuns
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetAllTimeMaxDurationMs() int64 {
-	if m != nil {
-		return m.AllTimeMaxDurationMs
+func (x *GCAnalytics) GetAllTimeMaxDurationMs() int64 {
+	if x != nil {
+		return x.AllTimeMaxDurationMs
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetAllTimeDurationMs() int64 {
-	if m != nil {
-		return m.AllTimeDurationMs
+func (x *GCAnalytics) GetAllTimeDurationMs() int64 {
+	if x != nil {
+		return x.AllTimeDurationMs
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetCurrentStartTimeSecEpoch() int64 {
-	if m != nil {
-		return m.CurrentStartTimeSecEpoch
+func (x *GCAnalytics) GetCurrentStartTimeSecEpoch() int64 {
+	if x != nil {
+		return x.CurrentStartTimeSecEpoch
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetCurrentNumRecordsBefore() int64 {
-	if m != nil {
-		return m.CurrentNumRecordsBefore
+func (x *GCAnalytics) GetCurrentNumRecordsBefore() int64 {
+	if x != nil {
+		return x.CurrentNumRecordsBefore
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetCurrentSizeBefore() int64 {
-	if m != nil {
-		return m.CurrentSizeBefore
+func (x *GCAnalytics) GetCurrentSizeBefore() int64 {
+	if x != nil {
+		return x.CurrentSizeBefore
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetLastStartTimeSecEpoch() int64 {
-	if m != nil {
-		return m.LastStartTimeSecEpoch
+func (x *GCAnalytics) GetLastStartTimeSecEpoch() int64 {
+	if x != nil {
+		return x.LastStartTimeSecEpoch
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetLastEndTimeSecEpoch() int64 {
-	if m != nil {
-		return m.LastEndTimeSecEpoch
+func (x *GCAnalytics) GetLastEndTimeSecEpoch() int64 {
+	if x != nil {
+		return x.LastEndTimeSecEpoch
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetLastNumRecordsBefore() int64 {
-	if m != nil {
-		return m.LastNumRecordsBefore
+func (x *GCAnalytics) GetLastNumRecordsBefore() int64 {
+	if x != nil {
+		return x.LastNumRecordsBefore
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetLastSizeBefore() int64 {
-	if m != nil {
-		return m.LastSizeBefore
+func (x *GCAnalytics) GetLastSizeBefore() int64 {
+	if x != nil {
+		return x.LastSizeBefore
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetLastNumRecordsCleared() int64 {
-	if m != nil {
-		return m.LastNumRecordsCleared
+func (x *GCAnalytics) GetLastNumRecordsCleared() int64 {
+	if x != nil {
+		return x.LastNumRecordsCleared
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetLastSizeCleared() int64 {
-	if m != nil {
-		return m.LastSizeCleared
+func (x *GCAnalytics) GetLastSizeCleared() int64 {
+	if x != nil {
+		return x.LastSizeCleared
 	}
 	return 0
 }
 
-func (m *GCAnalytics) GetLastSuccess() bool {
-	if m != nil {
-		return m.LastSuccess
+func (x *GCAnalytics) GetLastSuccess() bool {
+	if x != nil {
+		return x.LastSuccess
 	}
 	return false
 }
@@ -368,25 +346,11 @@ type GCPolicy struct {
 	MinFreeSpace  int64 `protobuf:"varint,6,opt,name=minFreeSpace,proto3" json:"minFreeSpace,omitempty"`
 }
 
-<<<<<<< origin/main
-func (m *GCPolicy) Reset()         { *m = GCPolicy{} }
-func (m *GCPolicy) String() string { return proto.CompactTextString(m) }
-func (*GCPolicy) ProtoMessage()    {}
-func (*GCPolicy) Descriptor() ([]byte, []int) {
-	return fileDescriptor_e4ff6184b07e587a, []int{2}
-||||||| v0.16.0
-func (m *GCPolicy) Reset()         { *m = GCPolicy{} }
-func (m *GCPolicy) String() string { return proto.CompactTextString(m) }
-func (*GCPolicy) ProtoMessage()    {}
-func (*GCPolicy) Descriptor() ([]byte, []int) {
-	return fileDescriptor_e4ff6184b07e587a, []int{1}
-=======
 func (x *GCPolicy) Reset() {
 	*x = GCPolicy{}
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[1]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
->>>>>>> v0.17.3
 }
 
 func (x *GCPolicy) String() string {
@@ -396,7 +360,7 @@ func (x *GCPolicy) String() string {
 func (*GCPolicy) ProtoMessage() {}
 
 func (x *GCPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[1]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -409,7 +373,7 @@ func (x *GCPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GCPolicy.ProtoReflect.Descriptor instead.
 func (*GCPolicy) Descriptor() ([]byte, []int) {
-	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{1}
+	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GCPolicy) GetAll() bool {
@@ -466,7 +430,7 @@ type BuildkitVersion struct {
 
 func (x *BuildkitVersion) Reset() {
 	*x = BuildkitVersion{}
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[2]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -478,7 +442,7 @@ func (x *BuildkitVersion) String() string {
 func (*BuildkitVersion) ProtoMessage() {}
 
 func (x *BuildkitVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[2]
+	mi := &file_github_com_moby_buildkit_api_types_worker_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -491,61 +455,7 @@ func (x *BuildkitVersion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildkitVersion.ProtoReflect.Descriptor instead.
 func (*BuildkitVersion) Descriptor() ([]byte, []int) {
-<<<<<<< origin/main
-	return fileDescriptor_e4ff6184b07e587a, []int{3}
-}
-func (m *BuildkitVersion) XXX_Unmarshal(b []byte) error {
-	return m.Unmarshal(b)
-}
-func (m *BuildkitVersion) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	if deterministic {
-		return xxx_messageInfo_BuildkitVersion.Marshal(b, m, deterministic)
-	} else {
-		b = b[:cap(b)]
-		n, err := m.MarshalToSizedBuffer(b)
-		if err != nil {
-			return nil, err
-		}
-		return b[:n], nil
-	}
-}
-func (m *BuildkitVersion) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_BuildkitVersion.Merge(m, src)
-}
-func (m *BuildkitVersion) XXX_Size() int {
-	return m.Size()
-}
-func (m *BuildkitVersion) XXX_DiscardUnknown() {
-	xxx_messageInfo_BuildkitVersion.DiscardUnknown(m)
-||||||| v0.16.0
-	return fileDescriptor_e4ff6184b07e587a, []int{2}
-}
-func (m *BuildkitVersion) XXX_Unmarshal(b []byte) error {
-	return m.Unmarshal(b)
-}
-func (m *BuildkitVersion) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	if deterministic {
-		return xxx_messageInfo_BuildkitVersion.Marshal(b, m, deterministic)
-	} else {
-		b = b[:cap(b)]
-		n, err := m.MarshalToSizedBuffer(b)
-		if err != nil {
-			return nil, err
-		}
-		return b[:n], nil
-	}
-}
-func (m *BuildkitVersion) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_BuildkitVersion.Merge(m, src)
-}
-func (m *BuildkitVersion) XXX_Size() int {
-	return m.Size()
-}
-func (m *BuildkitVersion) XXX_DiscardUnknown() {
-	xxx_messageInfo_BuildkitVersion.DiscardUnknown(m)
-=======
-	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{2}
->>>>>>> v0.17.3
+	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *BuildkitVersion) GetPackage() string {
@@ -569,2870 +479,8 @@ func (x *BuildkitVersion) GetRevision() string {
 	return ""
 }
 
-<<<<<<< origin/main
-func init() {
-	proto.RegisterType((*WorkerRecord)(nil), "moby.buildkit.v1.types.WorkerRecord")
-	proto.RegisterMapType((map[string]string)(nil), "moby.buildkit.v1.types.WorkerRecord.LabelsEntry")
-	proto.RegisterType((*GCAnalytics)(nil), "moby.buildkit.v1.types.GCAnalytics")
-	proto.RegisterType((*GCPolicy)(nil), "moby.buildkit.v1.types.GCPolicy")
-	proto.RegisterType((*BuildkitVersion)(nil), "moby.buildkit.v1.types.BuildkitVersion")
-}
-||||||| v0.16.0
-func init() {
-	proto.RegisterType((*WorkerRecord)(nil), "moby.buildkit.v1.types.WorkerRecord")
-	proto.RegisterMapType((map[string]string)(nil), "moby.buildkit.v1.types.WorkerRecord.LabelsEntry")
-	proto.RegisterType((*GCPolicy)(nil), "moby.buildkit.v1.types.GCPolicy")
-	proto.RegisterType((*BuildkitVersion)(nil), "moby.buildkit.v1.types.BuildkitVersion")
-}
-=======
 var File_github_com_moby_buildkit_api_types_worker_proto protoreflect.FileDescriptor
->>>>>>> v0.17.3
 
-<<<<<<< origin/main
-func init() { proto.RegisterFile("worker.proto", fileDescriptor_e4ff6184b07e587a) }
-
-var fileDescriptor_e4ff6184b07e587a = []byte{
-	// 775 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x74, 0x55, 0x5f, 0x6f, 0xd3, 0x3a,
-	0x14, 0xbf, 0x69, 0xbb, 0xad, 0x75, 0xbb, 0x7f, 0xde, 0xee, 0xbd, 0x56, 0x75, 0xb5, 0x5b, 0x15,
-	0x04, 0x15, 0x1a, 0xe9, 0x18, 0x3c, 0x8c, 0x89, 0x17, 0xda, 0x95, 0x31, 0x89, 0xa1, 0x91, 0x21,
-	0xf6, 0xec, 0xa4, 0x6e, 0x66, 0xd5, 0x89, 0x23, 0x3b, 0x09, 0x2b, 0xef, 0x7c, 0x24, 0xbe, 0xc3,
-	0x1e, 0xf9, 0x04, 0x08, 0xed, 0x93, 0x20, 0x3b, 0x49, 0x93, 0xfe, 0x7b, 0xf3, 0xf9, 0xfd, 0x39,
-	0x3d, 0xe7, 0xe4, 0xd8, 0x05, 0x8d, 0xaf, 0x5c, 0x8c, 0x89, 0x30, 0x03, 0xc1, 0x43, 0x0e, 0xff,
-	0xf1, 0xb8, 0x3d, 0x31, 0xed, 0x88, 0xb2, 0xe1, 0x98, 0x86, 0x66, 0xfc, 0xc2, 0x0c, 0x27, 0x01,
-	0x91, 0xcd, 0xe7, 0x2e, 0x0d, 0x6f, 0x23, 0xdb, 0x74, 0xb8, 0xd7, 0x75, 0xb9, 0xcb, 0xbb, 0x5a,
-	0x6e, 0x47, 0x23, 0x1d, 0xe9, 0x40, 0x9f, 0x92, 0x34, 0xcd, 0xc3, 0x82, 0x5c, 0x65, 0xec, 0x66,
-	0x19, 0xbb, 0x92, 0xb3, 0x98, 0x88, 0x6e, 0x60, 0x77, 0x79, 0x20, 0x13, 0x75, 0xfb, 0x47, 0x05,
-	0x34, 0x6e, 0x74, 0x15, 0x16, 0x71, 0xb8, 0x18, 0xc2, 0x2d, 0x50, 0xba, 0x38, 0x43, 0x46, 0xcb,
-	0xe8, 0xd4, 0xac, 0xd2, 0xc5, 0x19, 0x7c, 0x0f, 0xd6, 0x3f, 0x60, 0x9b, 0x30, 0x89, 0x4a, 0xad,
-	0x72, 0xa7, 0x7e, 0x7c, 0x64, 0x2e, 0x2f, 0xd3, 0x2c, 0x66, 0x31, 0x13, 0xcb, 0xc0, 0x0f, 0xc5,
-	0xc4, 0x4a, 0xfd, 0xf0, 0x08, 0xd4, 0x02, 0x86, 0xc3, 0x11, 0x17, 0x9e, 0x44, 0x65, 0x9d, 0xac,
-	0x61, 0x06, 0xb6, 0x79, 0x95, 0x82, 0xbd, 0xca, 0xfd, 0xaf, 0xff, 0xff, 0xb2, 0x72, 0x11, 0x7c,
-	0x03, 0xaa, 0xe7, 0xfd, 0x2b, 0xce, 0xa8, 0x33, 0x41, 0x15, 0x6d, 0x68, 0xad, 0xfa, 0xf5, 0x4c,
-	0x67, 0x4d, 0x1d, 0xf0, 0x13, 0xd8, 0xee, 0xa5, 0xba, 0x2f, 0x44, 0x48, 0xca, 0x7d, 0xb4, 0xd6,
-	0x32, 0x3a, 0xf5, 0xe3, 0xa7, 0xab, 0x92, 0xcc, 0xc9, 0xad, 0x79, 0x3f, 0x34, 0x01, 0x0c, 0xb0,
-	0xc0, 0x8c, 0x11, 0x46, 0xa5, 0xd7, 0x8f, 0x84, 0x20, 0x7e, 0x88, 0x48, 0xcb, 0xe8, 0x94, 0xad,
-	0x25, 0x0c, 0x7c, 0x02, 0xb6, 0x0a, 0xe8, 0x25, 0xbe, 0x43, 0x23, 0xad, 0x9d, 0x43, 0xe7, 0xf2,
-	0xde, 0x60, 0x1a, 0x52, 0xdf, 0x45, 0xee, 0x42, 0xde, 0x94, 0x81, 0x03, 0x50, 0x3f, 0xef, 0xbf,
-	0xf5, 0x31, 0x9b, 0x84, 0xd4, 0x91, 0xe8, 0x56, 0xb7, 0xf5, 0x68, 0xf5, 0x6c, 0xa6, 0x52, 0xab,
-	0xe8, 0x6b, 0xbe, 0x06, 0xf5, 0xc2, 0x87, 0x82, 0x3b, 0xa0, 0x3c, 0x26, 0x93, 0xf4, 0xdb, 0xab,
-	0x23, 0xdc, 0x07, 0x6b, 0x31, 0x66, 0x11, 0x41, 0x25, 0x8d, 0x25, 0xc1, 0x69, 0xe9, 0xc4, 0x68,
-	0x7f, 0xdf, 0x98, 0x29, 0x01, 0x22, 0xb0, 0xe1, 0x47, 0x9e, 0x15, 0xf9, 0x52, 0xfb, 0xcb, 0x56,
-	0x16, 0xc2, 0x16, 0xa8, 0xfb, 0x91, 0xf7, 0x0e, 0x53, 0x16, 0x09, 0x22, 0x75, 0xa6, 0xb2, 0x55,
-	0x84, 0xe0, 0x63, 0xb0, 0x89, 0x63, 0xf7, 0x2c, 0x12, 0x38, 0xa4, 0xdc, 0xbf, 0x54, 0xcb, 0xa1,
-	0x34, 0xb3, 0x20, 0x3c, 0x04, 0xbb, 0x38, 0x76, 0x93, 0xfd, 0x92, 0x7d, 0x46, 0xb0, 0x20, 0x43,
-	0x54, 0xd1, 0xca, 0x45, 0x42, 0x4d, 0x1e, 0xc7, 0xee, 0x35, 0xfd, 0x46, 0x32, 0xe9, 0x5a, 0x32,
-	0xf9, 0x59, 0x14, 0x3e, 0x03, 0x3b, 0xb9, 0xb9, 0x47, 0x46, 0x5c, 0x10, 0xb4, 0xae, 0x95, 0x0b,
-	0x78, 0x5a, 0xa7, 0x72, 0xa7, 0xc2, 0x8d, 0x69, 0x9d, 0x39, 0xa8, 0xfa, 0xc5, 0x8c, 0x7d, 0xa6,
-	0x1e, 0xd1, 0xd3, 0xa8, 0x26, 0xfd, 0x16, 0x20, 0x78, 0x0c, 0xf6, 0xd3, 0xf0, 0x12, 0xdf, 0x15,
-	0xda, 0xae, 0x69, 0xe9, 0x52, 0x4e, 0x77, 0x9f, 0xe0, 0x05, 0x03, 0x48, 0xbb, 0x9f, 0x27, 0xe0,
-	0x29, 0x40, 0x4e, 0xb2, 0x82, 0xd7, 0x21, 0x16, 0xa1, 0x62, 0xaf, 0x89, 0x33, 0x08, 0xb8, 0x73,
-	0x8b, 0xea, 0xda, 0xb4, 0x92, 0x87, 0x27, 0xe0, 0xdf, 0x94, 0xfb, 0x18, 0x79, 0xb3, 0x83, 0x69,
-	0x68, 0xeb, 0x2a, 0x5a, 0xd5, 0x98, 0x65, 0xcd, 0x67, 0xb4, 0x99, 0xd4, 0xb8, 0x40, 0xc0, 0x57,
-	0xe0, 0x6f, 0x86, 0xe5, 0x92, 0x02, 0xb7, 0xb4, 0x63, 0x39, 0x09, 0x8f, 0xc0, 0x9e, 0x22, 0x06,
-	0xfe, 0x70, 0xc6, 0xb3, 0xad, 0x3d, 0xcb, 0x28, 0x35, 0x6d, 0x05, 0x2f, 0x34, 0xb3, 0x93, 0x4c,
-	0x7b, 0x19, 0xa7, 0xb6, 0x47, 0xff, 0x7c, 0xde, 0xc6, 0x6e, 0xb2, 0x3d, 0xb3, 0x68, 0xd6, 0x43,
-	0xee, 0xcf, 0x96, 0x0d, 0xe6, 0x3d, 0x2c, 0x90, 0xb0, 0x03, 0xb6, 0xb3, 0x3c, 0x99, 0x7e, 0x4f,
-	0xeb, 0xe7, 0x61, 0xb5, 0x4b, 0x1a, 0x8a, 0x1c, 0x87, 0x48, 0x89, 0xf6, 0x5b, 0x46, 0xa7, 0x6a,
-	0x15, 0xa1, 0xf6, 0x5d, 0xfe, 0x44, 0xaa, 0xfb, 0x8b, 0x19, 0xd3, 0xf7, 0xaf, 0x6a, 0xa9, 0x23,
-	0x6c, 0x83, 0xc6, 0x98, 0x90, 0x20, 0xdb, 0x8c, 0xf4, 0xf2, 0xcd, 0x60, 0xf0, 0x3f, 0x50, 0x53,
-	0x71, 0x6f, 0x12, 0x92, 0xec, 0xe6, 0xe5, 0x80, 0xba, 0xd7, 0x23, 0xca, 0x42, 0x22, 0xa4, 0x7e,
-	0x81, 0x6b, 0x56, 0x16, 0xb6, 0xf1, 0xc2, 0xf3, 0xaa, 0xc4, 0x01, 0x76, 0xc6, 0xd8, 0x25, 0xe9,
-	0x23, 0x92, 0x85, 0x8a, 0x89, 0xd3, 0x37, 0x38, 0x79, 0x4a, 0xb2, 0x10, 0x36, 0x41, 0x55, 0x90,
-	0x98, 0x6a, 0xaa, 0xac, 0xa9, 0x69, 0xdc, 0x6b, 0xdc, 0x3f, 0x1c, 0x18, 0x3f, 0x1f, 0x0e, 0x8c,
-	0xdf, 0x0f, 0x07, 0x86, 0xbd, 0xae, 0xff, 0xb1, 0x5e, 0xfe, 0x09, 0x00, 0x00, 0xff, 0xff, 0xac,
-	0xc1, 0x45, 0x83, 0x36, 0x07, 0x00, 0x00,
-}
-
-func (m *WorkerRecord) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *WorkerRecord) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *WorkerRecord) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
-	if m.GCAnalytics != nil {
-		{
-			size, err := m.GCAnalytics.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
-			}
-			i -= size
-			i = encodeVarintWorker(dAtA, i, uint64(size))
-		}
-		i--
-		dAtA[i] = 0x6
-		i--
-		dAtA[i] = 0xc2
-	}
-	if m.ParallelismWaiting != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.ParallelismWaiting))
-		i--
-		dAtA[i] = 0x6
-		i--
-		dAtA[i] = 0xb8
-	}
-	if m.ParallelismMax != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.ParallelismMax))
-		i--
-		dAtA[i] = 0x6
-		i--
-		dAtA[i] = 0xb0
-	}
-	if m.ParallelismCurrent != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.ParallelismCurrent))
-		i--
-		dAtA[i] = 0x6
-		i--
-		dAtA[i] = 0xa8
-	}
-	if m.BuildkitVersion != nil {
-		{
-			size, err := m.BuildkitVersion.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
-			}
-			i -= size
-			i = encodeVarintWorker(dAtA, i, uint64(size))
-		}
-		i--
-		dAtA[i] = 0x2a
-	}
-	if len(m.GCPolicy) > 0 {
-		for iNdEx := len(m.GCPolicy) - 1; iNdEx >= 0; iNdEx-- {
-			{
-				size, err := m.GCPolicy[iNdEx].MarshalToSizedBuffer(dAtA[:i])
-				if err != nil {
-					return 0, err
-				}
-				i -= size
-				i = encodeVarintWorker(dAtA, i, uint64(size))
-			}
-			i--
-			dAtA[i] = 0x22
-		}
-	}
-	if len(m.Platforms) > 0 {
-		for iNdEx := len(m.Platforms) - 1; iNdEx >= 0; iNdEx-- {
-			{
-				size, err := m.Platforms[iNdEx].MarshalToSizedBuffer(dAtA[:i])
-				if err != nil {
-					return 0, err
-				}
-				i -= size
-				i = encodeVarintWorker(dAtA, i, uint64(size))
-			}
-			i--
-			dAtA[i] = 0x1a
-		}
-	}
-	if len(m.Labels) > 0 {
-		for k := range m.Labels {
-			v := m.Labels[k]
-			baseI := i
-			i -= len(v)
-			copy(dAtA[i:], v)
-			i = encodeVarintWorker(dAtA, i, uint64(len(v)))
-			i--
-			dAtA[i] = 0x12
-			i -= len(k)
-			copy(dAtA[i:], k)
-			i = encodeVarintWorker(dAtA, i, uint64(len(k)))
-			i--
-			dAtA[i] = 0xa
-			i = encodeVarintWorker(dAtA, i, uint64(baseI-i))
-			i--
-			dAtA[i] = 0x12
-		}
-	}
-	if len(m.ID) > 0 {
-		i -= len(m.ID)
-		copy(dAtA[i:], m.ID)
-		i = encodeVarintWorker(dAtA, i, uint64(len(m.ID)))
-		i--
-		dAtA[i] = 0xa
-	}
-	return len(dAtA) - i, nil
-}
-
-func (m *GCAnalytics) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *GCAnalytics) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *GCAnalytics) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
-	if m.LastSuccess {
-		i--
-		if m.LastSuccess {
-			dAtA[i] = 1
-		} else {
-			dAtA[i] = 0
-		}
-		i--
-		dAtA[i] = 0x1
-		i--
-		dAtA[i] = 0xa0
-	}
-	if m.LastSizeCleared != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.LastSizeCleared))
-		i--
-		dAtA[i] = 0x1
-		i--
-		dAtA[i] = 0x98
-	}
-	if m.LastNumRecordsCleared != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.LastNumRecordsCleared))
-		i--
-		dAtA[i] = 0x1
-		i--
-		dAtA[i] = 0x90
-	}
-	if m.LastSizeBefore != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.LastSizeBefore))
-		i--
-		dAtA[i] = 0x1
-		i--
-		dAtA[i] = 0x88
-	}
-	if m.LastNumRecordsBefore != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.LastNumRecordsBefore))
-		i--
-		dAtA[i] = 0x1
-		i--
-		dAtA[i] = 0x80
-	}
-	if m.LastEndTimeSecEpoch != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.LastEndTimeSecEpoch))
-		i--
-		dAtA[i] = 0x78
-	}
-	if m.LastStartTimeSecEpoch != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.LastStartTimeSecEpoch))
-		i--
-		dAtA[i] = 0x70
-	}
-	if m.CurrentSizeBefore != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.CurrentSizeBefore))
-		i--
-		dAtA[i] = 0x68
-	}
-	if m.CurrentNumRecordsBefore != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.CurrentNumRecordsBefore))
-		i--
-		dAtA[i] = 0x60
-	}
-	if m.CurrentStartTimeSecEpoch != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.CurrentStartTimeSecEpoch))
-		i--
-		dAtA[i] = 0x58
-	}
-	if m.AllTimeDurationMs != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.AllTimeDurationMs))
-		i--
-		dAtA[i] = 0x50
-	}
-	if m.AllTimeMaxDurationMs != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.AllTimeMaxDurationMs))
-		i--
-		dAtA[i] = 0x48
-	}
-	if m.AllTimeRuns != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.AllTimeRuns))
-		i--
-		dAtA[i] = 0x40
-	}
-	if m.AvgSizeBefore != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.AvgSizeBefore))
-		i--
-		dAtA[i] = 0x38
-	}
-	if m.AvgRecordsBefore != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.AvgRecordsBefore))
-		i--
-		dAtA[i] = 0x30
-	}
-	if m.AvgSizeCleared != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.AvgSizeCleared))
-		i--
-		dAtA[i] = 0x28
-	}
-	if m.AvgRecordsCleared != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.AvgRecordsCleared))
-		i--
-		dAtA[i] = 0x20
-	}
-	if m.AvgDurationMs != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.AvgDurationMs))
-		i--
-		dAtA[i] = 0x18
-	}
-	if m.NumFailures != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.NumFailures))
-		i--
-		dAtA[i] = 0x10
-	}
-	if m.NumRuns != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.NumRuns))
-		i--
-		dAtA[i] = 0x8
-	}
-	return len(dAtA) - i, nil
-}
-
-func (m *GCPolicy) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *GCPolicy) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *GCPolicy) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
-	if len(m.Filters) > 0 {
-		for iNdEx := len(m.Filters) - 1; iNdEx >= 0; iNdEx-- {
-			i -= len(m.Filters[iNdEx])
-			copy(dAtA[i:], m.Filters[iNdEx])
-			i = encodeVarintWorker(dAtA, i, uint64(len(m.Filters[iNdEx])))
-			i--
-			dAtA[i] = 0x22
-		}
-	}
-	if m.KeepBytes != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.KeepBytes))
-		i--
-		dAtA[i] = 0x18
-	}
-	if m.KeepDuration != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.KeepDuration))
-		i--
-		dAtA[i] = 0x10
-	}
-	if m.All {
-		i--
-		if m.All {
-			dAtA[i] = 1
-		} else {
-			dAtA[i] = 0
-		}
-		i--
-		dAtA[i] = 0x8
-	}
-	return len(dAtA) - i, nil
-}
-
-func (m *BuildkitVersion) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *BuildkitVersion) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *BuildkitVersion) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
-	if len(m.Revision) > 0 {
-		i -= len(m.Revision)
-		copy(dAtA[i:], m.Revision)
-		i = encodeVarintWorker(dAtA, i, uint64(len(m.Revision)))
-		i--
-		dAtA[i] = 0x1a
-	}
-	if len(m.Version) > 0 {
-		i -= len(m.Version)
-		copy(dAtA[i:], m.Version)
-		i = encodeVarintWorker(dAtA, i, uint64(len(m.Version)))
-		i--
-		dAtA[i] = 0x12
-	}
-	if len(m.Package) > 0 {
-		i -= len(m.Package)
-		copy(dAtA[i:], m.Package)
-		i = encodeVarintWorker(dAtA, i, uint64(len(m.Package)))
-		i--
-		dAtA[i] = 0xa
-	}
-	return len(dAtA) - i, nil
-}
-
-func encodeVarintWorker(dAtA []byte, offset int, v uint64) int {
-	offset -= sovWorker(v)
-	base := offset
-	for v >= 1<<7 {
-		dAtA[offset] = uint8(v&0x7f | 0x80)
-		v >>= 7
-		offset++
-	}
-	dAtA[offset] = uint8(v)
-	return base
-}
-func (m *WorkerRecord) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = len(m.ID)
-	if l > 0 {
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	if len(m.Labels) > 0 {
-		for k, v := range m.Labels {
-			_ = k
-			_ = v
-			mapEntrySize := 1 + len(k) + sovWorker(uint64(len(k))) + 1 + len(v) + sovWorker(uint64(len(v)))
-			n += mapEntrySize + 1 + sovWorker(uint64(mapEntrySize))
-		}
-	}
-	if len(m.Platforms) > 0 {
-		for _, e := range m.Platforms {
-			l = e.Size()
-			n += 1 + l + sovWorker(uint64(l))
-		}
-	}
-	if len(m.GCPolicy) > 0 {
-		for _, e := range m.GCPolicy {
-			l = e.Size()
-			n += 1 + l + sovWorker(uint64(l))
-		}
-	}
-	if m.BuildkitVersion != nil {
-		l = m.BuildkitVersion.Size()
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	if m.ParallelismCurrent != 0 {
-		n += 2 + sovWorker(uint64(m.ParallelismCurrent))
-	}
-	if m.ParallelismMax != 0 {
-		n += 2 + sovWorker(uint64(m.ParallelismMax))
-	}
-	if m.ParallelismWaiting != 0 {
-		n += 2 + sovWorker(uint64(m.ParallelismWaiting))
-	}
-	if m.GCAnalytics != nil {
-		l = m.GCAnalytics.Size()
-		n += 2 + l + sovWorker(uint64(l))
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
-	return n
-}
-
-func (m *GCAnalytics) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	if m.NumRuns != 0 {
-		n += 1 + sovWorker(uint64(m.NumRuns))
-	}
-	if m.NumFailures != 0 {
-		n += 1 + sovWorker(uint64(m.NumFailures))
-	}
-	if m.AvgDurationMs != 0 {
-		n += 1 + sovWorker(uint64(m.AvgDurationMs))
-	}
-	if m.AvgRecordsCleared != 0 {
-		n += 1 + sovWorker(uint64(m.AvgRecordsCleared))
-	}
-	if m.AvgSizeCleared != 0 {
-		n += 1 + sovWorker(uint64(m.AvgSizeCleared))
-	}
-	if m.AvgRecordsBefore != 0 {
-		n += 1 + sovWorker(uint64(m.AvgRecordsBefore))
-	}
-	if m.AvgSizeBefore != 0 {
-		n += 1 + sovWorker(uint64(m.AvgSizeBefore))
-	}
-	if m.AllTimeRuns != 0 {
-		n += 1 + sovWorker(uint64(m.AllTimeRuns))
-	}
-	if m.AllTimeMaxDurationMs != 0 {
-		n += 1 + sovWorker(uint64(m.AllTimeMaxDurationMs))
-	}
-	if m.AllTimeDurationMs != 0 {
-		n += 1 + sovWorker(uint64(m.AllTimeDurationMs))
-	}
-	if m.CurrentStartTimeSecEpoch != 0 {
-		n += 1 + sovWorker(uint64(m.CurrentStartTimeSecEpoch))
-	}
-	if m.CurrentNumRecordsBefore != 0 {
-		n += 1 + sovWorker(uint64(m.CurrentNumRecordsBefore))
-	}
-	if m.CurrentSizeBefore != 0 {
-		n += 1 + sovWorker(uint64(m.CurrentSizeBefore))
-	}
-	if m.LastStartTimeSecEpoch != 0 {
-		n += 1 + sovWorker(uint64(m.LastStartTimeSecEpoch))
-	}
-	if m.LastEndTimeSecEpoch != 0 {
-		n += 1 + sovWorker(uint64(m.LastEndTimeSecEpoch))
-	}
-	if m.LastNumRecordsBefore != 0 {
-		n += 2 + sovWorker(uint64(m.LastNumRecordsBefore))
-	}
-	if m.LastSizeBefore != 0 {
-		n += 2 + sovWorker(uint64(m.LastSizeBefore))
-	}
-	if m.LastNumRecordsCleared != 0 {
-		n += 2 + sovWorker(uint64(m.LastNumRecordsCleared))
-	}
-	if m.LastSizeCleared != 0 {
-		n += 2 + sovWorker(uint64(m.LastSizeCleared))
-	}
-	if m.LastSuccess {
-		n += 3
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
-	return n
-}
-
-func (m *GCPolicy) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	if m.All {
-		n += 2
-	}
-	if m.KeepDuration != 0 {
-		n += 1 + sovWorker(uint64(m.KeepDuration))
-	}
-	if m.KeepBytes != 0 {
-		n += 1 + sovWorker(uint64(m.KeepBytes))
-	}
-	if len(m.Filters) > 0 {
-		for _, s := range m.Filters {
-			l = len(s)
-			n += 1 + l + sovWorker(uint64(l))
-		}
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
-	return n
-}
-
-func (m *BuildkitVersion) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = len(m.Package)
-	if l > 0 {
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	l = len(m.Version)
-	if l > 0 {
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	l = len(m.Revision)
-	if l > 0 {
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
-	return n
-}
-
-func sovWorker(x uint64) (n int) {
-	return (math_bits.Len64(x|1) + 6) / 7
-}
-func sozWorker(x uint64) (n int) {
-	return sovWorker(uint64((x << 1) ^ uint64((int64(x) >> 63))))
-}
-func (m *WorkerRecord) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowWorker
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: WorkerRecord: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: WorkerRecord: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ID", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.ID = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Labels", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.Labels == nil {
-				m.Labels = make(map[string]string)
-			}
-			var mapkey string
-			var mapvalue string
-			for iNdEx < postIndex {
-				entryPreIndex := iNdEx
-				var wire uint64
-				for shift := uint(0); ; shift += 7 {
-					if shift >= 64 {
-						return ErrIntOverflowWorker
-					}
-					if iNdEx >= l {
-						return io.ErrUnexpectedEOF
-					}
-					b := dAtA[iNdEx]
-					iNdEx++
-					wire |= uint64(b&0x7F) << shift
-					if b < 0x80 {
-						break
-					}
-				}
-				fieldNum := int32(wire >> 3)
-				if fieldNum == 1 {
-					var stringLenmapkey uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowWorker
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapkey |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapkey := int(stringLenmapkey)
-					if intStringLenmapkey < 0 {
-						return ErrInvalidLengthWorker
-					}
-					postStringIndexmapkey := iNdEx + intStringLenmapkey
-					if postStringIndexmapkey < 0 {
-						return ErrInvalidLengthWorker
-					}
-					if postStringIndexmapkey > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
-					iNdEx = postStringIndexmapkey
-				} else if fieldNum == 2 {
-					var stringLenmapvalue uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowWorker
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapvalue |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapvalue := int(stringLenmapvalue)
-					if intStringLenmapvalue < 0 {
-						return ErrInvalidLengthWorker
-					}
-					postStringIndexmapvalue := iNdEx + intStringLenmapvalue
-					if postStringIndexmapvalue < 0 {
-						return ErrInvalidLengthWorker
-					}
-					if postStringIndexmapvalue > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapvalue = string(dAtA[iNdEx:postStringIndexmapvalue])
-					iNdEx = postStringIndexmapvalue
-				} else {
-					iNdEx = entryPreIndex
-					skippy, err := skipWorker(dAtA[iNdEx:])
-					if err != nil {
-						return err
-					}
-					if (skippy < 0) || (iNdEx+skippy) < 0 {
-						return ErrInvalidLengthWorker
-					}
-					if (iNdEx + skippy) > postIndex {
-						return io.ErrUnexpectedEOF
-					}
-					iNdEx += skippy
-				}
-			}
-			m.Labels[mapkey] = mapvalue
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Platforms", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Platforms = append(m.Platforms, pb.Platform{})
-			if err := m.Platforms[len(m.Platforms)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field GCPolicy", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.GCPolicy = append(m.GCPolicy, &GCPolicy{})
-			if err := m.GCPolicy[len(m.GCPolicy)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 5:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field BuildkitVersion", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.BuildkitVersion == nil {
-				m.BuildkitVersion = &BuildkitVersion{}
-			}
-			if err := m.BuildkitVersion.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 101:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ParallelismCurrent", wireType)
-			}
-			m.ParallelismCurrent = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.ParallelismCurrent |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 102:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ParallelismMax", wireType)
-			}
-			m.ParallelismMax = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.ParallelismMax |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 103:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ParallelismWaiting", wireType)
-			}
-			m.ParallelismWaiting = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.ParallelismWaiting |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 104:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field GCAnalytics", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.GCAnalytics == nil {
-				m.GCAnalytics = &GCAnalytics{}
-			}
-			if err := m.GCAnalytics.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipWorker(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *GCAnalytics) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowWorker
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: GCAnalytics: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: GCAnalytics: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field NumRuns", wireType)
-			}
-			m.NumRuns = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.NumRuns |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 2:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field NumFailures", wireType)
-			}
-			m.NumFailures = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.NumFailures |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 3:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AvgDurationMs", wireType)
-			}
-			m.AvgDurationMs = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AvgDurationMs |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 4:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AvgRecordsCleared", wireType)
-			}
-			m.AvgRecordsCleared = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AvgRecordsCleared |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 5:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AvgSizeCleared", wireType)
-			}
-			m.AvgSizeCleared = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AvgSizeCleared |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 6:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AvgRecordsBefore", wireType)
-			}
-			m.AvgRecordsBefore = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AvgRecordsBefore |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 7:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AvgSizeBefore", wireType)
-			}
-			m.AvgSizeBefore = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AvgSizeBefore |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 8:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AllTimeRuns", wireType)
-			}
-			m.AllTimeRuns = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AllTimeRuns |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 9:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AllTimeMaxDurationMs", wireType)
-			}
-			m.AllTimeMaxDurationMs = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AllTimeMaxDurationMs |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 10:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AllTimeDurationMs", wireType)
-			}
-			m.AllTimeDurationMs = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.AllTimeDurationMs |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 11:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field CurrentStartTimeSecEpoch", wireType)
-			}
-			m.CurrentStartTimeSecEpoch = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.CurrentStartTimeSecEpoch |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 12:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field CurrentNumRecordsBefore", wireType)
-			}
-			m.CurrentNumRecordsBefore = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.CurrentNumRecordsBefore |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 13:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field CurrentSizeBefore", wireType)
-			}
-			m.CurrentSizeBefore = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.CurrentSizeBefore |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 14:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field LastStartTimeSecEpoch", wireType)
-			}
-			m.LastStartTimeSecEpoch = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.LastStartTimeSecEpoch |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 15:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field LastEndTimeSecEpoch", wireType)
-			}
-			m.LastEndTimeSecEpoch = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.LastEndTimeSecEpoch |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 16:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field LastNumRecordsBefore", wireType)
-			}
-			m.LastNumRecordsBefore = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.LastNumRecordsBefore |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 17:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field LastSizeBefore", wireType)
-			}
-			m.LastSizeBefore = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.LastSizeBefore |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 18:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field LastNumRecordsCleared", wireType)
-			}
-			m.LastNumRecordsCleared = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.LastNumRecordsCleared |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 19:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field LastSizeCleared", wireType)
-			}
-			m.LastSizeCleared = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.LastSizeCleared |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 20:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field LastSuccess", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.LastSuccess = bool(v != 0)
-		default:
-			iNdEx = preIndex
-			skippy, err := skipWorker(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *GCPolicy) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowWorker
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: GCPolicy: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: GCPolicy: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field All", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.All = bool(v != 0)
-		case 2:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field KeepDuration", wireType)
-			}
-			m.KeepDuration = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.KeepDuration |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 3:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field KeepBytes", wireType)
-			}
-			m.KeepBytes = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.KeepBytes |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Filters", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Filters = append(m.Filters, string(dAtA[iNdEx:postIndex]))
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipWorker(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *BuildkitVersion) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowWorker
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: BuildkitVersion: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: BuildkitVersion: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Package", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Package = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Version = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Revision", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Revision = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipWorker(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func skipWorker(dAtA []byte) (n int, err error) {
-	l := len(dAtA)
-	iNdEx := 0
-	depth := 0
-	for iNdEx < l {
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return 0, ErrIntOverflowWorker
-			}
-			if iNdEx >= l {
-				return 0, io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		wireType := int(wire & 0x7)
-		switch wireType {
-		case 0:
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return 0, ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return 0, io.ErrUnexpectedEOF
-				}
-				iNdEx++
-				if dAtA[iNdEx-1] < 0x80 {
-					break
-				}
-			}
-		case 1:
-			iNdEx += 8
-		case 2:
-			var length int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return 0, ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return 0, io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				length |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if length < 0 {
-				return 0, ErrInvalidLengthWorker
-			}
-			iNdEx += length
-		case 3:
-			depth++
-		case 4:
-			if depth == 0 {
-				return 0, ErrUnexpectedEndOfGroupWorker
-			}
-			depth--
-		case 5:
-			iNdEx += 4
-		default:
-			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
-		}
-		if iNdEx < 0 {
-			return 0, ErrInvalidLengthWorker
-		}
-		if depth == 0 {
-			return iNdEx, nil
-		}
-	}
-	return 0, io.ErrUnexpectedEOF
-||||||| v0.16.0
-func init() { proto.RegisterFile("worker.proto", fileDescriptor_e4ff6184b07e587a) }
-
-var fileDescriptor_e4ff6184b07e587a = []byte{
-	// 416 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x74, 0x52, 0xc1, 0x8e, 0xd3, 0x30,
-	0x10, 0x25, 0xc9, 0xee, 0xd2, 0xb8, 0x11, 0x20, 0x0b, 0xa1, 0x28, 0x42, 0x25, 0xca, 0x85, 0x1e,
-	0xc0, 0x59, 0x96, 0x0b, 0x20, 0x4e, 0xa1, 0x08, 0x56, 0xe2, 0xb0, 0xf8, 0x00, 0x67, 0x3b, 0xeb,
-	0x86, 0x28, 0xee, 0xda, 0x72, 0x9c, 0x40, 0xfe, 0xb0, 0x47, 0xbe, 0x00, 0xa1, 0x1e, 0xf8, 0x0e,
-	0x64, 0x27, 0x69, 0x4b, 0xd9, 0xde, 0xe6, 0xcd, 0xbc, 0xf7, 0x3c, 0xf3, 0x64, 0x10, 0x7c, 0x17,
-	0xaa, 0x62, 0x0a, 0x49, 0x25, 0xb4, 0x80, 0x8f, 0x56, 0x82, 0x76, 0x88, 0x36, 0x25, 0xbf, 0xae,
-	0x4a, 0x8d, 0xda, 0x17, 0x48, 0x77, 0x92, 0xd5, 0xd1, 0xf3, 0xa2, 0xd4, 0xdf, 0x1a, 0x8a, 0x72,
-	0xb1, 0x4a, 0x0b, 0x51, 0x88, 0xd4, 0xd2, 0x69, 0xb3, 0xb4, 0xc8, 0x02, 0x5b, 0xf5, 0x36, 0xd1,
-	0xb3, 0x3d, 0xba, 0x71, 0x4c, 0x47, 0xc7, 0xb4, 0x16, 0xbc, 0x65, 0x2a, 0x95, 0x34, 0x15, 0xb2,
-	0xee, 0xd9, 0xc9, 0x1f, 0x17, 0x04, 0x5f, 0xed, 0x16, 0x98, 0xe5, 0x42, 0x5d, 0xc3, 0x7b, 0xc0,
-	0xbd, 0x5c, 0x84, 0x4e, 0xec, 0xcc, 0x7d, 0xec, 0x5e, 0x2e, 0xe0, 0x47, 0x70, 0xf6, 0x89, 0x50,
-	0xc6, 0xeb, 0xd0, 0x8d, 0xbd, 0xf9, 0xf4, 0xe2, 0x1c, 0xdd, 0xbe, 0x26, 0xda, 0x77, 0x41, 0xbd,
-	0xe4, 0xfd, 0x8d, 0x56, 0x1d, 0x1e, 0xf4, 0xf0, 0x1c, 0xf8, 0x92, 0x13, 0xbd, 0x14, 0x6a, 0x55,
-	0x87, 0x9e, 0x35, 0x0b, 0x90, 0xa4, 0xe8, 0x6a, 0x68, 0x66, 0x27, 0xeb, 0x5f, 0x4f, 0xee, 0xe0,
-	0x1d, 0x09, 0xbe, 0x05, 0x93, 0x0f, 0xef, 0xae, 0x04, 0x2f, 0xf3, 0x2e, 0x3c, 0xb1, 0x82, 0xf8,
-	0xd8, 0xeb, 0x23, 0x0f, 0x6f, 0x15, 0xf0, 0x33, 0xb8, 0x9f, 0x0d, 0xbc, 0x2f, 0x4c, 0xd5, 0xa5,
-	0xb8, 0x09, 0x4f, 0x63, 0x67, 0x3e, 0xbd, 0x78, 0x7a, 0xcc, 0xe4, 0x80, 0x8e, 0x0f, 0xf5, 0xd1,
-	0x6b, 0x30, 0xdd, 0xbb, 0x0c, 0x3e, 0x00, 0x5e, 0xc5, 0xba, 0x21, 0x2c, 0x53, 0xc2, 0x87, 0xe0,
-	0xb4, 0x25, 0xbc, 0x61, 0xa1, 0x6b, 0x7b, 0x3d, 0x78, 0xe3, 0xbe, 0x72, 0x92, 0x1f, 0xbb, 0x5b,
-	0x8c, 0x8e, 0x70, 0x6e, 0x75, 0x13, 0x6c, 0x4a, 0x98, 0x80, 0xa0, 0x62, 0x4c, 0x2e, 0x1a, 0x45,
-	0xb4, 0x59, 0xd4, 0xc8, 0x3d, 0xfc, 0x4f, 0x0f, 0x3e, 0x06, 0xbe, 0xc1, 0x59, 0xa7, 0x99, 0xc9,
-	0xcf, 0x10, 0x76, 0x0d, 0x18, 0x82, 0xbb, 0xcb, 0x92, 0x6b, 0xa6, 0x6a, 0x1b, 0x95, 0x8f, 0x47,
-	0x98, 0x90, 0xff, 0x72, 0x30, 0x64, 0x49, 0xf2, 0x8a, 0x14, 0x6c, 0x58, 0x7e, 0x84, 0x66, 0xd2,
-	0x0e, 0x61, 0xf5, 0x27, 0x8c, 0x10, 0x46, 0x60, 0xa2, 0x58, 0x5b, 0xda, 0x91, 0x67, 0x47, 0x5b,
-	0x9c, 0x05, 0xeb, 0xcd, 0xcc, 0xf9, 0xb9, 0x99, 0x39, 0xbf, 0x37, 0x33, 0x87, 0x9e, 0xd9, 0xaf,
-	0xf5, 0xf2, 0x6f, 0x00, 0x00, 0x00, 0xff, 0xff, 0x01, 0x19, 0xcf, 0xd5, 0xdf, 0x02, 0x00, 0x00,
-}
-
-func (m *WorkerRecord) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *WorkerRecord) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *WorkerRecord) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
-	if m.BuildkitVersion != nil {
-		{
-			size, err := m.BuildkitVersion.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
-			}
-			i -= size
-			i = encodeVarintWorker(dAtA, i, uint64(size))
-		}
-		i--
-		dAtA[i] = 0x2a
-	}
-	if len(m.GCPolicy) > 0 {
-		for iNdEx := len(m.GCPolicy) - 1; iNdEx >= 0; iNdEx-- {
-			{
-				size, err := m.GCPolicy[iNdEx].MarshalToSizedBuffer(dAtA[:i])
-				if err != nil {
-					return 0, err
-				}
-				i -= size
-				i = encodeVarintWorker(dAtA, i, uint64(size))
-			}
-			i--
-			dAtA[i] = 0x22
-		}
-	}
-	if len(m.Platforms) > 0 {
-		for iNdEx := len(m.Platforms) - 1; iNdEx >= 0; iNdEx-- {
-			{
-				size, err := m.Platforms[iNdEx].MarshalToSizedBuffer(dAtA[:i])
-				if err != nil {
-					return 0, err
-				}
-				i -= size
-				i = encodeVarintWorker(dAtA, i, uint64(size))
-			}
-			i--
-			dAtA[i] = 0x1a
-		}
-	}
-	if len(m.Labels) > 0 {
-		for k := range m.Labels {
-			v := m.Labels[k]
-			baseI := i
-			i -= len(v)
-			copy(dAtA[i:], v)
-			i = encodeVarintWorker(dAtA, i, uint64(len(v)))
-			i--
-			dAtA[i] = 0x12
-			i -= len(k)
-			copy(dAtA[i:], k)
-			i = encodeVarintWorker(dAtA, i, uint64(len(k)))
-			i--
-			dAtA[i] = 0xa
-			i = encodeVarintWorker(dAtA, i, uint64(baseI-i))
-			i--
-			dAtA[i] = 0x12
-		}
-	}
-	if len(m.ID) > 0 {
-		i -= len(m.ID)
-		copy(dAtA[i:], m.ID)
-		i = encodeVarintWorker(dAtA, i, uint64(len(m.ID)))
-		i--
-		dAtA[i] = 0xa
-	}
-	return len(dAtA) - i, nil
-}
-
-func (m *GCPolicy) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *GCPolicy) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *GCPolicy) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
-	if len(m.Filters) > 0 {
-		for iNdEx := len(m.Filters) - 1; iNdEx >= 0; iNdEx-- {
-			i -= len(m.Filters[iNdEx])
-			copy(dAtA[i:], m.Filters[iNdEx])
-			i = encodeVarintWorker(dAtA, i, uint64(len(m.Filters[iNdEx])))
-			i--
-			dAtA[i] = 0x22
-		}
-	}
-	if m.KeepBytes != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.KeepBytes))
-		i--
-		dAtA[i] = 0x18
-	}
-	if m.KeepDuration != 0 {
-		i = encodeVarintWorker(dAtA, i, uint64(m.KeepDuration))
-		i--
-		dAtA[i] = 0x10
-	}
-	if m.All {
-		i--
-		if m.All {
-			dAtA[i] = 1
-		} else {
-			dAtA[i] = 0
-		}
-		i--
-		dAtA[i] = 0x8
-	}
-	return len(dAtA) - i, nil
-}
-
-func (m *BuildkitVersion) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *BuildkitVersion) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *BuildkitVersion) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	if m.XXX_unrecognized != nil {
-		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
-	}
-	if len(m.Revision) > 0 {
-		i -= len(m.Revision)
-		copy(dAtA[i:], m.Revision)
-		i = encodeVarintWorker(dAtA, i, uint64(len(m.Revision)))
-		i--
-		dAtA[i] = 0x1a
-	}
-	if len(m.Version) > 0 {
-		i -= len(m.Version)
-		copy(dAtA[i:], m.Version)
-		i = encodeVarintWorker(dAtA, i, uint64(len(m.Version)))
-		i--
-		dAtA[i] = 0x12
-	}
-	if len(m.Package) > 0 {
-		i -= len(m.Package)
-		copy(dAtA[i:], m.Package)
-		i = encodeVarintWorker(dAtA, i, uint64(len(m.Package)))
-		i--
-		dAtA[i] = 0xa
-	}
-	return len(dAtA) - i, nil
-}
-
-func encodeVarintWorker(dAtA []byte, offset int, v uint64) int {
-	offset -= sovWorker(v)
-	base := offset
-	for v >= 1<<7 {
-		dAtA[offset] = uint8(v&0x7f | 0x80)
-		v >>= 7
-		offset++
-	}
-	dAtA[offset] = uint8(v)
-	return base
-}
-func (m *WorkerRecord) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = len(m.ID)
-	if l > 0 {
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	if len(m.Labels) > 0 {
-		for k, v := range m.Labels {
-			_ = k
-			_ = v
-			mapEntrySize := 1 + len(k) + sovWorker(uint64(len(k))) + 1 + len(v) + sovWorker(uint64(len(v)))
-			n += mapEntrySize + 1 + sovWorker(uint64(mapEntrySize))
-		}
-	}
-	if len(m.Platforms) > 0 {
-		for _, e := range m.Platforms {
-			l = e.Size()
-			n += 1 + l + sovWorker(uint64(l))
-		}
-	}
-	if len(m.GCPolicy) > 0 {
-		for _, e := range m.GCPolicy {
-			l = e.Size()
-			n += 1 + l + sovWorker(uint64(l))
-		}
-	}
-	if m.BuildkitVersion != nil {
-		l = m.BuildkitVersion.Size()
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
-	return n
-}
-
-func (m *GCPolicy) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	if m.All {
-		n += 2
-	}
-	if m.KeepDuration != 0 {
-		n += 1 + sovWorker(uint64(m.KeepDuration))
-	}
-	if m.KeepBytes != 0 {
-		n += 1 + sovWorker(uint64(m.KeepBytes))
-	}
-	if len(m.Filters) > 0 {
-		for _, s := range m.Filters {
-			l = len(s)
-			n += 1 + l + sovWorker(uint64(l))
-		}
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
-	return n
-}
-
-func (m *BuildkitVersion) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = len(m.Package)
-	if l > 0 {
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	l = len(m.Version)
-	if l > 0 {
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	l = len(m.Revision)
-	if l > 0 {
-		n += 1 + l + sovWorker(uint64(l))
-	}
-	if m.XXX_unrecognized != nil {
-		n += len(m.XXX_unrecognized)
-	}
-	return n
-}
-
-func sovWorker(x uint64) (n int) {
-	return (math_bits.Len64(x|1) + 6) / 7
-}
-func sozWorker(x uint64) (n int) {
-	return sovWorker(uint64((x << 1) ^ uint64((int64(x) >> 63))))
-}
-func (m *WorkerRecord) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowWorker
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: WorkerRecord: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: WorkerRecord: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ID", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.ID = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Labels", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.Labels == nil {
-				m.Labels = make(map[string]string)
-			}
-			var mapkey string
-			var mapvalue string
-			for iNdEx < postIndex {
-				entryPreIndex := iNdEx
-				var wire uint64
-				for shift := uint(0); ; shift += 7 {
-					if shift >= 64 {
-						return ErrIntOverflowWorker
-					}
-					if iNdEx >= l {
-						return io.ErrUnexpectedEOF
-					}
-					b := dAtA[iNdEx]
-					iNdEx++
-					wire |= uint64(b&0x7F) << shift
-					if b < 0x80 {
-						break
-					}
-				}
-				fieldNum := int32(wire >> 3)
-				if fieldNum == 1 {
-					var stringLenmapkey uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowWorker
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapkey |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapkey := int(stringLenmapkey)
-					if intStringLenmapkey < 0 {
-						return ErrInvalidLengthWorker
-					}
-					postStringIndexmapkey := iNdEx + intStringLenmapkey
-					if postStringIndexmapkey < 0 {
-						return ErrInvalidLengthWorker
-					}
-					if postStringIndexmapkey > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
-					iNdEx = postStringIndexmapkey
-				} else if fieldNum == 2 {
-					var stringLenmapvalue uint64
-					for shift := uint(0); ; shift += 7 {
-						if shift >= 64 {
-							return ErrIntOverflowWorker
-						}
-						if iNdEx >= l {
-							return io.ErrUnexpectedEOF
-						}
-						b := dAtA[iNdEx]
-						iNdEx++
-						stringLenmapvalue |= uint64(b&0x7F) << shift
-						if b < 0x80 {
-							break
-						}
-					}
-					intStringLenmapvalue := int(stringLenmapvalue)
-					if intStringLenmapvalue < 0 {
-						return ErrInvalidLengthWorker
-					}
-					postStringIndexmapvalue := iNdEx + intStringLenmapvalue
-					if postStringIndexmapvalue < 0 {
-						return ErrInvalidLengthWorker
-					}
-					if postStringIndexmapvalue > l {
-						return io.ErrUnexpectedEOF
-					}
-					mapvalue = string(dAtA[iNdEx:postStringIndexmapvalue])
-					iNdEx = postStringIndexmapvalue
-				} else {
-					iNdEx = entryPreIndex
-					skippy, err := skipWorker(dAtA[iNdEx:])
-					if err != nil {
-						return err
-					}
-					if (skippy < 0) || (iNdEx+skippy) < 0 {
-						return ErrInvalidLengthWorker
-					}
-					if (iNdEx + skippy) > postIndex {
-						return io.ErrUnexpectedEOF
-					}
-					iNdEx += skippy
-				}
-			}
-			m.Labels[mapkey] = mapvalue
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Platforms", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Platforms = append(m.Platforms, pb.Platform{})
-			if err := m.Platforms[len(m.Platforms)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field GCPolicy", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.GCPolicy = append(m.GCPolicy, &GCPolicy{})
-			if err := m.GCPolicy[len(m.GCPolicy)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 5:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field BuildkitVersion", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if m.BuildkitVersion == nil {
-				m.BuildkitVersion = &BuildkitVersion{}
-			}
-			if err := m.BuildkitVersion.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipWorker(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *GCPolicy) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowWorker
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: GCPolicy: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: GCPolicy: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field All", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.All = bool(v != 0)
-		case 2:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field KeepDuration", wireType)
-			}
-			m.KeepDuration = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.KeepDuration |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 3:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field KeepBytes", wireType)
-			}
-			m.KeepBytes = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.KeepBytes |= int64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 4:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Filters", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Filters = append(m.Filters, string(dAtA[iNdEx:postIndex]))
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipWorker(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *BuildkitVersion) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowWorker
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: BuildkitVersion: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: BuildkitVersion: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Package", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Package = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Version = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Revision", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthWorker
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Revision = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipWorker(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthWorker
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.XXX_unrecognized = append(m.XXX_unrecognized, dAtA[iNdEx:iNdEx+skippy]...)
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func skipWorker(dAtA []byte) (n int, err error) {
-	l := len(dAtA)
-	iNdEx := 0
-	depth := 0
-	for iNdEx < l {
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return 0, ErrIntOverflowWorker
-			}
-			if iNdEx >= l {
-				return 0, io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= (uint64(b) & 0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		wireType := int(wire & 0x7)
-		switch wireType {
-		case 0:
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return 0, ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return 0, io.ErrUnexpectedEOF
-				}
-				iNdEx++
-				if dAtA[iNdEx-1] < 0x80 {
-					break
-				}
-			}
-		case 1:
-			iNdEx += 8
-		case 2:
-			var length int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return 0, ErrIntOverflowWorker
-				}
-				if iNdEx >= l {
-					return 0, io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				length |= (int(b) & 0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if length < 0 {
-				return 0, ErrInvalidLengthWorker
-			}
-			iNdEx += length
-		case 3:
-			depth++
-		case 4:
-			if depth == 0 {
-				return 0, ErrUnexpectedEndOfGroupWorker
-			}
-			depth--
-		case 5:
-			iNdEx += 4
-		default:
-			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
-		}
-		if iNdEx < 0 {
-			return 0, ErrInvalidLengthWorker
-		}
-		if depth == 0 {
-			return iNdEx, nil
-		}
-	}
-	return 0, io.ErrUnexpectedEOF
-=======
 var file_github_com_moby_buildkit_api_types_worker_proto_rawDesc = []byte{
 	0x0a, 0x2f, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x6f, 0x62,
 	0x79, 0x2f, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x6b, 0x69, 0x74, 0x2f, 0x61, 0x70, 0x69, 0x2f, 0x74,
@@ -3441,7 +489,7 @@ var file_github_com_moby_buildkit_api_types_worker_proto_rawDesc = []byte{
 	0x2e, 0x76, 0x31, 0x2e, 0x74, 0x79, 0x70, 0x65, 0x73, 0x1a, 0x2c, 0x67, 0x69, 0x74, 0x68, 0x75,
 	0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x6f, 0x62, 0x79, 0x2f, 0x62, 0x75, 0x69, 0x6c, 0x64,
 	0x6b, 0x69, 0x74, 0x2f, 0x73, 0x6f, 0x6c, 0x76, 0x65, 0x72, 0x2f, 0x70, 0x62, 0x2f, 0x6f, 0x70,
-	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x22, 0xe0, 0x02, 0x0a, 0x0c, 0x57, 0x6f, 0x72, 0x6b,
+	0x73, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x22, 0xaf, 0x04, 0x0a, 0x0c, 0x57, 0x6f, 0x72, 0x6b,
 	0x65, 0x72, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x12, 0x0e, 0x0a, 0x02, 0x49, 0x44, 0x18, 0x01,
 	0x20, 0x01, 0x28, 0x09, 0x52, 0x02, 0x49, 0x44, 0x12, 0x48, 0x0a, 0x06, 0x4c, 0x61, 0x62, 0x65,
 	0x6c, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x30, 0x2e, 0x6d, 0x6f, 0x62, 0x79, 0x2e,
@@ -3459,35 +507,104 @@ var file_github_com_moby_buildkit_api_types_worker_proto_rawDesc = []byte{
 	0x05, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x27, 0x2e, 0x6d, 0x6f, 0x62, 0x79, 0x2e, 0x62, 0x75, 0x69,
 	0x6c, 0x64, 0x6b, 0x69, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x74, 0x79, 0x70, 0x65, 0x73, 0x2e, 0x42,
 	0x75, 0x69, 0x6c, 0x64, 0x6b, 0x69, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x52, 0x0f,
-	0x42, 0x75, 0x69, 0x6c, 0x64, 0x6b, 0x69, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x1a,
-	0x39, 0x0a, 0x0b, 0x4c, 0x61, 0x62, 0x65, 0x6c, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x12, 0x10,
-	0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79,
-	0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52,
-	0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0xc8, 0x01, 0x0a, 0x08, 0x47,
-	0x43, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x61, 0x6c, 0x6c, 0x18, 0x01,
-	0x20, 0x01, 0x28, 0x08, 0x52, 0x03, 0x61, 0x6c, 0x6c, 0x12, 0x22, 0x0a, 0x0c, 0x6b, 0x65, 0x65,
-	0x70, 0x44, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52,
-	0x0c, 0x6b, 0x65, 0x65, 0x70, 0x44, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x18, 0x0a,
-	0x07, 0x66, 0x69, 0x6c, 0x74, 0x65, 0x72, 0x73, 0x18, 0x04, 0x20, 0x03, 0x28, 0x09, 0x52, 0x07,
-	0x66, 0x69, 0x6c, 0x74, 0x65, 0x72, 0x73, 0x12, 0x24, 0x0a, 0x0d, 0x72, 0x65, 0x73, 0x65, 0x72,
-	0x76, 0x65, 0x64, 0x53, 0x70, 0x61, 0x63, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0d,
-	0x72, 0x65, 0x73, 0x65, 0x72, 0x76, 0x65, 0x64, 0x53, 0x70, 0x61, 0x63, 0x65, 0x12, 0x22, 0x0a,
-	0x0c, 0x6d, 0x61, 0x78, 0x55, 0x73, 0x65, 0x64, 0x53, 0x70, 0x61, 0x63, 0x65, 0x18, 0x05, 0x20,
-	0x01, 0x28, 0x03, 0x52, 0x0c, 0x6d, 0x61, 0x78, 0x55, 0x73, 0x65, 0x64, 0x53, 0x70, 0x61, 0x63,
-	0x65, 0x12, 0x22, 0x0a, 0x0c, 0x6d, 0x69, 0x6e, 0x46, 0x72, 0x65, 0x65, 0x53, 0x70, 0x61, 0x63,
-	0x65, 0x18, 0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x6d, 0x69, 0x6e, 0x46, 0x72, 0x65, 0x65,
-	0x53, 0x70, 0x61, 0x63, 0x65, 0x22, 0x61, 0x0a, 0x0f, 0x42, 0x75, 0x69, 0x6c, 0x64, 0x6b, 0x69,
-	0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x18, 0x0a, 0x07, 0x70, 0x61, 0x63, 0x6b,
-	0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x70, 0x61, 0x63, 0x6b, 0x61,
-	0x67, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x02, 0x20,
-	0x01, 0x28, 0x09, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12, 0x1a, 0x0a, 0x08,
-	0x72, 0x65, 0x76, 0x69, 0x73, 0x69, 0x6f, 0x6e, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08,
-	0x72, 0x65, 0x76, 0x69, 0x73, 0x69, 0x6f, 0x6e, 0x42, 0x3b, 0x5a, 0x39, 0x67, 0x69, 0x74, 0x68,
-	0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x6f, 0x62, 0x79, 0x2f, 0x62, 0x75, 0x69, 0x6c,
-	0x64, 0x6b, 0x69, 0x74, 0x2f, 0x61, 0x70, 0x69, 0x2f, 0x74, 0x79, 0x70, 0x65, 0x73, 0x3b, 0x6d,
-	0x6f, 0x62, 0x79, 0x5f, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x6b, 0x69, 0x74, 0x5f, 0x76, 0x31, 0x5f,
-	0x74, 0x79, 0x70, 0x65, 0x73, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
->>>>>>> v0.17.3
+	0x42, 0x75, 0x69, 0x6c, 0x64, 0x6b, 0x69, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12,
+	0x2e, 0x0a, 0x12, 0x70, 0x61, 0x72, 0x61, 0x6c, 0x6c, 0x65, 0x6c, 0x69, 0x73, 0x6d, 0x43, 0x75,
+	0x72, 0x72, 0x65, 0x6e, 0x74, 0x18, 0x65, 0x20, 0x01, 0x28, 0x03, 0x52, 0x12, 0x70, 0x61, 0x72,
+	0x61, 0x6c, 0x6c, 0x65, 0x6c, 0x69, 0x73, 0x6d, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x12,
+	0x26, 0x0a, 0x0e, 0x70, 0x61, 0x72, 0x61, 0x6c, 0x6c, 0x65, 0x6c, 0x69, 0x73, 0x6d, 0x4d, 0x61,
+	0x78, 0x18, 0x66, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0e, 0x70, 0x61, 0x72, 0x61, 0x6c, 0x6c, 0x65,
+	0x6c, 0x69, 0x73, 0x6d, 0x4d, 0x61, 0x78, 0x12, 0x2e, 0x0a, 0x12, 0x70, 0x61, 0x72, 0x61, 0x6c,
+	0x6c, 0x65, 0x6c, 0x69, 0x73, 0x6d, 0x57, 0x61, 0x69, 0x74, 0x69, 0x6e, 0x67, 0x18, 0x67, 0x20,
+	0x01, 0x28, 0x03, 0x52, 0x12, 0x70, 0x61, 0x72, 0x61, 0x6c, 0x6c, 0x65, 0x6c, 0x69, 0x73, 0x6d,
+	0x57, 0x61, 0x69, 0x74, 0x69, 0x6e, 0x67, 0x12, 0x45, 0x0a, 0x0b, 0x47, 0x43, 0x41, 0x6e, 0x61,
+	0x6c, 0x79, 0x74, 0x69, 0x63, 0x73, 0x18, 0x68, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x23, 0x2e, 0x6d,
+	0x6f, 0x62, 0x79, 0x2e, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x6b, 0x69, 0x74, 0x2e, 0x76, 0x31, 0x2e,
+	0x74, 0x79, 0x70, 0x65, 0x73, 0x2e, 0x47, 0x43, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x74, 0x69, 0x63,
+	0x73, 0x52, 0x0b, 0x47, 0x43, 0x41, 0x6e, 0x61, 0x6c, 0x79, 0x74, 0x69, 0x63, 0x73, 0x1a, 0x39,
+	0x0a, 0x0b, 0x4c, 0x61, 0x62, 0x65, 0x6c, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a,
+	0x03, 0x6b, 0x65, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12,
+	0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05,
+	0x76, 0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x85, 0x07, 0x0a, 0x0b, 0x47, 0x43,
+	0x41, 0x6e, 0x61, 0x6c, 0x79, 0x74, 0x69, 0x63, 0x73, 0x12, 0x18, 0x0a, 0x07, 0x6e, 0x75, 0x6d,
+	0x52, 0x75, 0x6e, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x03, 0x52, 0x07, 0x6e, 0x75, 0x6d, 0x52,
+	0x75, 0x6e, 0x73, 0x12, 0x20, 0x0a, 0x0b, 0x6e, 0x75, 0x6d, 0x46, 0x61, 0x69, 0x6c, 0x75, 0x72,
+	0x65, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0b, 0x6e, 0x75, 0x6d, 0x46, 0x61, 0x69,
+	0x6c, 0x75, 0x72, 0x65, 0x73, 0x12, 0x24, 0x0a, 0x0d, 0x61, 0x76, 0x67, 0x44, 0x75, 0x72, 0x61,
+	0x74, 0x69, 0x6f, 0x6e, 0x4d, 0x73, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0d, 0x61, 0x76,
+	0x67, 0x44, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x4d, 0x73, 0x12, 0x2c, 0x0a, 0x11, 0x61,
+	0x76, 0x67, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x43, 0x6c, 0x65, 0x61, 0x72, 0x65, 0x64,
+	0x18, 0x04, 0x20, 0x01, 0x28, 0x03, 0x52, 0x11, 0x61, 0x76, 0x67, 0x52, 0x65, 0x63, 0x6f, 0x72,
+	0x64, 0x73, 0x43, 0x6c, 0x65, 0x61, 0x72, 0x65, 0x64, 0x12, 0x26, 0x0a, 0x0e, 0x61, 0x76, 0x67,
+	0x53, 0x69, 0x7a, 0x65, 0x43, 0x6c, 0x65, 0x61, 0x72, 0x65, 0x64, 0x18, 0x05, 0x20, 0x01, 0x28,
+	0x03, 0x52, 0x0e, 0x61, 0x76, 0x67, 0x53, 0x69, 0x7a, 0x65, 0x43, 0x6c, 0x65, 0x61, 0x72, 0x65,
+	0x64, 0x12, 0x2a, 0x0a, 0x10, 0x61, 0x76, 0x67, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x42,
+	0x65, 0x66, 0x6f, 0x72, 0x65, 0x18, 0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x10, 0x61, 0x76, 0x67,
+	0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x42, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x12, 0x24, 0x0a,
+	0x0d, 0x61, 0x76, 0x67, 0x53, 0x69, 0x7a, 0x65, 0x42, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x18, 0x07,
+	0x20, 0x01, 0x28, 0x03, 0x52, 0x0d, 0x61, 0x76, 0x67, 0x53, 0x69, 0x7a, 0x65, 0x42, 0x65, 0x66,
+	0x6f, 0x72, 0x65, 0x12, 0x20, 0x0a, 0x0b, 0x61, 0x6c, 0x6c, 0x54, 0x69, 0x6d, 0x65, 0x52, 0x75,
+	0x6e, 0x73, 0x18, 0x08, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0b, 0x61, 0x6c, 0x6c, 0x54, 0x69, 0x6d,
+	0x65, 0x52, 0x75, 0x6e, 0x73, 0x12, 0x32, 0x0a, 0x14, 0x61, 0x6c, 0x6c, 0x54, 0x69, 0x6d, 0x65,
+	0x4d, 0x61, 0x78, 0x44, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x4d, 0x73, 0x18, 0x09, 0x20,
+	0x01, 0x28, 0x03, 0x52, 0x14, 0x61, 0x6c, 0x6c, 0x54, 0x69, 0x6d, 0x65, 0x4d, 0x61, 0x78, 0x44,
+	0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x4d, 0x73, 0x12, 0x2c, 0x0a, 0x11, 0x61, 0x6c, 0x6c,
+	0x54, 0x69, 0x6d, 0x65, 0x44, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x4d, 0x73, 0x18, 0x0a,
+	0x20, 0x01, 0x28, 0x03, 0x52, 0x11, 0x61, 0x6c, 0x6c, 0x54, 0x69, 0x6d, 0x65, 0x44, 0x75, 0x72,
+	0x61, 0x74, 0x69, 0x6f, 0x6e, 0x4d, 0x73, 0x12, 0x3a, 0x0a, 0x18, 0x63, 0x75, 0x72, 0x72, 0x65,
+	0x6e, 0x74, 0x53, 0x74, 0x61, 0x72, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x53, 0x65, 0x63, 0x45, 0x70,
+	0x6f, 0x63, 0x68, 0x18, 0x0b, 0x20, 0x01, 0x28, 0x03, 0x52, 0x18, 0x63, 0x75, 0x72, 0x72, 0x65,
+	0x6e, 0x74, 0x53, 0x74, 0x61, 0x72, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x53, 0x65, 0x63, 0x45, 0x70,
+	0x6f, 0x63, 0x68, 0x12, 0x38, 0x0a, 0x17, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x4e, 0x75,
+	0x6d, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x42, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x18, 0x0c,
+	0x20, 0x01, 0x28, 0x03, 0x52, 0x17, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x4e, 0x75, 0x6d,
+	0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x42, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x12, 0x2c, 0x0a,
+	0x11, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x53, 0x69, 0x7a, 0x65, 0x42, 0x65, 0x66, 0x6f,
+	0x72, 0x65, 0x18, 0x0d, 0x20, 0x01, 0x28, 0x03, 0x52, 0x11, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e,
+	0x74, 0x53, 0x69, 0x7a, 0x65, 0x42, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x12, 0x34, 0x0a, 0x15, 0x6c,
+	0x61, 0x73, 0x74, 0x53, 0x74, 0x61, 0x72, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x53, 0x65, 0x63, 0x45,
+	0x70, 0x6f, 0x63, 0x68, 0x18, 0x0e, 0x20, 0x01, 0x28, 0x03, 0x52, 0x15, 0x6c, 0x61, 0x73, 0x74,
+	0x53, 0x74, 0x61, 0x72, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x53, 0x65, 0x63, 0x45, 0x70, 0x6f, 0x63,
+	0x68, 0x12, 0x30, 0x0a, 0x13, 0x6c, 0x61, 0x73, 0x74, 0x45, 0x6e, 0x64, 0x54, 0x69, 0x6d, 0x65,
+	0x53, 0x65, 0x63, 0x45, 0x70, 0x6f, 0x63, 0x68, 0x18, 0x0f, 0x20, 0x01, 0x28, 0x03, 0x52, 0x13,
+	0x6c, 0x61, 0x73, 0x74, 0x45, 0x6e, 0x64, 0x54, 0x69, 0x6d, 0x65, 0x53, 0x65, 0x63, 0x45, 0x70,
+	0x6f, 0x63, 0x68, 0x12, 0x32, 0x0a, 0x14, 0x6c, 0x61, 0x73, 0x74, 0x4e, 0x75, 0x6d, 0x52, 0x65,
+	0x63, 0x6f, 0x72, 0x64, 0x73, 0x42, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x18, 0x10, 0x20, 0x01, 0x28,
+	0x03, 0x52, 0x14, 0x6c, 0x61, 0x73, 0x74, 0x4e, 0x75, 0x6d, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64,
+	0x73, 0x42, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x12, 0x26, 0x0a, 0x0e, 0x6c, 0x61, 0x73, 0x74, 0x53,
+	0x69, 0x7a, 0x65, 0x42, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x18, 0x11, 0x20, 0x01, 0x28, 0x03, 0x52,
+	0x0e, 0x6c, 0x61, 0x73, 0x74, 0x53, 0x69, 0x7a, 0x65, 0x42, 0x65, 0x66, 0x6f, 0x72, 0x65, 0x12,
+	0x34, 0x0a, 0x15, 0x6c, 0x61, 0x73, 0x74, 0x4e, 0x75, 0x6d, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64,
+	0x73, 0x43, 0x6c, 0x65, 0x61, 0x72, 0x65, 0x64, 0x18, 0x12, 0x20, 0x01, 0x28, 0x03, 0x52, 0x15,
+	0x6c, 0x61, 0x73, 0x74, 0x4e, 0x75, 0x6d, 0x52, 0x65, 0x63, 0x6f, 0x72, 0x64, 0x73, 0x43, 0x6c,
+	0x65, 0x61, 0x72, 0x65, 0x64, 0x12, 0x28, 0x0a, 0x0f, 0x6c, 0x61, 0x73, 0x74, 0x53, 0x69, 0x7a,
+	0x65, 0x43, 0x6c, 0x65, 0x61, 0x72, 0x65, 0x64, 0x18, 0x13, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0f,
+	0x6c, 0x61, 0x73, 0x74, 0x53, 0x69, 0x7a, 0x65, 0x43, 0x6c, 0x65, 0x61, 0x72, 0x65, 0x64, 0x12,
+	0x20, 0x0a, 0x0b, 0x6c, 0x61, 0x73, 0x74, 0x53, 0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x18, 0x14,
+	0x20, 0x01, 0x28, 0x08, 0x52, 0x0b, 0x6c, 0x61, 0x73, 0x74, 0x53, 0x75, 0x63, 0x63, 0x65, 0x73,
+	0x73, 0x22, 0xc8, 0x01, 0x0a, 0x08, 0x47, 0x43, 0x50, 0x6f, 0x6c, 0x69, 0x63, 0x79, 0x12, 0x10,
+	0x0a, 0x03, 0x61, 0x6c, 0x6c, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x03, 0x61, 0x6c, 0x6c,
+	0x12, 0x22, 0x0a, 0x0c, 0x6b, 0x65, 0x65, 0x70, 0x44, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e,
+	0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x6b, 0x65, 0x65, 0x70, 0x44, 0x75, 0x72, 0x61,
+	0x74, 0x69, 0x6f, 0x6e, 0x12, 0x18, 0x0a, 0x07, 0x66, 0x69, 0x6c, 0x74, 0x65, 0x72, 0x73, 0x18,
+	0x04, 0x20, 0x03, 0x28, 0x09, 0x52, 0x07, 0x66, 0x69, 0x6c, 0x74, 0x65, 0x72, 0x73, 0x12, 0x24,
+	0x0a, 0x0d, 0x72, 0x65, 0x73, 0x65, 0x72, 0x76, 0x65, 0x64, 0x53, 0x70, 0x61, 0x63, 0x65, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0d, 0x72, 0x65, 0x73, 0x65, 0x72, 0x76, 0x65, 0x64, 0x53,
+	0x70, 0x61, 0x63, 0x65, 0x12, 0x22, 0x0a, 0x0c, 0x6d, 0x61, 0x78, 0x55, 0x73, 0x65, 0x64, 0x53,
+	0x70, 0x61, 0x63, 0x65, 0x18, 0x05, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c, 0x6d, 0x61, 0x78, 0x55,
+	0x73, 0x65, 0x64, 0x53, 0x70, 0x61, 0x63, 0x65, 0x12, 0x22, 0x0a, 0x0c, 0x6d, 0x69, 0x6e, 0x46,
+	0x72, 0x65, 0x65, 0x53, 0x70, 0x61, 0x63, 0x65, 0x18, 0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x0c,
+	0x6d, 0x69, 0x6e, 0x46, 0x72, 0x65, 0x65, 0x53, 0x70, 0x61, 0x63, 0x65, 0x22, 0x61, 0x0a, 0x0f,
+	0x42, 0x75, 0x69, 0x6c, 0x64, 0x6b, 0x69, 0x74, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x12,
+	0x18, 0x0a, 0x07, 0x70, 0x61, 0x63, 0x6b, 0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
+	0x52, 0x07, 0x70, 0x61, 0x63, 0x6b, 0x61, 0x67, 0x65, 0x12, 0x18, 0x0a, 0x07, 0x76, 0x65, 0x72,
+	0x73, 0x69, 0x6f, 0x6e, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x76, 0x65, 0x72, 0x73,
+	0x69, 0x6f, 0x6e, 0x12, 0x1a, 0x0a, 0x08, 0x72, 0x65, 0x76, 0x69, 0x73, 0x69, 0x6f, 0x6e, 0x18,
+	0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x72, 0x65, 0x76, 0x69, 0x73, 0x69, 0x6f, 0x6e, 0x42,
+	0x3b, 0x5a, 0x39, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x6d, 0x6f,
+	0x62, 0x79, 0x2f, 0x62, 0x75, 0x69, 0x6c, 0x64, 0x6b, 0x69, 0x74, 0x2f, 0x61, 0x70, 0x69, 0x2f,
+	0x74, 0x79, 0x70, 0x65, 0x73, 0x3b, 0x6d, 0x6f, 0x62, 0x79, 0x5f, 0x62, 0x75, 0x69, 0x6c, 0x64,
+	0x6b, 0x69, 0x74, 0x5f, 0x76, 0x31, 0x5f, 0x74, 0x79, 0x70, 0x65, 0x73, 0x62, 0x06, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -3502,24 +619,26 @@ func file_github_com_moby_buildkit_api_types_worker_proto_rawDescGZIP() []byte {
 	return file_github_com_moby_buildkit_api_types_worker_proto_rawDescData
 }
 
-var file_github_com_moby_buildkit_api_types_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_github_com_moby_buildkit_api_types_worker_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_github_com_moby_buildkit_api_types_worker_proto_goTypes = []any{
 	(*WorkerRecord)(nil),    // 0: moby.buildkit.v1.types.WorkerRecord
-	(*GCPolicy)(nil),        // 1: moby.buildkit.v1.types.GCPolicy
-	(*BuildkitVersion)(nil), // 2: moby.buildkit.v1.types.BuildkitVersion
-	nil,                     // 3: moby.buildkit.v1.types.WorkerRecord.LabelsEntry
-	(*pb.Platform)(nil),     // 4: pb.Platform
+	(*GCAnalytics)(nil),     // 1: moby.buildkit.v1.types.GCAnalytics
+	(*GCPolicy)(nil),        // 2: moby.buildkit.v1.types.GCPolicy
+	(*BuildkitVersion)(nil), // 3: moby.buildkit.v1.types.BuildkitVersion
+	nil,                     // 4: moby.buildkit.v1.types.WorkerRecord.LabelsEntry
+	(*pb.Platform)(nil),     // 5: pb.Platform
 }
 var file_github_com_moby_buildkit_api_types_worker_proto_depIdxs = []int32{
-	3, // 0: moby.buildkit.v1.types.WorkerRecord.Labels:type_name -> moby.buildkit.v1.types.WorkerRecord.LabelsEntry
-	4, // 1: moby.buildkit.v1.types.WorkerRecord.platforms:type_name -> pb.Platform
-	1, // 2: moby.buildkit.v1.types.WorkerRecord.GCPolicy:type_name -> moby.buildkit.v1.types.GCPolicy
-	2, // 3: moby.buildkit.v1.types.WorkerRecord.BuildkitVersion:type_name -> moby.buildkit.v1.types.BuildkitVersion
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 0: moby.buildkit.v1.types.WorkerRecord.Labels:type_name -> moby.buildkit.v1.types.WorkerRecord.LabelsEntry
+	5, // 1: moby.buildkit.v1.types.WorkerRecord.platforms:type_name -> pb.Platform
+	2, // 2: moby.buildkit.v1.types.WorkerRecord.GCPolicy:type_name -> moby.buildkit.v1.types.GCPolicy
+	3, // 3: moby.buildkit.v1.types.WorkerRecord.BuildkitVersion:type_name -> moby.buildkit.v1.types.BuildkitVersion
+	1, // 4: moby.buildkit.v1.types.WorkerRecord.GCAnalytics:type_name -> moby.buildkit.v1.types.GCAnalytics
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_github_com_moby_buildkit_api_types_worker_proto_init() }
@@ -3533,7 +652,7 @@ func file_github_com_moby_buildkit_api_types_worker_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_github_com_moby_buildkit_api_types_worker_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

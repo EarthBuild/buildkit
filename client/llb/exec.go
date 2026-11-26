@@ -450,7 +450,6 @@ func (e *ExecOp) Marshal(ctx context.Context, c *Constraints) (digest.Digest, []
 		peo.Mounts = append(peo.Mounts, pm)
 	}
 
-<<<<<<< origin/main
 	for _, s := range e.socket {
 		peo.Mounts = append(peo.Mounts, &pb.Mount{
 			Dest:      s.Target,
@@ -464,12 +463,7 @@ func (e *ExecOp) Marshal(ctx context.Context, c *Constraints) (digest.Digest, []
 		})
 	}
 
-	dt, err := pop.Marshal()
-||||||| v0.16.0
-	dt, err := pop.Marshal()
-=======
 	dt, err := deterministicMarshal(pop)
->>>>>>> v0.17.3
 	if err != nil {
 		return "", nil, nil, nil, err
 	}

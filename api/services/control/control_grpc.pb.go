@@ -26,6 +26,9 @@ const (
 	Control_Session_FullMethodName            = "/moby.buildkit.v1.Control/Session"
 	Control_ListWorkers_FullMethodName        = "/moby.buildkit.v1.Control/ListWorkers"
 	Control_Info_FullMethodName               = "/moby.buildkit.v1.Control/Info"
+	Control_ShutdownIfIdle_FullMethodName     = "/moby.buildkit.v1.Control/ShutdownIfIdle"
+	Control_Reserve_FullMethodName            = "/moby.buildkit.v1.Control/Reserve"
+	Control_SessionHistory_FullMethodName     = "/moby.buildkit.v1.Control/SessionHistory"
 	Control_ListenBuildHistory_FullMethodName = "/moby.buildkit.v1.Control/ListenBuildHistory"
 	Control_UpdateBuildHistory_FullMethodName = "/moby.buildkit.v1.Control/UpdateBuildHistory"
 )
@@ -41,6 +44,10 @@ type ControlClient interface {
 	Session(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[BytesMessage, BytesMessage], error)
 	ListWorkers(ctx context.Context, in *ListWorkersRequest, opts ...grpc.CallOption) (*ListWorkersResponse, error)
 	Info(ctx context.Context, in *InfoRequest, opts ...grpc.CallOption) (*InfoResponse, error)
+	// Earthly-specific.
+	ShutdownIfIdle(ctx context.Context, in *ShutdownIfIdleRequest, opts ...grpc.CallOption) (*ShutdownIfIdleResponse, error)
+	Reserve(ctx context.Context, in *ReserveRequest, opts ...grpc.CallOption) (*ReserveResponse, error)
+	SessionHistory(ctx context.Context, in *SessionHistoryRequest, opts ...grpc.CallOption) (*SessionHistoryResponse, error)
 	ListenBuildHistory(ctx context.Context, in *BuildHistoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildHistoryEvent], error)
 	UpdateBuildHistory(ctx context.Context, in *UpdateBuildHistoryRequest, opts ...grpc.CallOption) (*UpdateBuildHistoryResponse, error)
 }
@@ -144,6 +151,36 @@ func (c *controlClient) Info(ctx context.Context, in *InfoRequest, opts ...grpc.
 	return out, nil
 }
 
+func (c *controlClient) ShutdownIfIdle(ctx context.Context, in *ShutdownIfIdleRequest, opts ...grpc.CallOption) (*ShutdownIfIdleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShutdownIfIdleResponse)
+	err := c.cc.Invoke(ctx, Control_ShutdownIfIdle_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) Reserve(ctx context.Context, in *ReserveRequest, opts ...grpc.CallOption) (*ReserveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReserveResponse)
+	err := c.cc.Invoke(ctx, Control_Reserve_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) SessionHistory(ctx context.Context, in *SessionHistoryRequest, opts ...grpc.CallOption) (*SessionHistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SessionHistoryResponse)
+	err := c.cc.Invoke(ctx, Control_SessionHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *controlClient) ListenBuildHistory(ctx context.Context, in *BuildHistoryRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[BuildHistoryEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Control_ServiceDesc.Streams[3], Control_ListenBuildHistory_FullMethodName, cOpts...)
@@ -184,6 +221,10 @@ type ControlServer interface {
 	Session(grpc.BidiStreamingServer[BytesMessage, BytesMessage]) error
 	ListWorkers(context.Context, *ListWorkersRequest) (*ListWorkersResponse, error)
 	Info(context.Context, *InfoRequest) (*InfoResponse, error)
+	// Earthly-specific.
+	ShutdownIfIdle(context.Context, *ShutdownIfIdleRequest) (*ShutdownIfIdleResponse, error)
+	Reserve(context.Context, *ReserveRequest) (*ReserveResponse, error)
+	SessionHistory(context.Context, *SessionHistoryRequest) (*SessionHistoryResponse, error)
 	ListenBuildHistory(*BuildHistoryRequest, grpc.ServerStreamingServer[BuildHistoryEvent]) error
 	UpdateBuildHistory(context.Context, *UpdateBuildHistoryRequest) (*UpdateBuildHistoryResponse, error)
 }
@@ -215,6 +256,15 @@ func (UnimplementedControlServer) ListWorkers(context.Context, *ListWorkersReque
 }
 func (UnimplementedControlServer) Info(context.Context, *InfoRequest) (*InfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Info not implemented")
+}
+func (UnimplementedControlServer) ShutdownIfIdle(context.Context, *ShutdownIfIdleRequest) (*ShutdownIfIdleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ShutdownIfIdle not implemented")
+}
+func (UnimplementedControlServer) Reserve(context.Context, *ReserveRequest) (*ReserveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Reserve not implemented")
+}
+func (UnimplementedControlServer) SessionHistory(context.Context, *SessionHistoryRequest) (*SessionHistoryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SessionHistory not implemented")
 }
 func (UnimplementedControlServer) ListenBuildHistory(*BuildHistoryRequest, grpc.ServerStreamingServer[BuildHistoryEvent]) error {
 	return status.Errorf(codes.Unimplemented, "method ListenBuildHistory not implemented")
@@ -343,6 +393,60 @@ func _Control_Info_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_ShutdownIfIdle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShutdownIfIdleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ShutdownIfIdle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_ShutdownIfIdle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ShutdownIfIdle(ctx, req.(*ShutdownIfIdleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_Reserve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReserveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).Reserve(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_Reserve_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).Reserve(ctx, req.(*ReserveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_SessionHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SessionHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).SessionHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Control_SessionHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).SessionHistory(ctx, req.(*SessionHistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Control_ListenBuildHistory_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(BuildHistoryRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -394,6 +498,18 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Info",
 			Handler:    _Control_Info_Handler,
+		},
+		{
+			MethodName: "ShutdownIfIdle",
+			Handler:    _Control_ShutdownIfIdle_Handler,
+		},
+		{
+			MethodName: "Reserve",
+			Handler:    _Control_Reserve_Handler,
+		},
+		{
+			MethodName: "SessionHistory",
+			Handler:    _Control_SessionHistory_Handler,
 		},
 		{
 			MethodName: "UpdateBuildHistory",

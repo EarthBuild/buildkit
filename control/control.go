@@ -3,12 +3,8 @@ package control
 import (
 	"context"
 	"fmt"
-<<<<<<< origin/main
 	"math"
-||||||| v0.16.0
-=======
 	"runtime/trace"
->>>>>>> v0.17.3
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -655,8 +651,8 @@ func (c *Controller) SessionHistory(ctx context.Context, r *controlapi.SessionHi
 	for id, h := range history {
 		resp = append(resp, &controlapi.SessionHistoryResponse_History{
 			SessionID: id,
-			Start:     &h.Start,
-			End:       &h.End,
+			Start:     timestamppb.New(h.Start),
+			End:       timestamppb.New(h.End),
 		})
 	}
 	return &controlapi.SessionHistoryResponse{History: resp}, nil

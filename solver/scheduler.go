@@ -2,18 +2,13 @@ package solver
 
 import (
 	"context"
-<<<<<<< origin/main
 	"fmt"
-	"os"
 	"strings"
-||||||| v0.16.0
-	"os"
-=======
->>>>>>> v0.17.3
 	"sync"
 
 	"github.com/moby/buildkit/errdefs"
 	"github.com/moby/buildkit/solver/internal/pipe"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/cond"
 	"github.com/pkg/errors"
 )
@@ -106,18 +101,12 @@ func (s *scheduler) loop() {
 
 // dispatch schedules an edge to be processed
 func (s *scheduler) dispatch(e *edge) {
-<<<<<<< origin/main
 	helpMe := []string{"v1"} // earthly specific
 
 	helpMe = append(helpMe, fmt.Sprintf("%s: %+v", e.edge.Vertex.Name(), e))
 
 	helpMe = append(helpMe, fmt.Sprintf("%d %d %d %d", len(s.incoming), len(s.outgoing), len(s.incoming[e]), len(s.outgoing[e])))
-	inc := make([]pipe.Sender, len(s.incoming[e]))
-||||||| v0.16.0
-	inc := make([]pipe.Sender, len(s.incoming[e]))
-=======
 	inc := make([]pipeSender, len(s.incoming[e]))
->>>>>>> v0.17.3
 	for i, p := range s.incoming[e] {
 		inc[i] = p.Sender
 	}
@@ -373,7 +362,8 @@ type pipeFactory struct {
 func (pf *pipeFactory) NewInputRequest(ee Edge, req *edgeRequest) pipeReceiver {
 	target := pf.s.ef.getEdge(ee)
 	if target == nil {
-<<<<<<< origin/main
+		debugSchedulerInconsistentGraphState(ee)
+		// earth-specific: always log the recent digest history (ADR-003).
 		bklog.G(context.TODO()).
 			WithField("edge_vertex_name", ee.Vertex.Name()).
 			WithField("edge_vertex_digest", ee.Vertex.Digest()).
@@ -381,15 +371,6 @@ func (pf *pipeFactory) NewInputRequest(ee Edge, req *edgeRequest) pipeReceiver {
 			WithField("desired_state", req.desiredState).
 			WithField("actives_history", dgstTrackerInst.String()).
 			Error("failed to get edge: inconsistent graph state")
-||||||| v0.16.0
-		bklog.G(context.TODO()).
-			WithField("edge_vertex_name", ee.Vertex.Name()).
-			WithField("edge_vertex_digest", ee.Vertex.Digest()).
-			WithField("edge_index", ee.Index).
-			Error("failed to get edge: inconsistent graph state")
-=======
-		debugSchedulerInconsistentGraphState(ee)
->>>>>>> v0.17.3
 		return pf.NewFuncRequest(func(_ context.Context) (interface{}, error) {
 			return nil, errdefs.Internal(errors.Errorf("failed to get edge: inconsistent graph state in edge %s %s %d", ee.Vertex.Name(), ee.Vertex.Digest(), ee.Index))
 		})

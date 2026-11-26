@@ -1054,17 +1054,13 @@ func (cm *cacheManager) pruneOnce(ctx context.Context, ch chan client.UsageInfo,
 	// collect GC-related metrics.
 	interCh := ch
 	totalSize := int64(0)
-<<<<<<< origin/main
 	success := true
-	gcMode := (opt.KeepBytes != 0)
+	// earth-specific: GC analytics mirror upstream's "gc mode" test below
+	// (cm.prune runs in gc mode only when keepBytes != 0).
+	gcMode := opt.MaxUsedSpace != 0 || opt.ReservedSpace != 0 || opt.MinFreeSpace != 0
 	doneCh := make(chan struct{})
 	if gcMode {
 		totalRecords := int64(0)
-||||||| v0.16.0
-	if opt.KeepBytes != 0 {
-=======
-	if opt.MaxUsedSpace != 0 || opt.ReservedSpace != 0 || opt.MinFreeSpace != 0 {
->>>>>>> v0.17.3
 		du, err := cm.DiskUsage(ctx, client.DiskUsageInfo{})
 		if err != nil {
 			return err
@@ -1077,7 +1073,6 @@ func (cm *cacheManager) pruneOnce(ctx context.Context, ch chan client.UsageInfo,
 		}
 		totalRecords = int64(len(du))
 
-<<<<<<< origin/main
 		cm.GCAnalytics.Start(totalRecords, totalSize)
 		interCh = make(chan client.UsageInfo, 1)
 		go func() {
@@ -1102,10 +1097,7 @@ func (cm *cacheManager) pruneOnce(ctx context.Context, ch chan client.UsageInfo,
 			}
 		}()
 	}
-	retErr := cm.prune(ctx, interCh, pruneOpt{
-||||||| v0.16.0
-	return cm.prune(ctx, ch, pruneOpt{
-=======
+
 	var dstat disk.DiskStat
 	if opt.MinFreeSpace != 0 {
 		dstat, err = disk.GetDiskStat(cm.root)
@@ -1114,8 +1106,7 @@ func (cm *cacheManager) pruneOnce(ctx context.Context, ch chan client.UsageInfo,
 		}
 	}
 
-	return cm.prune(ctx, ch, pruneOpt{
->>>>>>> v0.17.3
+	retErr := cm.prune(ctx, interCh, pruneOpt{
 		filter:       filter,
 		all:          opt.All,
 		checkShared:  check,

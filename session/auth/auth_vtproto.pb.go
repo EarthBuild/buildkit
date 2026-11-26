@@ -87,6 +87,7 @@ func (m *FetchTokenResponse) CloneVT() *FetchTokenResponse {
 	r.Token = m.Token
 	r.ExpiresIn = m.ExpiresIn
 	r.IssuedAt = m.IssuedAt
+	r.Anonymous = m.Anonymous
 	if len(m.unknownFields) > 0 {
 		r.unknownFields = make([]byte, len(m.unknownFields))
 		copy(r.unknownFields, m.unknownFields)
@@ -280,6 +281,9 @@ func (this *FetchTokenResponse) EqualVT(that *FetchTokenResponse) bool {
 		return false
 	}
 	if this.IssuedAt != that.IssuedAt {
+		return false
+	}
+	if this.Anonymous != that.Anonymous {
 		return false
 	}
 	return string(this.unknownFields) == string(that.unknownFields)
@@ -564,6 +568,18 @@ func (m *FetchTokenResponse) MarshalToSizedBufferVT(dAtA []byte) (int, error) {
 		i -= len(m.unknownFields)
 		copy(dAtA[i:], m.unknownFields)
 	}
+	if m.Anonymous {
+		i--
+		if m.Anonymous {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0x98
+	}
 	if m.IssuedAt != 0 {
 		i = protohelpers.EncodeVarint(dAtA, i, uint64(m.IssuedAt))
 		i--
@@ -844,6 +860,9 @@ func (m *FetchTokenResponse) SizeVT() (n int) {
 	}
 	if m.IssuedAt != 0 {
 		n += 1 + protohelpers.SizeOfVarint(uint64(m.IssuedAt))
+	}
+	if m.Anonymous {
+		n += 3
 	}
 	n += len(m.unknownFields)
 	return n
@@ -1425,6 +1444,26 @@ func (m *FetchTokenResponse) UnmarshalVT(dAtA []byte) error {
 					break
 				}
 			}
+		case 99:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Anonymous", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return protohelpers.ErrIntOverflow
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Anonymous = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := protohelpers.Skip(dAtA[iNdEx:])

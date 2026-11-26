@@ -130,7 +130,7 @@ func syncTargetDiffCopy(ds grpc.ServerStream, dest string, progress progressCb, 
 				if onFile != nil && !st.IsDir() {
 					if _, ok := seen[p]; !ok {
 						seen[p] = struct{}{}
-						onFile(p, st.GetSize_())
+						onFile(p, st.GetSize())
 					}
 				}
 				return true
