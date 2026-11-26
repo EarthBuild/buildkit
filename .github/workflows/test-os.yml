@@ -147,13 +147,7 @@ jobs:
       -
         name: Send to Codecov
         if: always()
-<<<<<<< origin/chore-buildkit-merge-v0.17.3
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238  # v4.6.0
-||||||| v0.17.3
-        uses: codecov/codecov-action@v4
-=======
-        uses: codecov/codecov-action@v5
->>>>>>> v0.18.2
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac  # v5.5.5
         with:
           directory: ./bin/testreports
           env_vars: RUNNER_OS

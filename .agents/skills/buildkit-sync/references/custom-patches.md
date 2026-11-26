@@ -1,6 +1,6 @@
 # EarthBuild Custom Patches (MADR-Lite)
 
-Baseline: `moby/buildkit` **`v0.17.3`**
+Baseline: `moby/buildkit` **`v0.18.2`**
 
 ## Active Patches
 
@@ -22,7 +22,7 @@ Baseline: `moby/buildkit` **`v0.17.3`**
 
 ## Resolution Rules
 
-- **Workflows**: Conflict -> keep fork full-SHA pins + `TODO(jhorsts)` deviations; take upstream action version bumps, re-pinned to full SHA (`# vX.Y.Z`). Fork pin a major behind upstream = bump lost in resolution.
+- **Workflows**: Conflict -> keep fork full-SHA pins + `TODO(jhorsts)` deviations; take upstream action version bumps, re-pinned to full SHA (`# vX.Y.Z`). Resolve `vN` -> SHA with `git ls-remote <action> 'refs/tags/vN*'` (peeled `^{}` line), name the exact `vN.x.y` that peels to it. Fork pin a major behind upstream = bump lost in resolution.
 - **Unused/superseded code**: No callers in `.` or `../earthbuild`, or superseded by upstream API -> delete instead of carrying forward. Deletion needs `../earthbuild` change -> keep in sync; retire via separate decoupled PRs (`buildkit-audit` suggests these).
 - **Dockerfile `buildkit-version`**: Keep `RELEASE_VERSION` + `version.Package=github.com/EarthBuild/buildkit`; drop upstream's hard `exit 1` without git dir (`earth` builds from git refs/worktrees, `.git` outside context).
 - **`snapshot/diffapply_linux.go`**: Keep `uint64(stat.Dev)` & `Rdev: 0`; linux/mips64 `Stat_t.Dev`/`Rdev` are `uint32`, upstream form fails to compile there.
