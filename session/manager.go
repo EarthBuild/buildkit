@@ -224,7 +224,7 @@ func (sm *Manager) handleConn(ctx context.Context, conn net.Conn, opts map[strin
 	}
 
 	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(errors.WithStack(context.Canceled))
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	opts = canonicalHeaders(opts)
 
@@ -284,7 +284,7 @@ func (sm *Manager) Get(ctx context.Context, id string, noWait bool) (Caller, err
 	}
 
 	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(errors.WithStack(context.Canceled))
+	defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 	go func() {
 		<-ctx.Done()

@@ -52,7 +52,7 @@ type mount struct {
 }
 
 type ExecOp struct {
-	MarshalCache
+	cache       MarshalCache
 	proxyEnv    *ProxyEnv
 	root        Output
 	mounts      []*mount
@@ -65,6 +65,9 @@ type ExecOp struct {
 }
 
 func (e *ExecOp) AddMount(target string, source Output, opt ...MountOption) Output {
+	cache := e.cache.Acquire()
+	defer cache.Release()
+
 	m := &mount{
 		target: target,
 		source: source,
@@ -86,7 +89,7 @@ func (e *ExecOp) AddMount(target string, source Output, opt ...MountOption) Outp
 		}
 		m.output = o
 	}
-	e.Store(nil, nil, nil, nil)
+	cache.Store(nil, nil, nil, nil)
 	e.isValidated = false
 	return m.output
 }
@@ -130,7 +133,10 @@ func (e *ExecOp) Validate(ctx context.Context, c *Constraints) error {
 }
 
 func (e *ExecOp) Marshal(ctx context.Context, c *Constraints) (digest.Digest, []byte, *pb.OpMetadata, []*SourceLocation, error) {
-	if dgst, dt, md, srcs, err := e.Load(c); err == nil {
+	cache := e.cache.Acquire()
+	defer cache.Release()
+
+	if dgst, dt, md, srcs, err := cache.Load(c); err == nil {
 		return dgst, dt, md, srcs, nil
 	}
 
@@ -467,7 +473,7 @@ func (e *ExecOp) Marshal(ctx context.Context, c *Constraints) (digest.Digest, []
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
-	return e.Store(dt, md, e.constraints.SourceLocations, c)
+	return cache.Store(dt, md, e.constraints.SourceLocations, c)
 }
 
 func (e *ExecOp) Output() Output {

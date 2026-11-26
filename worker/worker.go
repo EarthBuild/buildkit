@@ -42,6 +42,7 @@ type Worker interface {
 	Executor() executor.Executor
 	CacheManager() cache.Manager
 	LeaseManager() *leaseutil.Manager
+	GarbageCollect(context.Context) error
 }
 
 type Infos interface {

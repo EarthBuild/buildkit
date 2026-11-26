@@ -235,7 +235,7 @@ func main() {
 			return errors.New("rootless mode requires to be executed as the mapped root in a user namespace; you may use RootlessKit for setting up the namespace")
 		}
 		ctx, cancel := context.WithCancelCause(appcontext.Context())
-		defer cancel(errors.WithStack(context.Canceled))
+		defer func() { cancel(errors.WithStack(context.Canceled)) }()
 
 		cfg, err := config.LoadFile(c.GlobalString("config"))
 		if err != nil {
@@ -348,8 +348,14 @@ func main() {
 			return err
 		}
 
+<<<<<<< origin/chore-buildkit-merge-v0.17.3
 		shutdownCh := make(chan struct{})
 		controller, err := newController(c, &cfg, shutdownCh)
+||||||| v0.17.3
+		controller, err := newController(c, &cfg)
+=======
+		controller, err := newController(ctx, c, &cfg)
+>>>>>>> v0.18.2
 		if err != nil {
 			return err
 		}
@@ -814,6 +820,7 @@ func serverCredentials(cfg config.TLSConfig) (*tls.Config, error) {
 	return tlsConf, nil
 }
 
+<<<<<<< origin/chore-buildkit-merge-v0.17.3
 func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{}) (*control.Controller, error) {
 	sessionManager, err := session.NewManager(&session.ManagerOpt{
 		HealthFrequency:       cfg.Health.Frequency,
@@ -821,6 +828,13 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		HealthTimeout:         cfg.Health.Timeout,
 		ShutdownCh:            shutdownCh,
 	})
+||||||| v0.17.3
+func newController(c *cli.Context, cfg *config.Config) (*control.Controller, error) {
+	sessionManager, err := session.NewManager()
+=======
+func newController(ctx context.Context, c *cli.Context, cfg *config.Config) (*control.Controller, error) {
+	sessionManager, err := session.NewManager()
+>>>>>>> v0.18.2
 	if err != nil {
 		return nil, err
 	}
@@ -911,6 +925,8 @@ func newController(c *cli.Context, cfg *config.Config, shutdownCh chan struct{})
 		LeaseManager:              w.LeaseManager(),
 		ContentStore:              w.ContentStore(),
 		HistoryConfig:             cfg.History,
+		GarbageCollect:            w.GarbageCollect,
+		GracefulStop:              ctx.Done(),
 	})
 }
 
